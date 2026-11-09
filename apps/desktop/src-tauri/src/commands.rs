@@ -4,7 +4,9 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::ai;
 use crate::annotations::{self, Annotation, ImageAnnotations, Label};
+use crate::assist;
 use crate::dataset::{self, ExportOptions, ExportResult, SplitSummary};
 use crate::dataset_import::{self, DatasetImportResult};
 use crate::deploy;
@@ -366,6 +368,86 @@ pub async fn predict_image(app: AppHandle, state: State<'_, AppState>, run_id: i
     })
     .await
     .map_err(|e| msg(format!("预测异常：{e}")))?
+}
+
+// ---------- 标注辅助：SAM、文本提示、巡瞳 AI ----------
+
+/// 辅助模型准备过程（安装组件、下载模型）的日志推给前端显示
+fn assist_log(app: &AppHandle) -> impl Fn(String) + Sync {
+    let a = app.clone();
+    move |line: String| {
+        let _ = a.emit("assist-log", line);
+    }
+}
+
+#[tauri::command]
+pub async fn sam_segment(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    image_id: i64,
+    points: Vec<[f64; 3]>,
+    bbox: Option<[f64; 4]>,
+) -> AppResult<assist::SamResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let log = assist_log(&app);
+        assist::sam_segment(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), image_id, &points, bbox, &log)
+    })
+    .await
+    .map_err(|e| msg(format!("SAM 异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn text_detect(app: AppHandle, state: State<'_, AppState>, image_id: i64, conf: f64) -> AppResult<PredResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let log = assist_log(&app);
+        assist::text_detect(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), image_id, conf, &log)
+    })
+    .await
+    .map_err(|e| msg(format!("文本提示异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn text_prelabel_all(app: AppHandle, state: State<'_, AppState>, conf: f64) -> AppResult<PrelabelResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let log = assist_log(&app);
+        let progress = progress_emitter(app.clone(), "prelabel-progress");
+        assist::text_prelabel_all(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), conf, &progress, &log)
+    })
+    .await
+    .map_err(|e| msg(format!("预标注异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn ai_models(app: AppHandle) -> AppResult<Vec<ai::AiModel>> {
+    tauri::async_runtime::spawn_blocking(move || ai::models(&app.state::<Runtime>()))
+        .await
+        .map_err(|e| msg(format!("读取模型异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn ai_detect(app: AppHandle, state: State<'_, AppState>, image_id: i64, model: String, conf: f64) -> AppResult<PredResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let log = assist_log(&app);
+        ai::detect(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), image_id, &model, conf, &log)
+    })
+    .await
+    .map_err(|e| msg(format!("巡瞳 AI 异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn ai_prelabel_all(app: AppHandle, state: State<'_, AppState>, model: String, conf: f64) -> AppResult<PrelabelResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let log = assist_log(&app);
+        let progress = progress_emitter(app.clone(), "prelabel-progress");
+        ai::prelabel_all(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), &model, conf, &progress, &log)
+    })
+    .await
+    .map_err(|e| msg(format!("预标注异常：{e}")))?
 }
 
 #[tauri::command]

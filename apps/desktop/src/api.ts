@@ -195,6 +195,10 @@ export interface Settings {
   mirror: "china" | "official";
   envRoot: string | null;
   ffmpeg: string | null;
+  /** 巡瞳 AI 平台地址，空 = 默认 https://xuntongai.com */
+  aiUrl: string | null;
+  /** 巡瞳 AI 的 API Key，只保存在本机 */
+  aiKey: string | null;
 }
 
 export interface EnvStatus {
@@ -408,7 +412,7 @@ export const api = {
   updateLabel: (id: number, name: string, color: string, prompt?: string) =>
     invoke<void>("update_label", { id, name, color, prompt: prompt ?? null }),
   samSegment: (imageId: number, points: number[][], box: number[] | null) =>
-    invoke<SamResult>("sam_segment", { imageId, points, box }),
+    invoke<SamResult>("sam_segment", { imageId, points, bbox: box }),
   textDetect: (imageId: number, conf: number) => invoke<PredResult>("text_detect", { imageId, conf }),
   textPrelabelAll: (conf: number) => invoke<{ images: number; boxes: number }>("text_prelabel_all", { conf }),
   aiModels: () => invoke<AiModel[]>("ai_models"),

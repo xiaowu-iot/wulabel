@@ -70,7 +70,8 @@ pub fn collect(paths: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 /// 解码图片并按 EXIF 方向摆正，宽高以摆正后的为准
-fn decode(path: &Path) -> AppResult<DynamicImage> {
+/// 读图并按 EXIF 摆正（和项目里记录的宽高、标注坐标一致）
+pub fn decode(path: &Path) -> AppResult<DynamicImage> {
     let mut decoder = ImageReader::open(path)?.with_guessed_format()?.into_decoder()?;
     let orientation = decoder.orientation()?;
     let mut img = DynamicImage::from_decoder(decoder)?;

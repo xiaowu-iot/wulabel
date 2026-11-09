@@ -1,4 +1,6 @@
+mod ai;
 mod annotations;
+mod assist;
 mod commands;
 mod dataset;
 mod dataset_import;
@@ -66,6 +68,12 @@ pub fn run() {
             commands::stop_extract,
             commands::keypoint_template,
             commands::save_keypoint_template,
+            commands::sam_segment,
+            commands::text_detect,
+            commands::text_prelabel_all,
+            commands::ai_models,
+            commands::ai_detect,
+            commands::ai_prelabel_all,
             commands::list_images,
             commands::project_stats,
             commands::last_import,

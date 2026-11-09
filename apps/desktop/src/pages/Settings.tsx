@@ -40,6 +40,9 @@ export default function Settings() {
   const [root, setRoot] = useState("");
   const [speed, setSpeed] = useState<SpeedResult | null>(null);
   const [testing, setTesting] = useState(false);
+  const [aiUrl, setAiUrl] = useState("");
+  const [aiKey, setAiKey] = useState("");
+  const [aiTesting, setAiTesting] = useState(false);
   const logBox = useRef<HTMLDivElement>(null);
 
   const load = useCallback(
@@ -50,6 +53,8 @@ export default function Settings() {
         setSt(s);
         setPython(s.settings.python ?? "");
         setRoot(s.settings.envRoot ?? "");
+        setAiUrl(s.settings.aiUrl ?? "");
+        setAiKey(s.settings.aiKey ?? "");
         setInstalling(s.installing);
       } catch (e) {
         message.error(errText(e));
@@ -118,6 +123,26 @@ export default function Settings() {
       await load(true);
     } catch (e) {
       message.error(errText(e));
+    }
+  };
+
+  /** 保存巡瞳 AI 设置并调一次 /v1/models 验证 Key */
+  const saveAi = async () => {
+    if (!st) return;
+    setAiTesting(true);
+    try {
+      await api.saveSettings({ ...st.settings, aiUrl: aiUrl.trim() || null, aiKey: aiKey.trim() || null });
+      await load(false);
+      if (aiKey.trim()) {
+        const ms = await api.aiModels();
+        message.success(`连接成功，可用 ${ms.length} 个识别模型`);
+      } else {
+        message.success("已保存");
+      }
+    } catch (e) {
+      modal.error({ title: "巡瞳 AI 连接失败", content: errText(e) });
+    } finally {
+      setAiTesting(false);
     }
   };
 
@@ -238,7 +263,24 @@ export default function Settings() {
             </Radio>
           </Space>
         </Radio.Group>
-        <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>点「测速并推荐」会分别从两个源各拉几 MB 实测，自动勾选更快的。</div>
+        <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>
+          点「测速并推荐」会分别从两个源各拉几 MB 实测，自动勾选更快的。国内镜像也会让 SAM、文本提示模型从 hf-mirror.com 下载。
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 15, marginTop: 0 }}>巡瞳 AI（辅助标注）</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          填上巡瞳 AI 的 API Key 后，标注页的「AI 辅助 → 巡瞳 AI」可以用平台上的专用模型或大模型帮你预标注。
+          每识别一张图会消耗你账号的额度。Key 只保存在这台电脑上。
+        </p>
+        <Space direction="vertical" style={{ width: "100%" }}>
+          <Input addonBefore="平台地址" value={aiUrl} placeholder="https://xuntongai.com（私有化部署时填自己的地址）" onChange={(e) => setAiUrl(e.target.value)} />
+          <Input.Password addonBefore="API Key" value={aiKey} placeholder="sk-live-…（在巡瞳 AI 控制台的「API Key」页创建）" onChange={(e) => setAiKey(e.target.value)} />
+          <Button type="primary" loading={aiTesting} onClick={saveAi}>
+            保存并测试连接
+          </Button>
+        </Space>
       </div>
 
       <div className="card">

@@ -27,6 +27,12 @@ pub struct Settings {
     /// 用户指定的 ffmpeg（视频抽帧用），可以是 ffmpeg.exe 或其所在目录；为空则自动查找/下载
     #[serde(default)]
     pub ffmpeg: Option<String>,
+    /// 巡瞳 AI 平台地址，为空用默认地址（私有化部署时填自己的）
+    #[serde(default)]
+    pub ai_url: Option<String>,
+    /// 巡瞳 AI 的 API Key（只保存在本机设置文件里）
+    #[serde(default)]
+    pub ai_key: Option<String>,
 }
 
 fn default_mirror() -> String {
@@ -35,7 +41,7 @@ fn default_mirror() -> String {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { python: None, uv: None, mirror: default_mirror(), env_root: None, ffmpeg: None }
+        Settings { python: None, uv: None, mirror: default_mirror(), env_root: None, ffmpeg: None, ai_url: None, ai_key: None }
     }
 }
 
@@ -137,7 +143,13 @@ impl Runtime {
         c.env("PYTHONPATH", &self.worker_dir)
             .env("PYTHONIOENCODING", "utf-8")
             .env("PYTHONUNBUFFERED", "1")
-            .env("TORCH_HOME", self.root().join("torch"));
+            .env("TORCH_HOME", self.root().join("torch"))
+            // SAM、文本提示等辅助模型从 Hugging Face 下载，缓存放训练环境目录
+            .env("HF_HOME", self.root().join("hf"))
+            .env("HF_HUB_DISABLE_TELEMETRY", "1");
+        if self.settings().mirror == "china" {
+            c.env("HF_ENDPOINT", "https://hf-mirror.com");
+        }
         Ok(c)
     }
 

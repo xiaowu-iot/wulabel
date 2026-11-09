@@ -652,15 +652,27 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
 
   // ---------- AI 辅助（我的模型 / 文本提示 / 巡瞳 AI）----------
 
+  // 文本提示模型的分数普遍比训练出的模型低，单独记一个置信度（默认 0.2）
+  const confKey = (src: AiSrc) => (src === "text" ? "textConf" : "prelabelConf");
+  const confDefault = (src: AiSrc) => (src === "text" ? "0.2" : "0.4");
   const [models, setModels] = useState<RunInfo[]>([]);
   const [modelId, setModelId] = useState<number | null>(null);
-  const [conf, setConf] = useState(Number(prefs.get("prelabelConf", "0.4")));
+  const [aiSrc, setAiSrc] = useState<AiSrc>(isCls ? "model" : ((prefs.get("aiSrc", "model") as AiSrc) || "model"));
+  const [conf, setConf] = useState(() => Number(prefs.get(confKey(aiSrc), confDefault(aiSrc))));
   const [predicting, setPredicting] = useState(false);
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
-  const [aiSrc, setAiSrc] = useState<AiSrc>(isCls ? "model" : ((prefs.get("aiSrc", "model") as AiSrc) || "model"));
   const [aiModels, setAiModels] = useState<AiModel[] | null>(null);
   const [aiModel, setAiModel] = useState(prefs.get("aiModel", ""));
   const [aiError, setAiError] = useState<string | null>(null);
+  // 辅助模型准备过程（安装组件、下载模型）的最新一行日志
+  const [assistLog, setAssistLog] = useState("");
+
+  useEffect(() => {
+    const un = listen<string>("assist-log", (e) => setAssistLog(e.payload));
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
 
   useEffect(() => {
     api
@@ -690,6 +702,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const pickSrc = (v: AiSrc) => {
     setAiSrc(v);
     prefs.set("aiSrc", v);
+    setConf(Number(prefs.get(confKey(v), confDefault(v))));
   };
 
   /** 把一次预测结果放进当前图（和已有标注重叠很大的不重复添加）。source：model / text / ai */
@@ -757,6 +770,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     if (aiSrc === "model" && modelId == null) return;
     if (aiSrc === "ai" && !aiModel) return;
     setPredicting(true);
+    setAssistLog("");
     try {
       const preds =
         aiSrc === "model"
@@ -820,6 +834,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
       return;
     }
     setSamBusy(true);
+    setAssistLog("");
     try {
       const r = await api.samSegment(m.id, points, box ? [box.x, box.y, box.x + box.w, box.y + box.h] : null);
       samUsed.current = true;
@@ -1176,7 +1191,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             {samBusy
               ? samUsed.current
                 ? "SAM 计算中…"
-                : "SAM 准备中…（首次使用要安装组件、下载模型，可能需要几分钟）"
+                : `SAM 准备中…（首次使用要安装组件、下载模型，可能需要几分钟）${assistLog ? ` · ${assistLog.slice(0, 60)}` : ""}`
               : samPreview
                 ? `已选出目标 · Enter 采用为「${nameOf(curLabel)}」 · 继续点击修正（Shift+点击排除） · Esc 放弃`
                 : "点击目标自动选出轮廓 · 也可以拖动框选 · Shift+点击排除区域"}
@@ -1265,11 +1280,16 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
                   value={conf}
                   onChange={(v) => {
                     setConf(v);
-                    prefs.set("prelabelConf", String(v));
+                    prefs.set(confKey(aiSrc), String(v));
                   }}
                 />
                 <span style={{ fontSize: 12, width: 30 }}>{conf.toFixed(2)}</span>
               </div>
+              {predicting && aiSrc !== "model" && (
+                <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>
+                  {assistLog ? assistLog.slice(0, 80) : aiSrc === "text" ? "首次使用要安装组件、下载模型，可能需要几分钟…" : "正在请求巡瞳 AI…"}
+                </div>
+              )}
               <div className="row" style={{ gap: 6 }}>
                 <Button size="small" type="primary" icon={<ThunderboltOutlined />} loading={predicting} disabled={!canPredict} onClick={predictCurrent}>
                   {isCls ? "预测本图 (P)" : "标注本图 (P)"}

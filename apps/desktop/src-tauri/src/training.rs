@@ -491,7 +491,7 @@ pub struct RawPred {
 }
 
 /// 解析推理进程一行 pred 事件
-fn parse_pred(v: &serde_json::Value) -> RawPred {
+pub fn parse_pred(v: &serde_json::Value) -> RawPred {
     let boxes: Vec<[f64; 6]> = serde_json::from_value(v["boxes"].clone()).unwrap_or_default();
     let nums = |x: &serde_json::Value| -> Vec<f64> {
         x.as_array().map(|a| a.iter().filter_map(|n| n.as_f64()).collect()).unwrap_or_default()
@@ -530,15 +530,14 @@ impl Predictor {
         }
     }
 
-    /// 发一次预测请求，每张图的结果回调一次
-    fn request(
+    /// 给常驻推理进程发一个请求（没启动就先启动），一直读到 done / error 为止。
+    /// 中间的事件（pred、sam、log 等）交给 on_event；返回 done 事件。
+    pub fn call(
         &self,
         rt: &Runtime,
-        weights: &Path,
-        items: &[(i64, PathBuf)],
-        conf: f64,
-        on_pred: &mut dyn FnMut(i64, RawPred),
-    ) -> AppResult<Vec<String>> {
+        req: &serde_json::Value,
+        on_event: &mut dyn FnMut(&serde_json::Value),
+    ) -> AppResult<serde_json::Value> {
         let mut guard = self.proc.lock();
         let alive = guard.as_mut().map(|s| matches!(s.child.try_wait(), Ok(None))).unwrap_or(false);
         if !alive {
@@ -550,10 +549,6 @@ impl Predictor {
             *guard = Some(ServeProc { child, stdin, stdout });
         }
         let s = guard.as_mut().unwrap();
-        let req = serde_json::json!({
-            "cmd": "predict", "weights": weights, "conf": conf,
-            "images": items.iter().map(|(id, p)| serde_json::json!({ "id": id, "path": p })).collect::<Vec<_>>(),
-        });
         if writeln!(s.stdin, "{req}").and_then(|_| s.stdin.flush()).is_err() {
             *guard = None;
             return Err(msg("推理进程已退出，请重试"));
@@ -567,21 +562,37 @@ impl Predictor {
             }
             let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
             match v["type"].as_str() {
-                Some("pred") => {
-                    on_pred(v["id"].as_i64().unwrap_or(-1), parse_pred(&v));
-                }
-                Some("done") => {
-                    return Ok(serde_json::from_value(v["classes"].clone()).unwrap_or_default());
-                }
+                Some("done") => return Ok(v),
                 Some("error") => return Err(msg(v["msg"].as_str().unwrap_or("推理失败").to_string())),
-                _ => {}
+                _ => on_event(&v),
             }
         }
+    }
+
+    /// 发一次预测请求，每张图的结果回调一次；返回模型的类别名
+    fn request(
+        &self,
+        rt: &Runtime,
+        weights: &Path,
+        items: &[(i64, PathBuf)],
+        conf: f64,
+        on_pred: &mut dyn FnMut(i64, RawPred),
+    ) -> AppResult<Vec<String>> {
+        let req = serde_json::json!({
+            "cmd": "predict", "weights": weights, "conf": conf,
+            "images": items.iter().map(|(id, p)| serde_json::json!({ "id": id, "path": p })).collect::<Vec<_>>(),
+        });
+        let done = self.call(rt, &req, &mut |v| {
+            if v["type"] == "pred" {
+                on_pred(v["id"].as_i64().unwrap_or(-1), parse_pred(v));
+            }
+        })?;
+        Ok(serde_json::from_value(done["classes"].clone()).unwrap_or_default())
     }
 }
 
 /// 模型的类别名对应到项目的类别 id，项目里没有的自动新建
-fn class_map(p: &Project, classes: &[String]) -> AppResult<Vec<i64>> {
+pub fn class_map(p: &Project, classes: &[String]) -> AppResult<Vec<i64>> {
     const PALETTE: [&str; 6] = ["#3d8bfd", "#e5534b", "#2fb67c", "#e7a33e", "#9b7bf2", "#14b8a6"];
     let mut have: HashMap<String, i64> = annotations::list_labels(p)?.into_iter().map(|l| (l.name, l.id)).collect();
     let mut out = Vec::new();
@@ -635,7 +646,8 @@ fn to_poses(raw: Vec<(usize, f64, [f64; 4], Vec<f64>)>, map: &[i64]) -> Vec<Pred
         .collect()
 }
 
-fn to_result(raw: RawPred, map: &[i64]) -> PredResult {
+/// 推理进程的原始结果换成项目类别 id。map[i] 是类别序号 i 对应的类别 id
+pub fn to_result(raw: RawPred, map: &[i64]) -> PredResult {
     PredResult {
         boxes: to_boxes(raw.boxes, map),
         polys: to_polys(raw.polys, map),
@@ -668,6 +680,40 @@ pub fn result_to_annotations(r: &PredResult, conf: f64, source: &str) -> Vec<Ann
         return r.polys.iter().map(|pl| ann(pl.label_id, "polygon", serde_json::json!(pl.points), pl.score)).collect();
     }
     r.boxes.iter().map(|b| ann(b.label_id, "bbox", serde_json::json!([b.x, b.y, b.w, b.h]), b.score)).collect()
+}
+
+/// 同 result_to_annotations，但按项目任务转换只有框的结果（文本提示、巡瞳 AI 只给框）：
+/// 分割项目把框变成矩形轮廓，关键点项目变成还没点关键点的目标
+pub fn task_annotations(p: &Project, r: &PredResult, conf: f64, source: &str) -> AppResult<Vec<Annotation>> {
+    let boxes_only = r.polys.is_empty() && r.poses.is_empty() && r.tags.is_empty() && !r.boxes.is_empty();
+    let ann = |label_id: i64, kind: &str, data: serde_json::Value, score: f64| Annotation {
+        label_id: Some(label_id),
+        kind: kind.into(),
+        data,
+        score: Some(score),
+        source: source.into(),
+    };
+    Ok(match p.meta.task.as_str() {
+        "segment" if boxes_only => r
+            .boxes
+            .iter()
+            .map(|b| {
+                let pts = [b.x, b.y, b.x + b.w, b.y, b.x + b.w, b.y + b.h, b.x, b.y + b.h];
+                ann(b.label_id, "polygon", serde_json::json!(pts), b.score)
+            })
+            .collect(),
+        "pose" if boxes_only => {
+            let nk = crate::keypoints::get(p)?.points.len();
+            r.boxes
+                .iter()
+                .map(|b| {
+                    let data = serde_json::json!({ "box": [b.x, b.y, b.w, b.h], "kpts": vec![0.0; nk * 3] });
+                    ann(b.label_id, "keypoints", data, b.score)
+                })
+                .collect()
+        }
+        _ => result_to_annotations(r, conf, source),
+    })
 }
 
 #[cfg(test)]
@@ -889,6 +935,18 @@ pub struct PrelabelResult {
     pub boxes: usize,
 }
 
+/// 批量预标注的对象：「未标注」且没有任何标注的图（id, 图片文件）
+pub fn prelabel_targets(p: &Project) -> AppResult<Vec<(i64, PathBuf)>> {
+    let conn = p.conn.lock();
+    let mut stmt = conn.prepare(
+        "SELECT id, path FROM images WHERE status = 'todo'
+         AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id) ORDER BY id",
+    )?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+    let v = rows.map(|r| r.map(|(id, path)| (id, p.resolve(&path)))).collect::<Result<_, _>>()?;
+    Ok(v)
+}
+
 /// 批量预标注所有「未标注」且没有任何框的图。结果存为模型来源，图片仍是「未标注」，等人工确认。
 pub fn prelabel_all(
     p: &Project,
@@ -899,15 +957,7 @@ pub fn prelabel_all(
     progress: &dyn Fn(usize, usize),
 ) -> AppResult<PrelabelResult> {
     let w = weights_of(p, run_id)?;
-    let items: Vec<(i64, PathBuf)> = {
-        let conn = p.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT id, path FROM images WHERE status = 'todo'
-             AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id) ORDER BY id",
-        )?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
-        rows.map(|r| r.map(|(id, path)| (id, p.resolve(&path)))).collect::<Result<_, _>>()?
-    };
+    let items = prelabel_targets(p)?;
     let total = items.len();
     let mut result = PrelabelResult { images: 0, boxes: 0 };
     let mut map: Option<Vec<i64>> = None;
@@ -921,7 +971,7 @@ pub fn prelabel_all(
         }
         let m = map.as_ref().unwrap();
         for (id, raw) in got {
-            let anns = result_to_annotations(&to_result(raw, m), conf, "model");
+            let anns = task_annotations(p, &to_result(raw, m), conf, "model")?;
             if !anns.is_empty() {
                 result.boxes += anns.len();
                 result.images += 1;
