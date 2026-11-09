@@ -8,6 +8,7 @@ mod error;
 mod feedback;
 mod health;
 mod images;
+mod keypoints;
 mod project;
 mod protocol;
 mod runtime;
@@ -63,6 +64,8 @@ pub fn run() {
             commands::probe_stream,
             commands::extract_stream,
             commands::stop_extract,
+            commands::keypoint_template,
+            commands::save_keypoint_template,
             commands::list_images,
             commands::project_stats,
             commands::last_import,

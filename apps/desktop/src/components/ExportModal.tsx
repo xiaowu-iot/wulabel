@@ -3,14 +3,37 @@ import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Progress, Radio
 import { FolderOpenOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, DatasetFormat, errText, ImportProgress, ProjectInfo, SplitSummary } from "../api";
+import { api, DatasetFormat, errText, ExportResult, ImportProgress, ProjectInfo, SplitSummary, Task } from "../api";
 import { prefs } from "../store";
 
-const FORMATS: { value: DatasetFormat; name: string; desc: string }[] = [
-  { value: "yolo", name: "YOLO", desc: "images + labels + data.yaml，Ultralytics 等直接可用" },
-  { value: "coco", name: "COCO", desc: "annotations/instances_*.json，通用格式" },
-  { value: "voc", name: "VOC", desc: "Annotations/*.xml + JPEGImages" },
-];
+/** 各任务能导出的格式 */
+const FORMATS: Record<Task, { value: DatasetFormat; name: string; desc: string }[]> = {
+  detect: [
+    { value: "yolo", name: "YOLO", desc: "images + labels + data.yaml，Ultralytics 等直接可用" },
+    { value: "coco", name: "COCO", desc: "annotations/instances_*.json，通用格式" },
+    { value: "voc", name: "VOC", desc: "Annotations/*.xml + JPEGImages" },
+  ],
+  segment: [
+    { value: "yolo", name: "YOLO-seg", desc: "每行一个多边形（归一化），Ultralytics 分割直接可用" },
+    { value: "coco", name: "COCO", desc: "带 segmentation 多边形，通用格式" },
+    { value: "voc", name: "VOC", desc: "只有外接框（VOC 不支持多边形）" },
+  ],
+  pose: [
+    { value: "yolo", name: "YOLO-pose", desc: "框 + 关键点，data.yaml 带 kpt_shape 和 flip_idx" },
+    { value: "coco", name: "COCO 关键点", desc: "keypoints + skeleton，通用格式" },
+    { value: "voc", name: "VOC", desc: "只有目标框（VOC 不支持关键点）" },
+  ],
+  classify: [{ value: "cls", name: "分类文件夹", desc: "train/类别/图片.jpg，ImageNet、YOLO-cls 通用" }],
+};
+
+const summaryText = (task: Task, r: ExportResult) =>
+  task === "classify"
+    ? `${r.images} 张图片、${r.classes.length} 个类别`
+    : task === "segment"
+      ? `${r.images} 张图片、${r.polys} 个轮廓${r.boxes ? `、${r.boxes} 个框` : ""}、${r.classes.length} 个类别`
+      : task === "pose"
+        ? `${r.images} 张图片、${r.kpts} 个关键点目标、${r.classes.length} 个类别`
+        : `${r.images} 张图片、${r.boxes} 个框、${r.classes.length} 个类别`;
 
 const stamp = () => {
   const d = new Date();
@@ -20,7 +43,11 @@ const stamp = () => {
 
 export default function ExportModal({ project, open: visible, onClose }: { project: ProjectInfo; open: boolean; onClose: () => void }) {
   const { message, modal } = App.useApp();
-  const [format, setFormat] = useState<DatasetFormat>((prefs.get("exportFormat", "yolo") as DatasetFormat) || "yolo");
+  const formats = FORMATS[project.task];
+  const [format, setFormat] = useState<DatasetFormat>(() => {
+    const saved = prefs.get("exportFormat", "yolo") as DatasetFormat;
+    return formats.some((f) => f.value === saved) ? saved : formats[0].value;
+  });
   const [onlyReviewed, setOnlyReviewed] = useState(false);
   const [ratios, setRatios] = useState<[number, number, number]>([80, 20, 0]);
   const [parent, setParent] = useState(prefs.get("exportParent", ""));
@@ -76,9 +103,7 @@ export default function ExportModal({ project, open: visible, onClose }: { proje
         title: "导出完成",
         content: (
           <div>
-            <div>
-              {res.images} 张图片、{res.boxes} 个框、{res.classes.length} 个类别
-            </div>
+            <div>{summaryText(project.task, res)}</div>
             <div className="muted">
               训练 {res.train} · 验证 {res.val} · 测试 {res.test}
             </div>
@@ -112,7 +137,7 @@ export default function ExportModal({ project, open: visible, onClose }: { proje
         <Form.Item label="格式">
           <Radio.Group value={format} onChange={(e) => setFormat(e.target.value)}>
             <Space direction="vertical">
-              {FORMATS.map((f) => (
+              {formats.map((f) => (
                 <Radio key={f.value} value={f.value}>
                   <b>{f.name}</b> <span className="muted">· {f.desc}</span>
                 </Radio>
@@ -120,7 +145,14 @@ export default function ExportModal({ project, open: visible, onClose }: { proje
             </Space>
           </Radio.Group>
         </Form.Item>
-        <Form.Item label="范围" extra="未标注和已跳过的图片不导出；已审核但没有框的图片会作为负样本导出。">
+        <Form.Item
+          label="范围"
+          extra={
+            project.task === "classify"
+              ? "未标注和已跳过的图片不导出；没打类别的图片不导出。"
+              : "未标注和已跳过的图片不导出；已审核但没有标注的图片会作为负样本导出。"
+          }
+        >
           <Checkbox checked={onlyReviewed} onChange={(e) => setOnlyReviewed(e.target.checked)}>
             只导出已审核的图片
           </Checkbox>

@@ -1,4 +1,4 @@
-//! 导入带标注的数据集：自动识别 YOLO / COCO / VOC
+//! 导入带标注的数据集：自动识别 YOLO（含分割、关键点）/ COCO（含分割、关键点）/ VOC / 分类文件夹
 
 use std::collections::HashMap;
 use std::fs;
@@ -35,6 +35,27 @@ struct Item {
     split: Option<String>,
     boxes: Vec<(String, Coords)>,
     polys: Vec<(String, PolyCoords)>,
+    /// 图像分类：整图类别
+    tag: Option<String>,
+    /// 关键点目标：框 + [x, y, v, ...]（Norm 时 x、y 是归一化坐标）
+    kpts: Vec<(String, Coords, PolyCoords)>,
+}
+
+impl Item {
+    fn new(src: PathBuf, split: Option<String>) -> Item {
+        Item { src, split, boxes: Vec::new(), polys: Vec::new(), tag: None, kpts: Vec::new() }
+    }
+
+    fn has_any(&self) -> bool {
+        !self.boxes.is_empty() || !self.polys.is_empty() || self.tag.is_some() || !self.kpts.is_empty()
+    }
+}
+
+/// 读出来的关键点点名（COCO 类别里的 keypoints，或 YOLO 的 kpt_shape 推出的点数）
+#[derive(Debug, Clone, Default)]
+struct KptInfo {
+    names: Vec<String>,
+    skeleton: Vec<[usize; 2]>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -143,12 +164,28 @@ fn yolo_label_file(img: &Path) -> Option<PathBuf> {
     same.exists().then_some(same)
 }
 
-fn read_yolo(dir: &Path) -> AppResult<Vec<Item>> {
+/// data.yaml 里的 kpt_shape: [点数, 维度]（YOLO-pose），维度 2 = 只有 x y，3 = x y v
+fn yolo_kpt_shape(dir: &Path) -> Option<(usize, usize)> {
+    for f in ["data.yaml", "dataset.yaml", "data.yml"] {
+        let Ok(t) = fs::read_to_string(dir.join(f)) else { continue };
+        for line in t.lines() {
+            let Some(rest) = line.trim_start().strip_prefix("kpt_shape:") else { continue };
+            let nums: Vec<usize> =
+                rest.split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+            if nums.len() >= 2 && nums[0] > 0 && (nums[1] == 2 || nums[1] == 3) {
+                return Some((nums[0], nums[1]));
+            }
+        }
+    }
+    None
+}
+
+fn read_yolo(dir: &Path) -> AppResult<(Vec<Item>, Option<KptInfo>)> {
     let classes = yolo_classes(dir);
+    let kshape = yolo_kpt_shape(dir);
     let mut items = Vec::new();
     for img in all_images(dir) {
-        let mut boxes = Vec::new();
-        let mut polys = Vec::new();
+        let mut it = Item::new(img.clone(), split_from_path(&img));
         if let Some(lf) = yolo_label_file(&img) {
             for line in fs::read_to_string(&lf)?.lines() {
                 let v: Vec<f64> = line.split_whitespace().filter_map(|s| s.parse().ok()).collect();
@@ -157,17 +194,74 @@ fn read_yolo(dir: &Path) -> AppResult<Vec<Item>> {
                 }
                 let cls = v[0] as usize;
                 let name = classes.get(cls).cloned().unwrap_or_else(|| format!("class_{cls}"));
+                if let Some((k, d)) = kshape {
+                    // YOLO-pose：class cx cy w h 然后 k 个点（x y [v]）
+                    if v.len() == 5 + k * d {
+                        let mut pts = Vec::with_capacity(k * 3);
+                        for i in 0..k {
+                            let p = &v[5 + i * d..5 + i * d + d];
+                            let vis = if d == 3 { p[2] } else if p[0] > 0.0 || p[1] > 0.0 { 2.0 } else { 0.0 };
+                            pts.extend([p[0], p[1], vis]);
+                        }
+                        it.kpts.push((name, Coords::Norm(v[1], v[2], v[3], v[4]), PolyCoords::Norm(pts)));
+                    }
+                    continue;
+                }
                 if v.len() == 5 {
-                    boxes.push((name, Coords::Norm(v[1], v[2], v[3], v[4])));
+                    it.boxes.push((name, Coords::Norm(v[1], v[2], v[3], v[4])));
                 } else if v.len() >= 7 && v.len() % 2 == 1 {
                     // 分割格式：class 后面是多边形点，原样保留
-                    polys.push((name, PolyCoords::Norm(v[1..].to_vec())));
+                    it.polys.push((name, PolyCoords::Norm(v[1..].to_vec())));
                 }
             }
         }
-        items.push(Item { split: split_from_path(&img), src: img, boxes, polys });
+        items.push(it);
     }
-    Ok(items)
+    let info = kshape.map(|(k, _)| KptInfo { names: (1..=k).map(|i| format!("点{i}")).collect(), skeleton: Vec::new() });
+    Ok((items, info))
+}
+
+// ---------- 分类文件夹 ----------
+
+fn is_split_name(s: &str) -> bool {
+    matches!(s.to_lowercase().as_str(), "train" | "training" | "val" | "valid" | "validation" | "test" | "testing")
+}
+
+fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = fs::read_dir(dir)
+        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect())
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// 分类文件夹：根目录/类别/图片，或 根目录/train|val|test/类别/图片
+fn read_cls(dir: &Path) -> Vec<Item> {
+    let mut items = Vec::new();
+    let top = subdirs(dir);
+    let split_layout = !top.is_empty() && top.iter().all(|d| d.file_name().is_some_and(|n| is_split_name(&n.to_string_lossy())));
+    let groups: Vec<(Option<String>, PathBuf)> = if split_layout {
+        top.iter()
+            .flat_map(|s| {
+                let split = split_from_path(&s.join("x"));
+                subdirs(s).into_iter().map(move |c| (split.clone(), c))
+            })
+            .collect()
+    } else {
+        top.into_iter().map(|c| (None, c)).collect()
+    };
+    for (split, class_dir) in groups {
+        let Some(name) = class_dir.file_name().map(|n| n.to_string_lossy().trim().to_string()) else { continue };
+        if name.is_empty() || name.starts_with('.') || name.eq_ignore_ascii_case("annotations") {
+            continue;
+        }
+        for img in all_images(&class_dir) {
+            let mut it = Item::new(img, split.clone());
+            it.tag = Some(name.clone());
+            items.push(it);
+        }
+    }
+    items
 }
 
 // ---------- COCO ----------
@@ -188,10 +282,11 @@ fn find_coco_jsons(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn read_coco(dir: &Path, jsons: &[PathBuf]) -> AppResult<Vec<Item>> {
+fn read_coco(dir: &Path, jsons: &[PathBuf]) -> AppResult<(Vec<Item>, Option<KptInfo>)> {
     let files = all_images(dir);
     let names = by_name(&files);
     let mut items: Vec<Item> = Vec::new();
+    let mut kinfo: Option<KptInfo> = None;
     for jf in jsons {
         let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(jf)?)?;
         let stem = jf.file_stem().unwrap_or_default().to_string_lossy().to_lowercase();
@@ -202,6 +297,28 @@ fn read_coco(dir: &Path, jsons: &[PathBuf]) -> AppResult<Vec<Item>> {
             .flatten()
             .filter_map(|c| Some((c["id"].as_i64()?, c["name"].as_str()?.to_string())))
             .collect();
+        // COCO 关键点：类别里带 keypoints（点名）和 skeleton（从 1 开始）
+        if kinfo.is_none() {
+            for c in v["categories"].as_array().into_iter().flatten() {
+                let pts: Vec<String> =
+                    c["keypoints"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+                if pts.is_empty() {
+                    continue;
+                }
+                let skeleton = c["skeleton"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| {
+                        let a = e.as_array()?;
+                        let (x, y) = (a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize);
+                        (x >= 1 && y >= 1 && x <= pts.len() && y <= pts.len()).then_some([x - 1, y - 1])
+                    })
+                    .collect();
+                kinfo = Some(KptInfo { names: pts, skeleton });
+                break;
+            }
+        }
         let mut by_id: HashMap<i64, usize> = HashMap::new();
         for im in v["images"].as_array().into_iter().flatten() {
             let (Some(id), Some(fname)) = (im["id"].as_i64(), im["file_name"].as_str()) else { continue };
@@ -212,13 +329,33 @@ fn read_coco(dir: &Path, jsons: &[PathBuf]) -> AppResult<Vec<Item>> {
                 .or_else(|| names.get(&base).cloned());
             if let Some(src) = found {
                 by_id.insert(id, items.len());
-                items.push(Item { split: split.clone().or_else(|| split_from_path(&src)), src, boxes: Vec::new(), polys: Vec::new() });
+                let sp = split.clone().or_else(|| split_from_path(&src));
+                items.push(Item::new(src, sp));
             }
         }
         for a in v["annotations"].as_array().into_iter().flatten() {
             let (Some(img), Some(cat)) = (a["image_id"].as_i64(), a["category_id"].as_i64()) else { continue };
             let Some(&i) = by_id.get(&img) else { continue };
             let name = cats.get(&cat).cloned().unwrap_or_else(|| format!("class_{cat}"));
+            // 关键点目标
+            let kp: Vec<f64> = a["keypoints"].as_array().into_iter().flatten().filter_map(|x| x.as_f64()).collect();
+            if !kp.is_empty() && kp.len() % 3 == 0 {
+                let b: Vec<f64> = a["bbox"].as_array().into_iter().flatten().filter_map(|x| x.as_f64()).collect();
+                let bbox = if b.len() == 4 {
+                    Coords::Abs(b[0], b[1], b[2], b[3])
+                } else {
+                    // 没有框就用可见点的外接框
+                    let vis: Vec<&[f64]> = kp.chunks(3).filter(|t| t[2] > 0.0).collect();
+                    if vis.is_empty() {
+                        continue;
+                    }
+                    let (x0, x1) = vis.iter().fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(t[0]), hi.max(t[0])));
+                    let (y0, y1) = vis.iter().fold((f64::MAX, f64::MIN), |(lo, hi), t| (lo.min(t[1]), hi.max(t[1])));
+                    Coords::Abs(x0, y0, (x1 - x0).max(1.0), (y1 - y0).max(1.0))
+                };
+                items[i].kpts.push((name, bbox, PolyCoords::Abs(kp)));
+                continue;
+            }
             // 有多边形分割就按多边形导入，否则用检测框
             let seg = a["segmentation"].as_array().and_then(|arr| arr.first()).and_then(|s| s.as_array());
             if let Some(poly) = seg {
@@ -234,7 +371,7 @@ fn read_coco(dir: &Path, jsons: &[PathBuf]) -> AppResult<Vec<Item>> {
             }
         }
     }
-    Ok(items)
+    Ok((items, kinfo))
 }
 
 // ---------- VOC ----------
@@ -288,38 +425,83 @@ fn read_voc(dir: &Path, xmls: &[PathBuf]) -> AppResult<Vec<Item>> {
                 boxes.push((name, Coords::Abs(x0, y0, x1 - x0, y1 - y0)));
             }
         }
-        items.push(Item { split: sets.get(&stem).cloned().or_else(|| split_from_path(&src)), src, boxes, polys: Vec::new() });
+        let sp = sets.get(&stem).cloned().or_else(|| split_from_path(&src));
+        let mut it = Item::new(src, sp);
+        it.boxes = boxes;
+        items.push(it);
     }
     Ok(items)
 }
 
-/// 识别格式并读出图片和框
-fn read(dir: &Path) -> AppResult<(String, Vec<Item>)> {
+/// 识别格式并读出图片和标注。分类项目优先按「分类文件夹」识别
+fn read(dir: &Path, task: &str) -> AppResult<(String, Vec<Item>, Option<KptInfo>)> {
     if !dir.is_dir() {
         return Err(msg("请选择数据集所在的文件夹"));
     }
+    if task == "classify" {
+        let items = read_cls(dir);
+        if !items.is_empty() {
+            return Ok(("分类文件夹".into(), items, None));
+        }
+        return Err(msg("没有识别出分类数据集。请选择这样的文件夹：每个类别一个子文件夹（猫/、狗/…），或者 train/猫/、val/猫/ 这样再分一层"));
+    }
     let jsons = find_coco_jsons(dir);
     if !jsons.is_empty() {
-        return Ok(("COCO".into(), read_coco(dir, &jsons)?));
+        let (items, k) = read_coco(dir, &jsons)?;
+        return Ok(("COCO".into(), items, k));
     }
     let xmls = find_voc_xmls(dir);
     if !xmls.is_empty() {
         let items = read_voc(dir, &xmls)?;
         if !items.is_empty() {
-            return Ok(("VOC".into(), items));
+            return Ok(("VOC".into(), items, None));
         }
     }
-    let items = read_yolo(dir)?;
-    if items.iter().any(|i| !i.boxes.is_empty() || !i.polys.is_empty()) {
-        return Ok(("YOLO".into(), items));
+    let (items, k) = read_yolo(dir)?;
+    if items.iter().any(Item::has_any) {
+        return Ok((if k.is_some() { "YOLO-pose" } else { "YOLO" }.into(), items, k));
     }
     Err(msg("没有识别出数据集格式。支持 YOLO（images + labels + data.yaml）、COCO（json）、VOC（Annotations/*.xml）"))
 }
 
 pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync)) -> AppResult<DatasetImportResult> {
-    let (format, items) = read(dir)?;
+    let (format, items, kinfo) = read(dir, &p.meta.task)?;
     if items.is_empty() {
         return Err(msg("数据集里没有找到图片"));
+    }
+    // 关键点：项目里还没有关键点标注时，模板换成数据集的点名（点数不同的标注没法用）
+    let mut nk = None;
+    if p.meta.task == "pose" && items.iter().any(|i| !i.kpts.is_empty()) {
+        let cur = crate::keypoints::get(p)?;
+        let ds_k = items.iter().flat_map(|i| i.kpts.iter()).map(|(_, _, k)| match k {
+            PolyCoords::Norm(v) | PolyCoords::Abs(v) => v.len() / 3,
+        });
+        let k = ds_k.max().unwrap_or(0);
+        if k != cur.points.len() {
+            let has: i64 =
+                p.conn.lock().query_row("SELECT COUNT(*) FROM annotations WHERE type = 'keypoints'", [], |r| r.get(0))?;
+            if has > 0 {
+                return Err(msg(format!(
+                    "数据集每个目标 {k} 个关键点，项目模板是 {} 个点，而且项目里已经有关键点标注，没法合并",
+                    cur.points.len()
+                )));
+            }
+            let info = kinfo.clone().filter(|i| i.names.len() == k).unwrap_or(KptInfo {
+                names: (1..=k).map(|i| format!("点{i}")).collect(),
+                skeleton: Vec::new(),
+            });
+            crate::keypoints::save(
+                p,
+                &crate::keypoints::Template { name: format!("{format} 导入"), points: info.names, skeleton: info.skeleton },
+            )?;
+        } else if let Some(info) = kinfo.clone().filter(|i| i.names.len() == k && cur.points.iter().all(|n| n.starts_with('点'))) {
+            // 点数相同、项目还是默认编号名时，用数据集里有意义的点名
+            crate::keypoints::save(
+                p,
+                &crate::keypoints::Template { name: format!("{format} 导入"), points: info.names, skeleton: info.skeleton },
+            )?;
+        }
+        nk = Some(k);
     }
     // 1. 导入图片（复制进项目）
     let srcs: Vec<PathBuf> = items.iter().map(|i| i.src.clone()).collect();
@@ -330,7 +512,13 @@ pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync))
         annotations::list_labels(p)?.into_iter().map(|l| (l.name, l.id)).collect();
     let mut labels_added = Vec::new();
     for it in &items {
-        let names = it.boxes.iter().map(|(n, _)| n).chain(it.polys.iter().map(|(n, _)| n));
+        let names = it
+            .boxes
+            .iter()
+            .map(|(n, _)| n)
+            .chain(it.polys.iter().map(|(n, _)| n))
+            .chain(it.kpts.iter().map(|(n, _, _)| n))
+            .chain(it.tag.iter());
         for name in names {
             if !labels.contains_key(name) {
                 let color = PALETTE[labels.len() % PALETTE.len()];
@@ -398,6 +586,63 @@ pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync))
                     source: "manual".into(),
                 });
             }
+        }
+        // 关键点目标：框和点都换算成像素坐标、裁进图片，点数补齐到模板
+        for (name, bc, kc) in &it.kpts {
+            let (x, y, bw, bh) = match *bc {
+                Coords::Norm(cx, cy, nw, nh) => ((cx - nw / 2.0) * w, (cy - nh / 2.0) * h, nw * w, nh * h),
+                Coords::Abs(x, y, bw, bh) => (x, y, bw, bh),
+            };
+            let (x0, y0) = (x.clamp(0.0, w), y.clamp(0.0, h));
+            let (x1, y1) = ((x + bw).clamp(0.0, w), (y + bh).clamp(0.0, h));
+            if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
+                continue;
+            }
+            if p.meta.task != "pose" {
+                // 不是关键点项目：只要目标框
+                anns.push(Annotation {
+                    label_id: labels.get(name).copied(),
+                    kind: "bbox".into(),
+                    data: serde_json::json!([r2(x0), r2(y0), r2(x1 - x0), r2(y1 - y0)]),
+                    score: None,
+                    source: "manual".into(),
+                });
+                continue;
+            }
+            let (raw, norm) = match kc {
+                PolyCoords::Norm(v) => (v, true),
+                PolyCoords::Abs(v) => (v, false),
+            };
+            let mut kp: Vec<f64> = Vec::with_capacity(raw.len());
+            for t in raw.chunks(3).filter(|t| t.len() == 3) {
+                let (px, py) = if norm { (t[0] * w, t[1] * h) } else { (t[0], t[1]) };
+                let v = t[2].round().clamp(0.0, 2.0);
+                if v > 0.0 {
+                    kp.extend([r2(px.clamp(0.0, w)), r2(py.clamp(0.0, h)), v]);
+                } else {
+                    kp.extend([0.0, 0.0, 0.0]);
+                }
+            }
+            if let Some(n) = nk {
+                kp.resize(n * 3, 0.0);
+            }
+            anns.push(Annotation {
+                label_id: labels.get(name).copied(),
+                kind: "keypoints".into(),
+                data: serde_json::json!({ "box": [r2(x0), r2(y0), r2(x1 - x0), r2(y1 - y0)], "kpts": kp }),
+                score: None,
+                source: "manual".into(),
+            });
+        }
+        // 图像分类标签
+        if let Some(name) = &it.tag {
+            anns.push(Annotation {
+                label_id: labels.get(name).copied(),
+                kind: "tag".into(),
+                data: serde_json::json!([]),
+                score: None,
+                source: "manual".into(),
+            });
         }
         if !anns.is_empty() {
             boxes += anns.len();

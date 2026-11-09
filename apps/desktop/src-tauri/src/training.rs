@@ -190,28 +190,51 @@ pub fn start(p: Arc<Project>, rt: &Runtime, jobs: Arc<Jobs>, cfg: TrainConfig, s
         }
         n
     };
+    if model_task(&cfg.model) != p.meta.task {
+        return Err(msg("这个模型和项目的任务类型不匹配，请重新选择模型"));
+    }
     let dir = run_dir(&p, &name);
     let ds = dir.join("dataset");
+    // 分类项目导出分类文件夹，其他任务导出 COCO（框、多边形、关键点都在里面）
+    let format = if p.meta.task == "classify" { Format::Cls } else { Format::Coco };
     let res = dataset::export(
         &p,
-        &ExportOptions { format: Format::Coco, out_dir: ds.clone(), only_reviewed: cfg.only_reviewed, ratios: cfg.ratios },
+        &ExportOptions { format, out_dir: ds.clone(), only_reviewed: cfg.only_reviewed, ratios: cfg.ratios },
         &|_, _| {},
     )
     .inspect_err(|_| {
         let _ = fs::remove_dir_all(&dir);
     })?;
-    if res.boxes + res.polys == 0 {
+    let usable = match p.meta.task.as_str() {
+        "classify" => res.tags,
+        "pose" => res.kpts,
+        _ => res.boxes + res.polys,
+    };
+    if usable == 0 {
         let _ = fs::remove_dir_all(&dir);
-        return Err(msg("没有任何标注，先标注一些图片再训练"));
+        return Err(msg(match p.meta.task.as_str() {
+            "classify" => "还没有给图片打类别标签，先标注一些图片再训练",
+            "pose" => "还没有关键点标注，先标注一些目标再训练",
+            _ => "没有任何标注，先标注一些图片再训练",
+        }));
     }
-    let worker_cfg = serde_json::json!({
+    let mut worker_cfg = serde_json::json!({
         "dataset": ds, "out": dir, "model": cfg.model, "classes": res.classes, "task": p.meta.task,
         "epochs": cfg.epochs, "img_size": cfg.img_size, "batch": cfg.batch, "lr": cfg.lr, "device": cfg.device,
     });
+    if p.meta.task == "pose" {
+        let t = crate::keypoints::get(&p)?;
+        worker_cfg["num_keypoints"] = serde_json::json!(t.points.len());
+        worker_cfg["keypoints"] = serde_json::json!(t.points);
+        worker_cfg["flip_index"] = serde_json::json!(crate::keypoints::flip_index(&t.points));
+    }
     fs::write(dir.join("config.json"), serde_json::to_string_pretty(&worker_cfg)?)?;
     let mut saved = serde_json::to_value(&cfg)?;
     saved["classes"] = serde_json::json!(res.classes);
-    saved["images"] = serde_json::json!({ "train": res.train, "val": res.val, "test": res.test, "boxes": res.boxes, "polys": res.polys });
+    saved["images"] = serde_json::json!({
+        "train": res.train, "val": res.val, "test": res.test,
+        "boxes": res.boxes, "polys": res.polys, "anns": res.total(),
+    });
     let id = {
         let conn = p.conn.lock();
         conn.execute(
@@ -330,17 +353,46 @@ pub fn stop(jobs: &Jobs, id: i64) -> AppResult<()> {
     Ok(())
 }
 
-/// 分割模型（Mask R-CNN）不支持当前的 ONNX / 部署流程，提前拦住给出清楚提示
-pub fn ensure_exportable(p: &Project, id: i64) -> AppResult<()> {
-    let run = get_run(p, id)?;
-    if run.config["model"].as_str().map(is_seg_model).unwrap_or(false) {
-        return Err(msg("分割模型暂不支持导出 ONNX / 生成部署包，可以在软件内直接用它做预标注"));
+/// 模型对应的任务（和 worker 的 models.MODELS 对应）
+pub fn model_task(model: &str) -> &'static str {
+    if model.starts_with("maskrcnn") {
+        "segment"
+    } else if model.starts_with("keypointrcnn") {
+        "pose"
+    } else if model.starts_with("cls_") {
+        "classify"
+    } else {
+        "detect"
     }
-    Ok(())
+}
+
+/// 部署用途：导出模型文件 / 生成推理服务包 / 实时验证
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Deploy {
+    Onnx,
+    Service,
+    Live,
+}
+
+/// 不是每种模型都支持全部部署方式，提前拦住给出清楚提示
+pub fn ensure_deployable(p: &Project, id: i64, what: Deploy) -> AppResult<()> {
+    let run = get_run(p, id)?;
+    let task = model_task(run.config["model"].as_str().unwrap_or(""));
+    let err = match (task, what) {
+        ("detect", _) => None,
+        ("classify", Deploy::Onnx) => None,
+        ("classify", _) => Some("分类模型可以导出 ONNX / OpenVINO 等格式自己集成；推理服务包和实时验证目前只支持检测模型"),
+        ("segment", _) => Some("分割模型暂不支持导出和部署，可以在软件内直接用它做预标注"),
+        _ => Some("关键点模型暂不支持导出和部署，可以在软件内直接用它做预标注"),
+    };
+    match err {
+        Some(e) => Err(msg(e)),
+        None => Ok(()),
+    }
 }
 
 pub fn export_onnx(p: &Project, rt: &Runtime, id: i64, log: &(dyn Fn(String) + Sync)) -> AppResult<String> {
-    ensure_exportable(p, id)?;
+    ensure_deployable(p, id, Deploy::Onnx)?;
     let run = get_run(p, id)?;
     let dir = PathBuf::from(&run.dir);
     let w = dir.join("best.pt");
@@ -396,12 +448,33 @@ pub struct PredPoly {
     pub score: f64,
 }
 
-/// 预测结果：检测模型给框，分割模型给多边形
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PredTag {
+    pub label_id: i64,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PredPose {
+    pub label_id: i64,
+    /// 目标框 [x, y, w, h]
+    #[serde(rename = "box")]
+    pub bbox: [f64; 4],
+    /// 关键点 [x, y, v, ...]，v：0 没找到、2 找到
+    pub kpts: Vec<f64>,
+    pub score: f64,
+}
+
+/// 预测结果：检测模型给框，分割模型给多边形，关键点模型给 poses，分类模型给 tags（按分数从高到低）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PredResult {
     pub boxes: Vec<PredBox>,
     pub polys: Vec<PredPoly>,
+    pub tags: Vec<PredTag>,
+    pub poses: Vec<PredPose>,
 }
 
 /// 推理进程返回的一张图的原始结果
@@ -411,11 +484,42 @@ pub struct RawPred {
     pub boxes: Vec<[f64; 6]>,
     /// (类别序号, 分数, [x1, y1, ...])
     pub polys: Vec<(usize, f64, Vec<f64>)>,
+    /// (类别序号, 分数)
+    pub tags: Vec<(usize, f64)>,
+    /// (类别序号, 分数, 框 [x, y, w, h], 关键点 [x, y, v, ...])
+    pub poses: Vec<(usize, f64, [f64; 4], Vec<f64>)>,
 }
 
-/// 分割模型是不是 Mask R-CNN（Rust 侧判断，和 worker 的 MODELS 对应）
-fn is_seg_model(model: &str) -> bool {
-    model.starts_with("maskrcnn")
+/// 解析推理进程一行 pred 事件
+fn parse_pred(v: &serde_json::Value) -> RawPred {
+    let boxes: Vec<[f64; 6]> = serde_json::from_value(v["boxes"].clone()).unwrap_or_default();
+    let nums = |x: &serde_json::Value| -> Vec<f64> {
+        x.as_array().map(|a| a.iter().filter_map(|n| n.as_f64()).collect()).unwrap_or_default()
+    };
+    let mut polys = Vec::new();
+    for pl in v["polys"].as_array().into_iter().flatten() {
+        // [类别序号, 分数, x1, y1, ...]，至少 3 个点
+        let a = nums(pl);
+        if a.len() >= 8 && a.len() % 2 == 0 {
+            polys.push((a[0] as usize, a[1], a[2..].to_vec()));
+        }
+    }
+    let mut tags = Vec::new();
+    for t in v["tags"].as_array().into_iter().flatten() {
+        let a = nums(t);
+        if a.len() >= 2 {
+            tags.push((a[0] as usize, a[1]));
+        }
+    }
+    let mut poses = Vec::new();
+    for ps in v["poses"].as_array().into_iter().flatten() {
+        // [类别序号, 分数, x, y, w, h, kx1, ky1, kv1, ...]
+        let a = nums(ps);
+        if a.len() >= 6 && (a.len() - 6) % 3 == 0 {
+            poses.push((a[0] as usize, a[1], [a[2], a[3], a[4], a[5]], a[6..].to_vec()));
+        }
+    }
+    RawPred { boxes, polys, tags, poses }
 }
 
 impl Predictor {
@@ -464,24 +568,7 @@ impl Predictor {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
             match v["type"].as_str() {
                 Some("pred") => {
-                    let boxes: Vec<[f64; 6]> = serde_json::from_value(v["boxes"].clone()).unwrap_or_default();
-                    let mut polys = Vec::new();
-                    if let Some(arr) = v["polys"].as_array() {
-                        for pl in arr {
-                            let Some(a) = pl.as_array() else { continue };
-                            // [类别序号, 分数, x1, y1, ...]，至少 3 个点
-                            if a.len() < 8 {
-                                continue;
-                            }
-                            let cls = a[0].as_f64().unwrap_or(0.0) as usize;
-                            let score = a[1].as_f64().unwrap_or(0.0);
-                            let pts: Vec<f64> = a[2..].iter().filter_map(|x| x.as_f64()).collect();
-                            if pts.len() >= 6 && pts.len() % 2 == 0 {
-                                polys.push((cls, score, pts));
-                            }
-                        }
-                    }
-                    on_pred(v["id"].as_i64().unwrap_or(-1), RawPred { boxes, polys });
+                    on_pred(v["id"].as_i64().unwrap_or(-1), parse_pred(&v));
                 }
                 Some("done") => {
                     return Ok(serde_json::from_value(v["classes"].clone()).unwrap_or_default());
@@ -536,6 +623,51 @@ fn to_polys(raw: Vec<(usize, f64, Vec<f64>)>, map: &[i64]) -> Vec<PredPoly> {
             Some(PredPoly { label_id, points, score })
         })
         .collect()
+}
+
+fn to_tags(raw: Vec<(usize, f64)>, map: &[i64]) -> Vec<PredTag> {
+    raw.into_iter().filter_map(|(cls, score)| Some(PredTag { label_id: *map.get(cls)?, score })).collect()
+}
+
+fn to_poses(raw: Vec<(usize, f64, [f64; 4], Vec<f64>)>, map: &[i64]) -> Vec<PredPose> {
+    raw.into_iter()
+        .filter_map(|(cls, score, bbox, kpts)| Some(PredPose { label_id: *map.get(cls)?, bbox, kpts, score }))
+        .collect()
+}
+
+fn to_result(raw: RawPred, map: &[i64]) -> PredResult {
+    PredResult {
+        boxes: to_boxes(raw.boxes, map),
+        polys: to_polys(raw.polys, map),
+        tags: to_tags(raw.tags, map),
+        poses: to_poses(raw.poses, map),
+    }
+}
+
+/// 把一张图的预测结果转成待保存的标注（来源记为 source）：
+/// 分类取最高分的类别（低于 conf 不要），关键点模型给关键点目标，分割模型给多边形，检测模型给框
+pub fn result_to_annotations(r: &PredResult, conf: f64, source: &str) -> Vec<Annotation> {
+    let ann = |label_id: i64, kind: &str, data: serde_json::Value, score: f64| Annotation {
+        label_id: Some(label_id),
+        kind: kind.into(),
+        data,
+        score: Some(score),
+        source: source.into(),
+    };
+    if let Some(t) = r.tags.first() {
+        return if t.score >= conf { vec![ann(t.label_id, "tag", serde_json::json!([]), t.score)] } else { Vec::new() };
+    }
+    if !r.poses.is_empty() {
+        return r
+            .poses
+            .iter()
+            .map(|ps| ann(ps.label_id, "keypoints", serde_json::json!({ "box": ps.bbox, "kpts": ps.kpts }), ps.score))
+            .collect();
+    }
+    if !r.polys.is_empty() {
+        return r.polys.iter().map(|pl| ann(pl.label_id, "polygon", serde_json::json!(pl.points), pl.score)).collect();
+    }
+    r.boxes.iter().map(|b| ann(b.label_id, "bbox", serde_json::json!([b.x, b.y, b.w, b.h]), b.score)).collect()
 }
 
 #[cfg(test)]
@@ -685,7 +817,7 @@ pub fn predict_one(p: &Project, rt: &Runtime, pr: &Predictor, run_id: i64, image
     let mut raw = RawPred::default();
     let classes = pr.request(rt, &w, &[(image_id, p.resolve(&stored))], conf, &mut |_, r| raw = r)?;
     let map = class_map(p, &classes)?;
-    Ok(PredResult { boxes: to_boxes(raw.boxes, &map), polys: to_polys(raw.polys, &map) })
+    Ok(to_result(raw, &map))
 }
 
 /// 批量预测指定图片，返回每张图的预测框（体检用）
@@ -699,11 +831,18 @@ pub fn predict_many(
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> AppResult<HashMap<i64, Vec<crate::health::Pred>>> {
     let w = weights_of(p, run_id)?;
+    let mut dims: HashMap<i64, (f64, f64)> = HashMap::new();
     let items: Vec<(i64, PathBuf)> = {
         let conn = p.conn.lock();
-        let mut stmt = conn.prepare("SELECT path FROM images WHERE id = ?1")?;
+        let mut stmt = conn.prepare("SELECT path, width, height FROM images WHERE id = ?1")?;
         ids.iter()
-            .filter_map(|id| stmt.query_row([id], |r| r.get::<_, String>(0)).ok().map(|s| (*id, p.resolve(&s))))
+            .filter_map(|id| {
+                let (s, iw, ih) = stmt
+                    .query_row([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?)))
+                    .ok()?;
+                dims.insert(*id, (iw, ih));
+                Some((*id, p.resolve(&s)))
+            })
             .collect()
     };
     let total = items.len();
@@ -713,16 +852,29 @@ pub fn predict_many(
     let mut done = 0;
     for chunk in items.chunks(16) {
         let mut got = Vec::new();
-        let classes = pr.request(rt, &w, chunk, conf, &mut |id, r| got.push((id, r.boxes)))?;
+        let classes = pr.request(rt, &w, chunk, conf, &mut |id, r| got.push((id, r)))?;
         if map.is_none() {
             map = Some(class_map(p, &classes)?);
         }
         for (id, raw) in got {
-            let boxes = to_boxes(raw, map.as_ref().unwrap())
-                .into_iter()
-                .map(|b| crate::health::Pred { label_id: b.label_id, bbox: [b.x, b.y, b.w, b.h], score: b.score })
-                .collect();
-            out.insert(id, boxes);
+            let r = to_result(raw, map.as_ref().unwrap());
+            let preds = match r.tags.first() {
+                // 分类模型：最高分的类别当成整图一个框，和体检里分类标签的算法一致
+                Some(t) => {
+                    let (iw, ih) = dims.get(&id).copied().unwrap_or((1.0, 1.0));
+                    if t.score >= conf {
+                        vec![crate::health::Pred { label_id: t.label_id, bbox: [0.0, 0.0, iw, ih], score: t.score }]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                None => r
+                    .boxes
+                    .into_iter()
+                    .map(|b| crate::health::Pred { label_id: b.label_id, bbox: [b.x, b.y, b.w, b.h], score: b.score })
+                    .collect(),
+            };
+            out.insert(id, preds);
         }
         done += chunk.len();
         progress(done, total);
@@ -769,31 +921,7 @@ pub fn prelabel_all(
         }
         let m = map.as_ref().unwrap();
         for (id, raw) in got {
-            // 分割模型给多边形，检测模型给框
-            let polys = to_polys(raw.polys, m);
-            let anns: Vec<Annotation> = if !polys.is_empty() {
-                polys
-                    .iter()
-                    .map(|pl| Annotation {
-                        label_id: Some(pl.label_id),
-                        kind: "polygon".into(),
-                        data: serde_json::json!(pl.points),
-                        score: Some(pl.score),
-                        source: "model".into(),
-                    })
-                    .collect()
-            } else {
-                to_boxes(raw.boxes, m)
-                    .iter()
-                    .map(|b| Annotation {
-                        label_id: Some(b.label_id),
-                        kind: "bbox".into(),
-                        data: serde_json::json!([b.x, b.y, b.w, b.h]),
-                        score: Some(b.score),
-                        source: "model".into(),
-                    })
-                    .collect()
-            };
+            let anns = result_to_annotations(&to_result(raw, m), conf, "model");
             if !anns.is_empty() {
                 result.boxes += anns.len();
                 result.images += 1;

@@ -87,6 +87,8 @@ pub enum Format {
     Yolo,
     Coco,
     Voc,
+    /// 图像分类文件夹：train/类别/图片.jpg（ImageNet / YOLO-cls 通用布局）
+    Cls,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,6 +116,10 @@ pub struct ExportResult {
     pub boxes: usize,
     /// 分割多边形数量
     pub polys: usize,
+    /// 图像分类：有类别标签的图片数
+    pub tags: usize,
+    /// 关键点目标数量
+    pub kpts: usize,
     pub train: usize,
     pub val: usize,
     pub test: usize,
@@ -131,6 +137,24 @@ pub struct ExportImage {
     pub boxes: Vec<(usize, f64, f64, f64, f64)>,
     /// 分割多边形：(类别序号, [x1, y1, x2, y2, ...])，原图像素坐标
     pub polys: Vec<(usize, Vec<f64>)>,
+    /// 图像分类：整图的类别序号（单标签，取第一个）
+    pub tag: Option<usize>,
+    /// 关键点目标：(类别序号, 外接框 [x, y, w, h], [x1, y1, v1, ...])
+    pub kpts: Vec<(usize, [f64; 4], Vec<f64>)>,
+}
+
+impl ExportResult {
+    /// 全部标注数（框、多边形、关键点目标、分类标签合计）
+    pub fn total(&self) -> usize {
+        self.boxes + self.polys + self.tags + self.kpts
+    }
+}
+
+/// 类别名做文件夹名：去掉文件系统不允许的字符
+fn safe_dir(name: &str) -> String {
+    let s: String = name.chars().map(|c| if r#"\/:*?"<>|"#.contains(c) || c.is_control() { '_' } else { c }).collect();
+    let s = s.trim().trim_end_matches('.').to_string();
+    if s.is_empty() { "_".into() } else { s }
 }
 
 /// 多边形外接框 (x, y, w, h)
@@ -187,14 +211,28 @@ pub fn collect(p: &Project, only_reviewed: bool) -> AppResult<(Vec<String>, Vec<
             let (id, path, width, height, split) = row?;
             let src = p.resolve(&path);
             let file_name = src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| format!("{id}.jpg"));
-            images.push(ExportImage { id, src, file_name, width, height, split, boxes: Vec::new(), polys: Vec::new() });
+            images.push(ExportImage {
+                id,
+                src,
+                file_name,
+                width,
+                height,
+                split,
+                boxes: Vec::new(),
+                polys: Vec::new(),
+                tag: None,
+                kpts: Vec::new(),
+            });
         }
     }
     if images.is_empty() {
         return Err(msg(if only_reviewed { "没有已审核的图片" } else { "没有已标注的图片" }));
     }
     let pos: HashMap<i64, usize> = images.iter().enumerate().map(|(i, im)| (im.id, i)).collect();
-    let mut stmt = conn.prepare("SELECT image_id, label_id, type, data_json FROM annotations WHERE type IN ('bbox', 'polygon')")?;
+    let mut stmt = conn.prepare(
+        "SELECT image_id, label_id, type, data_json FROM annotations
+         WHERE type IN ('bbox', 'polygon', 'tag', 'keypoints') ORDER BY id",
+    )?;
     let rows = stmt.query_map([], |r| {
         Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
     })?;
@@ -202,13 +240,30 @@ pub fn collect(p: &Project, only_reviewed: bool) -> AppResult<(Vec<String>, Vec<
         let (image_id, label_id, kind, data) = row?;
         let (Some(&i), Some(label_id)) = (pos.get(&image_id), label_id) else { continue };
         let Some(&cls) = index.get(&label_id) else { continue };
-        let v: Vec<f64> = serde_json::from_str(&data).unwrap_or_default();
-        if kind == "bbox" {
-            if v.len() == 4 && v[2] > 0.0 && v[3] > 0.0 {
-                images[i].boxes.push((cls, v[0], v[1], v[2], v[3]));
+        match kind.as_str() {
+            "tag" => {
+                if images[i].tag.is_none() {
+                    images[i].tag = Some(cls);
+                }
             }
-        } else if v.len() >= 6 && v.len() % 2 == 0 {
-            images[i].polys.push((cls, v));
+            "keypoints" => {
+                let value: serde_json::Value = serde_json::from_str(&data).unwrap_or_default();
+                if let Some((b, k)) = crate::keypoints::parse(&value) {
+                    if b[2] > 0.0 && b[3] > 0.0 {
+                        images[i].kpts.push((cls, b, k));
+                    }
+                }
+            }
+            _ => {
+                let v: Vec<f64> = serde_json::from_str(&data).unwrap_or_default();
+                if kind == "bbox" {
+                    if v.len() == 4 && v[2] > 0.0 && v[3] > 0.0 {
+                        images[i].boxes.push((cls, v[0], v[1], v[2], v[3]));
+                    }
+                } else if v.len() >= 6 && v.len() % 2 == 0 {
+                    images[i].polys.push((cls, v));
+                }
+            }
         }
     }
     // 不同文件夹里的同名图片，导出时加上 id 区分
@@ -247,9 +302,23 @@ fn yaml_quote(s: &str) -> String {
 }
 
 pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)) -> AppResult<ExportResult> {
+    let classify = p.meta.task == "classify";
+    if classify && opts.format != Format::Cls {
+        return Err(msg("图像分类项目请导出为「分类文件夹」格式"));
+    }
+    if !classify && opts.format == Format::Cls {
+        return Err(msg("「分类文件夹」格式只适合图像分类项目"));
+    }
     // 还没划分的图先按比例划分，并记到库里，下次导出结果一致
     assign_splits(p, opts.ratios, false)?;
-    let (classes, images) = collect(p, opts.only_reviewed)?;
+    let (classes, mut images) = collect(p, opts.only_reviewed)?;
+    if classify {
+        // 没打类别标签的图对分类没有用
+        images.retain(|im| im.tag.is_some());
+        if images.is_empty() {
+            return Err(msg("还没有给图片打类别标签"));
+        }
+    }
     let out = &opts.out_dir;
     prepare_out(out)?;
     let total = images.len();
@@ -258,6 +327,8 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
         images: total,
         boxes: images.iter().map(|i| i.boxes.len()).sum(),
         polys: images.iter().map(|i| i.polys.len()).sum(),
+        tags: images.iter().filter(|i| i.tag.is_some()).count(),
+        kpts: images.iter().map(|i| i.kpts.len()).sum(),
         train: 0,
         val: 0,
         test: 0,
@@ -272,6 +343,9 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
     }
     // 只要有多边形，YOLO 就按分割格式导出（矩形框转成四点多边形），避免同一数据集里混两种格式
     let seg_mode = result.polys > 0;
+    // 关键点项目：YOLO 按 YOLO-pose 格式导出，COCO 带 keypoints
+    let template = if p.meta.task == "pose" { Some(crate::keypoints::get(p)?) } else { None };
+    let nk = template.as_ref().map(|t| t.points.len()).unwrap_or(0);
     let split_of = |im: &ExportImage| if SPLITS.contains(&im.split.as_str()) { im.split.clone() } else { "train".into() };
     let used: Vec<&str> = SPLITS.iter().copied().filter(|s| images.iter().any(|im| split_of(im) == *s)).collect();
 
@@ -288,7 +362,34 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
                 let norm_poly = |pts: &[f64]| -> String {
                     pts.chunks(2).map(|p| format!("{:.6} {:.6}", p[0] / w, p[1] / h)).collect::<Vec<_>>().join(" ")
                 };
-                let lines: Vec<String> = if seg_mode {
+                let lines: Vec<String> = if template.is_some() {
+                    // YOLO-pose：类别 cx cy w h 然后每个点 x y v（归一化）；没有关键点的框补 0
+                    let mut ls = Vec::new();
+                    let line = |c: usize, b: [f64; 4], k: &[f64]| -> String {
+                        let mut s = format!(
+                            "{c} {:.6} {:.6} {:.6} {:.6}",
+                            (b[0] + b[2] / 2.0) / w,
+                            (b[1] + b[3] / 2.0) / h,
+                            b[2] / w,
+                            b[3] / h
+                        );
+                        for i in 0..nk {
+                            let (x, y, v) = match k.get(i * 3..i * 3 + 3) {
+                                Some(t) if t[2] > 0.0 => (t[0] / w, t[1] / h, t[2]),
+                                _ => (0.0, 0.0, 0.0),
+                            };
+                            s += &format!(" {x:.6} {y:.6} {v:.0}");
+                        }
+                        s
+                    };
+                    for (c, b, k) in &im.kpts {
+                        ls.push(line(*c, *b, k));
+                    }
+                    for (c, x, y, bw, bh) in &im.boxes {
+                        ls.push(line(*c, [*x, *y, *bw, *bh], &[]));
+                    }
+                    ls
+                } else if seg_mode {
                     let mut ls = Vec::new();
                     for (c, pts) in &im.polys {
                         ls.push(format!("{c} {}", norm_poly(pts)));
@@ -313,6 +414,14 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
             for s in &used {
                 yaml += &format!("{s}: images/{s}\n");
             }
+            if let Some(t) = &template {
+                let flip: Vec<String> = crate::keypoints::flip_index(&t.points).iter().map(|i| i.to_string()).collect();
+                yaml += &format!("kpt_shape: [{nk}, 3]\nflip_idx: [{}]\n", flip.join(", "));
+                yaml += &format!(
+                    "# 关键点顺序：{}\n",
+                    t.points.iter().enumerate().map(|(i, n)| format!("{i}={n}")).collect::<Vec<_>>().join("，")
+                );
+            }
             yaml += &format!("nc: {}\nnames:\n", classes.len());
             for (i, c) in classes.iter().enumerate() {
                 yaml += &format!("  {i}: {}\n", yaml_quote(c));
@@ -325,7 +434,15 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
             let categories: Vec<_> = classes
                 .iter()
                 .enumerate()
-                .map(|(i, c)| serde_json::json!({ "id": i + 1, "name": c, "supercategory": "none" }))
+                .map(|(i, c)| match &template {
+                    // COCO 关键点：类别里带点名和骨架（骨架序号从 1 开始）
+                    Some(t) => serde_json::json!({
+                        "id": i + 1, "name": c, "supercategory": "none",
+                        "keypoints": t.points,
+                        "skeleton": t.skeleton.iter().map(|[a, b]| [a + 1, b + 1]).collect::<Vec<_>>(),
+                    }),
+                    None => serde_json::json!({ "id": i + 1, "name": c, "supercategory": "none" }),
+                })
                 .collect();
             let mut n = 0;
             let mut ann_id = 1;
@@ -351,6 +468,18 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
                             "id": ann_id, "image_id": im.id, "category_id": c + 1,
                             "bbox": [bx, by, bw, bh], "area": poly_area(pts), "iscrowd": 0,
                             "segmentation": [pts]
+                        }));
+                        ann_id += 1;
+                    }
+                    for (c, b, k) in &im.kpts {
+                        // 点数统一成模板点数，缺的补 0
+                        let mut kp: Vec<f64> = k.clone();
+                        kp.resize(nk.max(k.len() / 3) * 3, 0.0);
+                        let visible = kp.chunks(3).filter(|t| t[2] > 0.0).count();
+                        anns.push(serde_json::json!({
+                            "id": ann_id, "image_id": im.id, "category_id": c + 1,
+                            "bbox": b, "area": b[2] * b[3], "iscrowd": 0,
+                            "keypoints": kp, "num_keypoints": visible
                         }));
                         ann_id += 1;
                     }
@@ -385,10 +514,13 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
                 for (c, x, y, bw, bh) in &im.boxes {
                     voc_obj(*c, *x, *y, *bw, *bh);
                 }
-                // VOC 不支持多边形，用外接框导出
+                // VOC 不支持多边形和关键点，用外接框导出
                 for (c, pts) in &im.polys {
                     let (bx, by, bw, bh) = poly_bbox(pts);
                     voc_obj(*c, bx, by, bw, bh);
+                }
+                for (c, b, _) in &im.kpts {
+                    voc_obj(*c, b[0], b[1], b[2], b[3]);
                 }
                 xml += "</annotation>\n";
                 fs::write(out.join("Annotations").join(format!("{stem}.xml")), xml)?;
@@ -399,6 +531,45 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
                 fs::write(out.join("ImageSets/Main").join(format!("{s}.txt")), names.join("\n"))?;
             }
             fs::write(out.join("labels.txt"), classes.join("\n"))?;
+        }
+        Format::Cls => {
+            // 分类文件夹：{split}/{类别}/{图片}；另附 annotations/{split}.json 清单（带图片 id，训练和评估用）
+            let dirs: Vec<String> = {
+                // 类别名做文件夹名，去掉非法字符后撞名的加序号
+                let mut seen = HashSet::new();
+                classes
+                    .iter()
+                    .map(|c| {
+                        let base = safe_dir(c);
+                        let mut name = base.clone();
+                        let mut i = 2;
+                        while !seen.insert(name.to_lowercase()) {
+                            name = format!("{base}_{i}");
+                            i += 1;
+                        }
+                        name
+                    })
+                    .collect()
+            };
+            fs::create_dir_all(out.join("annotations"))?;
+            let mut n = 0;
+            for s in &used {
+                let mut list = Vec::new();
+                for im in images.iter().filter(|im| split_of(im) == *s) {
+                    let Some(c) = im.tag else { continue };
+                    let d = out.join(s).join(&dirs[c]);
+                    fs::create_dir_all(&d)?;
+                    link_or_copy(&im.src, &d.join(&im.file_name))?;
+                    list.push(serde_json::json!({
+                        "id": im.id, "file": format!("{s}/{}/{}", dirs[c], im.file_name), "label": c
+                    }));
+                    n += 1;
+                    progress(n, total);
+                }
+                let doc = serde_json::json!({ "classes": classes, "images": list });
+                fs::write(out.join("annotations").join(format!("{s}.json")), serde_json::to_string(&doc)?)?;
+            }
+            fs::write(out.join("classes.txt"), classes.join("\n"))?;
         }
     }
     Ok(result)
@@ -493,6 +664,7 @@ pub mod tests {
                     assert!(xml.contains("<name>person &amp; &lt;kid&gt;</name>") && xml.contains("<xmax>30</xmax>"));
                     assert!(out.join("ImageSets/Main/val.txt").exists());
                 }
+                Format::Cls => unreachable!(),
             }
             // 目录不为空时拒绝导出
             assert!(export(&p, &ExportOptions { format: fmt, out_dir: out, only_reviewed: false, ratios: [1.0, 0.0, 0.0] }, &|_, _| {}).is_err());

@@ -11,6 +11,7 @@ use crate::deploy;
 use crate::error::{msg, AppResult};
 use crate::health::{self, HealthReport};
 use crate::images::{self, DeleteScope, ImagePage, ImportResult, LastImport};
+use crate::keypoints::{self, Template};
 use crate::project::{self, Project, ProjectInfo, RecentProject, Stats};
 use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
 use crate::state::AppState;
@@ -198,6 +199,17 @@ pub async fn extract_stream(
     })
     .await
     .map_err(|e| msg(format!("采集任务异常：{e}")))?
+}
+
+/// 关键点项目的模板（点名 + 骨架），没有时返回默认的 COCO 人体 17 点
+#[tauri::command]
+pub async fn keypoint_template(state: State<'_, AppState>) -> AppResult<Template> {
+    keypoints::get(&state.current()?)
+}
+
+#[tauri::command]
+pub async fn save_keypoint_template(state: State<'_, AppState>, template: Template) -> AppResult<()> {
+    keypoints::save(&state.current()?, &template)
 }
 
 /// 停止正在进行的视频流采集，已抽的帧会照常导入
@@ -396,6 +408,7 @@ pub async fn reveal_path(path: String) -> AppResult<()> {
 #[tauri::command]
 pub async fn live_start(app: AppHandle, state: State<'_, AppState>, run_id: i64, source: String, conf: f64) -> AppResult<()> {
     let project = state.current()?;
+    training::ensure_deployable(&project, run_id, training::Deploy::Live)?;
     tauri::async_runtime::spawn_blocking(move || {
         let a = app.clone();
         let sink: deploy::Sink = Arc::new(move |kind, data| {
@@ -434,7 +447,7 @@ pub async fn export_formats(
     out_dir: String,
 ) -> AppResult<Vec<deploy::FormatResult>> {
     let project = state.current()?;
-    training::ensure_exportable(&project, run_id)?;
+    training::ensure_deployable(&project, run_id, training::Deploy::Onnx)?;
     tauri::async_runtime::spawn_blocking(move || {
         let a = app.clone();
         deploy::export_formats(&project, &app.state::<Runtime>(), run_id, &formats, size, &PathBuf::from(out_dir), &move |l| {
@@ -454,7 +467,7 @@ pub async fn build_service(
     out_dir: String,
 ) -> AppResult<String> {
     let project = state.current()?;
-    training::ensure_exportable(&project, run_id)?;
+    training::ensure_deployable(&project, run_id, training::Deploy::Service)?;
     tauri::async_runtime::spawn_blocking(move || {
         let a = app.clone();
         deploy::build_service(&project, &app.state::<Runtime>(), run_id, &config, &PathBuf::from(out_dir), &move |l| {
@@ -586,8 +599,14 @@ pub async fn add_label(state: State<'_, AppState>, name: String, color: String) 
 }
 
 #[tauri::command]
-pub async fn update_label(state: State<'_, AppState>, id: i64, name: String, color: String) -> AppResult<()> {
-    annotations::update_label(&*state.current()?, id, &name, &color)
+pub async fn update_label(
+    state: State<'_, AppState>,
+    id: i64,
+    name: String,
+    color: String,
+    prompt: Option<String>,
+) -> AppResult<()> {
+    annotations::update_label(&*state.current()?, id, &name, &color, prompt.as_deref())
 }
 
 #[tauri::command]

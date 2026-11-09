@@ -202,7 +202,10 @@ export default function Data({ project }: { project: ProjectInfo }) {
   }, [runImport]);
 
   const pickDataset = async () => {
-    const dir = await open({ directory: true, title: "选择数据集文件夹（YOLO / COCO / VOC）" });
+    const dir = await open({
+      directory: true,
+      title: project.task === "classify" ? "选择分类数据集文件夹（每个类别一个子文件夹）" : "选择数据集文件夹（YOLO / COCO / VOC）",
+    });
     if (typeof dir !== "string" || importing.current) return;
     importing.current = true;
     setProgress({ done: 0, total: 0 });
@@ -217,7 +220,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
         content: (
           <div>
             <div>
-              {r.images} 张图片：新增 {r.added}，重复 {r.duplicated}；导入 {r.boxes} 个框
+              {r.images} 张图片：新增 {r.added}，重复 {r.duplicated}；导入 {r.boxes} 个标注（{r.format}）
             </div>
             {r.labelsAdded.length > 0 && <div className="muted">新增类别：{r.labelsAdded.join("、")}</div>}
             {r.keptExisting > 0 && <div className="muted">{r.keptExisting} 张重复图片已有标注，保留原标注</div>}
@@ -439,7 +442,16 @@ export default function Data({ project }: { project: ProjectInfo }) {
                 { key: "files", icon: <FileImageOutlined />, label: "导入图片文件" },
                 { key: "video", icon: <VideoCameraOutlined />, label: "导入视频（抽帧）" },
                 { key: "stream", icon: <LinkOutlined />, label: "从视频流抽帧（RTSP / 直播 / 回放）" },
-                { key: "dataset", icon: <DatabaseOutlined />, label: "导入带标注的数据集（YOLO / COCO / VOC）" },
+                {
+                  key: "dataset",
+                  icon: <DatabaseOutlined />,
+                  label:
+                    project.task === "classify"
+                      ? "导入分类数据集（每个类别一个文件夹）"
+                      : project.task === "pose"
+                        ? "导入带标注的数据集（YOLO-pose / COCO 关键点）"
+                        : "导入带标注的数据集（YOLO / COCO / VOC）",
+                },
               ],
               onClick: ({ key }) => {
                 if (key === "files") pickFiles();

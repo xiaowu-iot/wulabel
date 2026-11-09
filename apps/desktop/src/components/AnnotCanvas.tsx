@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type Konva from "konva";
-import { Circle, Image as KImage, Label as KLabel, Layer, Line, Rect, Stage, Tag, Text, Transformer } from "react-konva";
+import { Circle, Group, Image as KImage, Label as KLabel, Layer, Line, Rect, Stage, Tag, Text, Transformer } from "react-konva";
 
 export interface Box {
   key: string;
@@ -22,7 +22,8 @@ export interface Poly {
   score?: number | null;
 }
 
-export type Tool = "select" | "rect" | "polygon";
+/** sam：智能选取，点击给提示点（Shift+点击是排除点），拖动给框 */
+export type Tool = "select" | "rect" | "polygon" | "sam";
 export type RectXYWH = { x: number; y: number; w: number; h: number };
 
 interface Props {
@@ -49,6 +50,27 @@ interface Props {
   onScale?: (scale: number) => void;
   /** 体检跳过来时高亮的问题框 */
   highlight?: { bbox: [number, number, number, number]; text: string } | null;
+  /** 关键点目标的点（目标框本身放在 boxes 里一起显示和调整） */
+  kpts?: KptSet[];
+  /** 骨架连线（点序号从 0 开始） */
+  skeleton?: [number, number][];
+  /** 正在逐个放置关键点：点哪里就把第 idx 个点放到哪里 */
+  placing?: { key: string; idx: number } | null;
+  onPlaceKpt?: (x: number, y: number, occluded: boolean) => void;
+  onMoveKpt?: (key: string, idx: number, x: number, y: number) => void;
+  /** 画面左上角的大标签（图像分类显示当前类别） */
+  badge?: { text: string; color: string } | null;
+  /** SAM 当前的提示（点 [x, y, 1 包含 / 0 排除]、框）和预览轮廓 */
+  sam?: { points: number[][]; box: RectXYWH | null; preview: number[] | null };
+  onSamClick?: (x: number, y: number, negative: boolean) => void;
+  onSamBox?: (r: RectXYWH) => void;
+}
+
+export interface KptSet {
+  key: string;
+  labelId: number | null;
+  /** [x, y, v, ...]，v：0 没标、1 被遮挡、2 可见 */
+  kpts: number[];
 }
 
 const MIN_SIZE = 2; // 原图像素，小于这个尺寸的框视为误点
@@ -79,6 +101,8 @@ export default function AnnotCanvas(p: Props) {
   const [spaceHeld, setSpaceHeld] = useState(false);
   const [panning, setPanning] = useState(false);
   const drawStart = useRef<{ x: number; y: number } | null>(null);
+  // SAM：按下的位置和是不是排除点；拖动超过几像素就当成框选
+  const samStart = useRef<{ x: number; y: number; neg: boolean } | null>(null);
   const pan = useRef<{ cx: number; cy: number; vx: number; vy: number } | null>(null);
   // 多边形绘制：draft 是已落的顶点（像素坐标），cursor 是当前鼠标位置（橡皮筋线）
   const [draft, setDraft] = useState<number[]>([]);
@@ -152,6 +176,18 @@ export default function AnnotCanvas(p: Props) {
     if (r.w >= MIN_SIZE && r.h >= MIN_SIZE) p.onCreate({ x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h) });
   }, [p]);
 
+  const finishSam = useCallback(() => {
+    const st = samStart.current;
+    if (!st) return;
+    samStart.current = null;
+    const d = draftRef.current;
+    const r = d && d.visible() ? { x: d.x(), y: d.y(), w: d.width(), h: d.height() } : null;
+    d?.visible(false);
+    d?.getLayer()?.batchDraw();
+    if (r && r.w >= MIN_SIZE * 2 && r.h >= MIN_SIZE * 2) p.onSamBox?.({ x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h) });
+    else p.onSamClick?.(round(st.x), round(st.y), st.neg);
+  }, [p]);
+
   const finishPoly = useCallback(() => {
     const pts = draftR.current;
     if (pts.length >= 6) p.onCreatePoly(pts.map(round));
@@ -199,10 +235,11 @@ export default function AnnotCanvas(p: Props) {
         setPanning(false);
       }
       finishDraw();
+      finishSam();
     };
     window.addEventListener("mouseup", up);
     return () => window.removeEventListener("mouseup", up);
-  }, [finishDraw]);
+  }, [finishDraw, finishSam]);
 
   const onMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
     const evt = e.evt;
@@ -213,6 +250,14 @@ export default function AnnotCanvas(p: Props) {
       return;
     }
     if (evt.button !== 0) return;
+    // 放置关键点优先于其他工具
+    if (p.placing && p.onPlaceKpt) {
+      const pt = pointer();
+      if (!pt) return;
+      const c = clampPt(pt);
+      p.onPlaceKpt(round(c.x), round(c.y), evt.shiftKey);
+      return;
+    }
     if (p.tool === "rect") {
       const pt = pointer();
       const d = draftRef.current;
@@ -220,6 +265,14 @@ export default function AnnotCanvas(p: Props) {
       const c = clampPt(pt);
       drawStart.current = c;
       d.setAttrs({ x: c.x, y: c.y, width: 0, height: 0, visible: true });
+      return;
+    }
+    if (p.tool === "sam") {
+      const pt = pointer();
+      if (!pt) return;
+      const c = clampPt(pt);
+      samStart.current = { ...c, neg: evt.shiftKey };
+      draftRef.current?.setAttrs({ x: c.x, y: c.y, width: 0, height: 0, visible: false });
       return;
     }
     if (p.tool === "polygon") {
@@ -247,7 +300,7 @@ export default function AnnotCanvas(p: Props) {
     }
     const pt = pointer();
     if (!pt) return;
-    if (p.tool === "rect" && hLine.current && vLine.current) {
+    if ((p.tool === "rect" || p.placing) && hLine.current && vLine.current) {
       const c = clampPt(pt);
       hLine.current.setAttrs({ points: [0, c.y, p.imgW, c.y], visible: true });
       vLine.current.setAttrs({ points: [c.x, 0, c.x, p.imgH], visible: true });
@@ -260,6 +313,19 @@ export default function AnnotCanvas(p: Props) {
         y: Math.min(s.y, c.y),
         width: Math.abs(c.x - s.x),
         height: Math.abs(c.y - s.y),
+      });
+    }
+    if (samStart.current && draftRef.current) {
+      const c = clampPt(pt);
+      const s = samStart.current;
+      // 屏幕上拖动超过 4 像素才算框选
+      const far = Math.hypot(c.x - s.x, c.y - s.y) * view.s > 4;
+      draftRef.current.setAttrs({
+        x: Math.min(s.x, c.x),
+        y: Math.min(s.y, c.y),
+        width: Math.abs(c.x - s.x),
+        height: Math.abs(c.y - s.y),
+        visible: far,
       });
     }
     if (p.tool === "polygon" && draftR.current.length) {
@@ -296,14 +362,20 @@ export default function AnnotCanvas(p: Props) {
   }, [p.selected, p.tool, p.boxes]);
 
   useEffect(() => {
-    if (p.tool !== "rect") onMouseLeave();
-  }, [p.tool]);
+    if (p.tool !== "rect" && !p.placing) onMouseLeave();
+  }, [p.tool, p.placing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const s = view.s;
   const fontSize = 12 / s;
   // 大框先画，小框在上面，方便点中
   const ordered = [...p.boxes].sort((a, b) => b.w * b.h - a.w * a.h);
-  const cssCursor = panning ? "grabbing" : spaceHeld ? "grab" : p.tool === "rect" || p.tool === "polygon" ? "crosshair" : "default";
+  const cssCursor = panning
+    ? "grabbing"
+    : spaceHeld
+      ? "grab"
+      : p.placing || p.tool === "rect" || p.tool === "polygon" || p.tool === "sam"
+        ? "crosshair"
+        : "default";
   const vertexIdx = (pts: number[]) => pts.map((_, i) => i).filter((i) => i % 2 === 0);
   const imgReady = img && img.src === p.src;
 
@@ -443,6 +515,57 @@ export default function AnnotCanvas(p: Props) {
                   />
                 ));
               })()}
+            {(p.kpts ?? []).map((ks) => {
+              const c = p.colorOf(ks.labelId);
+              const sel = ks.key === p.selected;
+              const pts = ks.kpts;
+              const n = Math.floor(pts.length / 3);
+              const vis = (i: number) => i < n && pts[i * 3 + 2] > 0;
+              // 选中的目标在「选择」工具下可以拖点微调；放置关键点时不响应拖动
+              const editable = sel && p.tool === "select" && !spaceHeld && !p.placing;
+              return (
+                <Group key={`k${ks.key}`}>
+                  {(p.skeleton ?? [])
+                    .filter(([a, b]) => vis(a) && vis(b))
+                    .map(([a, b], i) => (
+                      <Line
+                        key={`s${i}`}
+                        points={[pts[a * 3], pts[a * 3 + 1], pts[b * 3], pts[b * 3 + 1]]}
+                        stroke={c}
+                        strokeWidth={sel ? 2.5 : 1.5}
+                        strokeScaleEnabled={false}
+                        opacity={0.9}
+                        listening={false}
+                      />
+                    ))}
+                  {Array.from({ length: n }, (_, i) => i)
+                    .filter(vis)
+                    .map((i) => {
+                      // 可见：实心；被遮挡：空心
+                      const occluded = pts[i * 3 + 2] === 1;
+                      return (
+                        <Circle
+                          key={`p${i}`}
+                          x={pts[i * 3]}
+                          y={pts[i * 3 + 1]}
+                          radius={(sel ? 5 : 3.5) / s}
+                          fill={occluded ? "#ffffff" : c}
+                          stroke={occluded ? c : "#ffffff"}
+                          strokeWidth={1.5 / s}
+                          listening={editable}
+                          draggable={editable}
+                          onDragMove={(e) => {
+                            const t = e.target;
+                            t.x(Math.min(Math.max(t.x(), 0), p.imgW));
+                            t.y(Math.min(Math.max(t.y(), 0), p.imgH));
+                          }}
+                          onDragEnd={(e) => p.onMoveKpt?.(ks.key, i, round(e.target.x()), round(e.target.y()))}
+                        />
+                      );
+                    })}
+                </Group>
+              );
+            })}
             {p.showNames &&
               p.polys.map((pl) => {
                 const c = p.colorOf(pl.labelId);
@@ -523,6 +646,47 @@ export default function AnnotCanvas(p: Props) {
             />
             <Line ref={hLine} visible={false} stroke="rgba(255,255,255,.55)" strokeWidth={1} strokeScaleEnabled={false} dash={[4, 4]} />
             <Line ref={vLine} visible={false} stroke="rgba(255,255,255,.55)" strokeWidth={1} strokeScaleEnabled={false} dash={[4, 4]} />
+            {p.tool === "sam" && p.sam && (
+              <>
+                {p.sam.preview && p.sam.preview.length >= 6 && (
+                  <Line
+                    points={p.sam.preview}
+                    closed
+                    stroke={p.drawColor}
+                    strokeWidth={2}
+                    strokeScaleEnabled={false}
+                    dash={[6, 3]}
+                    fill={rgba(p.drawColor, 0.28)}
+                    listening={false}
+                  />
+                )}
+                {p.sam.box && (
+                  <Rect
+                    x={p.sam.box.x}
+                    y={p.sam.box.y}
+                    width={p.sam.box.w}
+                    height={p.sam.box.h}
+                    stroke="#ffffff"
+                    strokeWidth={1.5}
+                    strokeScaleEnabled={false}
+                    dash={[4, 4]}
+                    listening={false}
+                  />
+                )}
+                {p.sam.points.map(([x, y, pos], i) => (
+                  <Circle
+                    key={`sp${i}`}
+                    x={x}
+                    y={y}
+                    radius={6 / s}
+                    fill={pos ? "#2fb67c" : "#e5534b"}
+                    stroke="#ffffff"
+                    strokeWidth={2 / s}
+                    listening={false}
+                  />
+                ))}
+              </>
+            )}
             {draft.length > 0 && (
               <>
                 {draft.length >= 6 && (
@@ -552,6 +716,11 @@ export default function AnnotCanvas(p: Props) {
             )}
           </Layer>
         </Stage>
+      )}
+      {p.badge && (
+        <div className="canvas-badge" style={{ background: p.badge.color }}>
+          {p.badge.text}
+        </div>
       )}
     </div>
   );

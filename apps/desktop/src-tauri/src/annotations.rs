@@ -66,6 +66,28 @@ fn validate(a: &Annotation, w: u32, h: u32) -> AppResult<()> {
             }
         }
     }
+    if a.kind == "tag" {
+        // 图像分类：整张图一个类别标签，类别就是 label_id，data 不用
+        if a.label_id.is_none() {
+            return Err(msg("分类标签缺少类别"));
+        }
+    }
+    if a.kind == "keypoints" {
+        // {"box": [x, y, w, h], "kpts": [x, y, v, ...]}
+        let (b, k) = crate::keypoints::parse(&a.data).ok_or_else(|| msg("关键点数据格式不对"))?;
+        if b[2] <= 0.0 || b[3] <= 0.0 || b[0] < -1.0 || b[1] < -1.0 || b[0] + b[2] > w as f64 + 1.0 || b[1] + b[3] > h as f64 + 1.0 {
+            return Err(msg("关键点目标的框超出了图片范围"));
+        }
+        for pt in k.chunks(3) {
+            let v = pt[2];
+            if v != 0.0 && v != 1.0 && v != 2.0 {
+                return Err(msg("关键点可见性只能是 0、1、2"));
+            }
+            if v > 0.0 && (pt[0] < -1.0 || pt[1] < -1.0 || pt[0] > w as f64 + 1.0 || pt[1] > h as f64 + 1.0) {
+                return Err(msg("关键点超出了图片范围"));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -187,6 +209,8 @@ pub struct Label {
     pub color: String,
     /// 使用这个类别的标注数量
     pub count: i64,
+    /// 英文提示词（文本提示自动标注用），可为空
+    pub prompt: String,
 }
 
 fn check_name(name: &str) -> AppResult<String> {
@@ -212,11 +236,13 @@ fn map_unique(e: rusqlite::Error, name: &str) -> crate::error::AppError {
 pub fn list_labels(p: &Project) -> AppResult<Vec<Label>> {
     let conn = p.conn.lock();
     let mut stmt = conn.prepare(
-        "SELECT l.id, l.name, l.color, (SELECT COUNT(*) FROM annotations a WHERE a.label_id = l.id)
+        "SELECT l.id, l.name, l.color, (SELECT COUNT(*) FROM annotations a WHERE a.label_id = l.id), l.prompt
          FROM labels l ORDER BY l.sort, l.id",
     )?;
     let rows = stmt
-        .query_map([], |r| Ok(Label { id: r.get(0)?, name: r.get(1)?, color: r.get(2)?, count: r.get(3)? }))?
+        .query_map([], |r| {
+            Ok(Label { id: r.get(0)?, name: r.get(1)?, color: r.get(2)?, count: r.get(3)?, prompt: r.get(4)? })
+        })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
 }
@@ -227,18 +253,22 @@ pub fn add_label(p: &Project, name: &str, color: &str) -> AppResult<Label> {
     let sort: i64 = conn.query_row("SELECT COALESCE(MAX(sort), 0) + 1 FROM labels", [], |r| r.get(0))?;
     conn.execute("INSERT INTO labels (name, color, sort) VALUES (?1, ?2, ?3)", params![name, color, sort])
         .map_err(|e| map_unique(e, &name))?;
-    Ok(Label { id: conn.last_insert_rowid(), name, color: color.to_string(), count: 0 })
+    Ok(Label { id: conn.last_insert_rowid(), name, color: color.to_string(), count: 0, prompt: String::new() })
 }
 
-pub fn update_label(p: &Project, id: i64, name: &str, color: &str) -> AppResult<()> {
+/// 改类别名、颜色；prompt 为 None 时不改英文提示词
+pub fn update_label(p: &Project, id: i64, name: &str, color: &str, prompt: Option<&str>) -> AppResult<()> {
     let name = check_name(name)?;
-    let n = p
-        .conn
-        .lock()
+    let conn = p.conn.lock();
+    let n = conn
         .execute("UPDATE labels SET name = ?2, color = ?3 WHERE id = ?1", params![id, name, color])
         .map_err(|e| map_unique(e, &name))?;
     if n == 0 {
         return Err(msg("类别不存在"));
+    }
+    if let Some(pr) = prompt {
+        let pr: String = pr.trim().chars().take(120).collect();
+        conn.execute("UPDATE labels SET prompt = ?2 WHERE id = ?1", params![id, pr])?;
     }
     Ok(())
 }
@@ -331,8 +361,8 @@ mod tests {
         assert_eq!(a.name, "安全帽");
         assert!(add_label(&p, "安全帽", "#fff").is_err(), "重名");
         let b = add_label(&p, "人", "#2fb67c").unwrap();
-        update_label(&p, b.id, "行人", "#000000").unwrap();
-        assert!(update_label(&p, b.id, "安全帽", "#000").is_err(), "改成重名");
+        update_label(&p, b.id, "行人", "#000000", Some("pedestrian")).unwrap();
+        assert!(update_label(&p, b.id, "安全帽", "#000", None).is_err(), "改成重名");
 
         save(&p, 1, &[bbox(a.id, 0.0, 0.0, 10.0, 10.0)]).unwrap();
         save(&p, 2, &[bbox(a.id, 0.0, 0.0, 10.0, 10.0), bbox(b.id, 5.0, 5.0, 10.0, 10.0)]).unwrap();

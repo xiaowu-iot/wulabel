@@ -104,14 +104,47 @@ export interface Label {
   name: string;
   color: string;
   count: number;
+  /** 英文提示词（文本提示自动标注用），可为空 */
+  prompt?: string;
 }
 
+/** SAM 分割结果：多边形 [x1, y1, ...] 和外接框 [x, y, w, h]，原图像素坐标 */
+export interface SamResult {
+  points: number[];
+  box: number[];
+  score: number;
+}
+
+/** 巡瞳 AI 平台上可用的识别模型；code = "llm" 是大模型通用识别 */
+export interface AiModel {
+  code: string;
+  name: string;
+  description: string;
+}
+
+/** 关键点标注数据：目标框 [x, y, w, h] + 关键点 [x, y, v, ...]（v：0 没标、1 被遮挡、2 可见） */
+export interface KeypointData {
+  box: number[];
+  kpts: number[];
+}
+
+/**
+ * bbox：data = [x, y, w, h]；polygon：data = [x1, y1, x2, y2, ...]；
+ * tag：图像分类整图标签，data = []；keypoints：data = KeypointData
+ */
 export interface Annotation {
   labelId: number | null;
-  type: "bbox" | "polygon";
-  data: number[];
+  type: "bbox" | "polygon" | "tag" | "keypoints";
+  data: number[] | KeypointData;
   score?: number | null;
   source: string;
+}
+
+/** 关键点模板：点名（点击顺序）+ 骨架连线（点序号从 0 开始） */
+export interface KeypointTemplate {
+  name: string;
+  points: string[];
+  skeleton: [number, number][];
 }
 
 export interface ImageAnnotations {
@@ -130,13 +163,15 @@ export interface SplitSummary {
   unset: number;
 }
 
-export type DatasetFormat = "yolo" | "coco" | "voc";
+export type DatasetFormat = "yolo" | "coco" | "voc" | "cls";
 
 export interface ExportResult {
   outDir: string;
   images: number;
   boxes: number;
   polys: number;
+  tags: number;
+  kpts: number;
   train: number;
   val: number;
   test: number;
@@ -241,7 +276,8 @@ export interface SplitEval {
   recall: number;
   perClass: ClassEval[];
   confusion: number[][];
-  errors: { imageId: number; missed: number; extra: number; wrong: number }[];
+  /** 分类模型的错例另有 gt（标的类别序号）、pred（判成的类别序号）、score */
+  errors: { imageId: number; missed: number; extra: number; wrong: number; gt?: number; pred?: number; score?: number | null }[];
 }
 
 export interface RunDetail {
@@ -267,9 +303,24 @@ export interface PredPoly {
   score: number;
 }
 
+export interface PredTag {
+  labelId: number;
+  score: number;
+}
+
+export interface PredPose {
+  labelId: number;
+  box: number[];
+  kpts: number[];
+  score: number;
+}
+
+/** 检测模型给 boxes，分割模型给 polys，关键点模型给 poses，分类模型给 tags（分数从高到低） */
 export interface PredResult {
   boxes: PredBox[];
   polys: PredPoly[];
+  tags: PredTag[];
+  poses: PredPose[];
 }
 
 export type IssueKind = "missing" | "wrong_class" | "loose_box" | "extra_box" | "tiny_box" | "dup_box" | "no_label";
@@ -354,7 +405,15 @@ export const api = {
   setImageStatus: (imageId: number, status: ImageStatus) => invoke<void>("set_image_status", { imageId, status }),
   listLabels: () => invoke<Label[]>("list_labels"),
   addLabel: (name: string, color: string) => invoke<Label>("add_label", { name, color }),
-  updateLabel: (id: number, name: string, color: string) => invoke<void>("update_label", { id, name, color }),
+  updateLabel: (id: number, name: string, color: string, prompt?: string) =>
+    invoke<void>("update_label", { id, name, color, prompt: prompt ?? null }),
+  samSegment: (imageId: number, points: number[][], box: number[] | null) =>
+    invoke<SamResult>("sam_segment", { imageId, points, box }),
+  textDetect: (imageId: number, conf: number) => invoke<PredResult>("text_detect", { imageId, conf }),
+  textPrelabelAll: (conf: number) => invoke<{ images: number; boxes: number }>("text_prelabel_all", { conf }),
+  aiModels: () => invoke<AiModel[]>("ai_models"),
+  aiDetect: (imageId: number, model: string, conf: number) => invoke<PredResult>("ai_detect", { imageId, model, conf }),
+  aiPrelabelAll: (model: string, conf: number) => invoke<{ images: number; boxes: number }>("ai_prelabel_all", { model, conf }),
   deleteLabel: (id: number) => invoke<number>("delete_label", { id }),
 
   createProject: (parent: string, name: string, task: Task) =>
@@ -371,6 +430,8 @@ export const api = {
   extractStream: (url: string, every: number, maxFrames: number, maxMinutes: number, dedup: boolean) =>
     invoke<ExtractResult>("extract_stream", { url, every, maxFrames, maxMinutes, dedup }),
   stopExtract: () => invoke<void>("stop_extract"),
+  keypointTemplate: () => invoke<KeypointTemplate>("keypoint_template"),
+  saveKeypointTemplate: (template: KeypointTemplate) => invoke<void>("save_keypoint_template", { template }),
   listImages: (status: string | null, offset: number, limit: number) =>
     invoke<ImagePage>("list_images", { status, offset, limit }),
   projectStats: () => invoke<Stats>("project_stats"),

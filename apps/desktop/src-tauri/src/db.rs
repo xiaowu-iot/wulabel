@@ -82,6 +82,15 @@ fn migrate(conn: &Connection) -> AppResult<()> {
              COMMIT;",
         )?;
     }
+    if version < 3 {
+        // 类别的英文提示词：文本提示自动标注（开放词汇检测模型只懂英文）用
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE labels ADD COLUMN prompt TEXT NOT NULL DEFAULT '';
+             PRAGMA user_version = 3;
+             COMMIT;",
+        )?;
+    }
     Ok(())
 }
 

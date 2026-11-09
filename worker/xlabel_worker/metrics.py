@@ -180,3 +180,54 @@ def confusion_and_errors(preds, gts, num_classes: int, conf: float, iou: float =
             errors.append({"imageId": int(g.image_id), "missed": missed, "extra": extra, "wrong": wrong})
     errors.sort(key=lambda e: -(e["missed"] + e["extra"] + e["wrong"]))
     return cm.tolist(), errors
+
+
+def classify_eval(y_true, y_pred, image_ids, num_classes: int, scores=None) -> EvalResult:
+    """图像分类指标。为了和检测共用界面和存储格式：
+    map50 = 准确率，map = 宏平均 F1，precision / recall = 宏平均；
+    perClass 的 ap50 = 该类 F1、ap = None；混淆矩阵 n×n（没有背景行列）；
+    errors 里每张分错的图 wrong = 1（分数越高越靠前，越可能是标错的图）。"""
+    y_true = np.asarray(y_true, dtype=int)
+    y_pred = np.asarray(y_pred, dtype=int)
+    n = num_classes
+    cm = np.zeros((n, n), dtype=int)
+    for t, p in zip(y_true, y_pred):
+        cm[t, p] += 1
+    per_class = []
+    ps, rs, fs = [], [], []
+    for c in range(n):
+        tp = cm[c, c]
+        gt = int(cm[c].sum())
+        pred = int(cm[:, c].sum())
+        prec = tp / pred if pred else 0.0
+        rec = tp / gt if gt else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+        per_class.append({"index": c, "gt": gt, "precision": float(prec), "recall": float(rec), "ap50": float(f1) if gt else None, "ap": None})
+        if gt:
+            ps.append(prec)
+            rs.append(rec)
+            fs.append(f1)
+    acc = float((y_true == y_pred).mean()) if len(y_true) else 0.0
+    errors = []
+    for k in np.where(y_true != y_pred)[0]:
+        errors.append(
+            {
+                "imageId": int(image_ids[k]),
+                "missed": 0,
+                "extra": 0,
+                "wrong": 1,
+                "gt": int(y_true[k]),
+                "pred": int(y_pred[k]),
+                "score": float(scores[k]) if scores is not None else None,
+            }
+        )
+    errors.sort(key=lambda e: -(e["score"] or 0))
+    return EvalResult(
+        map50=acc,
+        map=float(np.mean(fs)) if fs else 0.0,
+        per_class=per_class,
+        precision=float(np.mean(ps)) if ps else 0.0,
+        recall=float(np.mean(rs)) if rs else 0.0,
+        confusion=cm.tolist(),
+        errors=errors,
+    )

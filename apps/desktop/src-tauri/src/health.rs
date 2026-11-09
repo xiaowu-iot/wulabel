@@ -96,7 +96,7 @@ pub fn iou(a: &[f64; 4], b: &[f64; 4]) -> f64 {
     inter / (a[2] * a[3] + b[2] * b[3] - inter)
 }
 
-/// 已标注、已审核图片上的所有框
+/// 已标注、已审核图片上的所有目标框：矩形框；分割多边形、关键点目标按外接框算
 fn load_gts(p: &Project) -> AppResult<(Vec<i64>, Vec<Gt>)> {
     let conn = p.conn.lock();
     let ids: Vec<i64> = conn
@@ -104,15 +104,49 @@ fn load_gts(p: &Project) -> AppResult<(Vec<i64>, Vec<Gt>)> {
         .query_map([], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     let mut stmt = conn.prepare(
-        "SELECT a.image_id, a.label_id, a.data_json FROM annotations a JOIN images i ON i.id = a.image_id
-         WHERE a.type = 'bbox' AND i.status IN ('labeled', 'reviewed') ORDER BY a.image_id, a.id",
+        "SELECT a.image_id, a.label_id, a.type, a.data_json, i.width, i.height
+         FROM annotations a JOIN images i ON i.id = a.image_id
+         WHERE a.type IN ('bbox', 'polygon', 'keypoints', 'tag') AND i.status IN ('labeled', 'reviewed')
+         ORDER BY a.image_id, a.id",
     )?;
     let gts = stmt
-        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?)))?
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<i64>>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, f64>(4)?,
+                r.get::<_, f64>(5)?,
+            ))
+        })?
         .filter_map(|r| r.ok())
-        .filter_map(|(image_id, label_id, d)| {
-            let v: Vec<f64> = serde_json::from_str(&d).ok()?;
-            (v.len() == 4).then(|| Gt { image_id, label_id, bbox: [v[0], v[1], v[2], v[3]] })
+        .filter_map(|(image_id, label_id, kind, d, w, h)| {
+            let value: serde_json::Value = serde_json::from_str(&d).ok()?;
+            let bbox = match kind.as_str() {
+                // 分类标签按整图一个框算，这样模型检查能直接查出「类别可能标错」
+                "tag" => [0.0, 0.0, w, h],
+                "keypoints" => crate::keypoints::parse(&value)?.0,
+                "polygon" => {
+                    let v: Vec<f64> = serde_json::from_value(value).ok()?;
+                    if v.len() < 6 {
+                        return None;
+                    }
+                    let xs = v.iter().step_by(2);
+                    let ys = v.iter().skip(1).step_by(2);
+                    let (x0, x1) = xs.fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+                    let (y0, y1) = ys.fold((f64::MAX, f64::MIN), |(a, b), y| (a.min(*y), b.max(*y)));
+                    [x0, y0, x1 - x0, y1 - y0]
+                }
+                _ => {
+                    let v: Vec<f64> = serde_json::from_value(value).ok()?;
+                    if v.len() != 4 {
+                        return None;
+                    }
+                    [v[0], v[1], v[2], v[3]]
+                }
+            };
+            Some(Gt { image_id, label_id, bbox })
         })
         .collect();
     Ok((ids, gts))

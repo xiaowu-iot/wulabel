@@ -6,7 +6,10 @@
 响应：
     {"type": "pong", ...}
     {"type": "pred", "id": 1, "boxes": [[x, y, w, h, 类别序号, 分数], ...],
-     "polys": [[类别序号, 分数, x1, y1, x2, y2, ...], ...]}   分割模型才有 polys，每张图一行
+     "polys": [[类别序号, 分数, x1, y1, x2, y2, ...], ...],          分割模型才有
+     "poses": [[类别序号, 分数, x, y, w, h, kx1, ky1, kv1, ...], ...], 关键点模型才有（kv：2 找到、0 没找到）
+     "tags": [[类别序号, 分数], ...]}                                  分类模型才有，前 5 个，分数从高到低
+    每张图一行
     {"type": "done", "count": n}
     {"type": "error", "msg": "..."}
 """
@@ -21,7 +24,7 @@ import torch
 from torchvision.transforms import functional as F
 
 from . import models
-from .data import load_image
+from .data import cls_preprocess, load_image
 from .protocol import emit
 
 
@@ -54,21 +57,37 @@ def mask_to_poly(mask, thresh: float = 0.5):
     return out
 
 
+def pick_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    mps = getattr(torch.backends, "mps", None)
+    if mps is not None and mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 class Predictor:
     def __init__(self):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = pick_device()
         self.key = None
         self.model = None
         self.ck = None
-        self.seg = False
+        self.task = "detect"
 
     def ensure(self, weights: str):
         p = Path(weights)
         key = (str(p), p.stat().st_mtime)
         if key != self.key:
             self.model, self.ck = models.load(p, self.device)
-            self.seg = models.is_seg(self.ck.get("model", ""))
+            self.task = models.task_of(self.ck.get("model", ""))
             self.key = key
+
+    def _classify(self, img) -> list:
+        x = cls_preprocess(img, int(self.ck["img_size"])).unsqueeze(0).to(self.device)
+        prob = torch.softmax(self.model(x).float(), dim=1)[0].cpu()
+        k = min(5, prob.numel())
+        top = torch.topk(prob, k)
+        return [[int(i), round(float(s), 4)] for s, i in zip(top.values, top.indices)]
 
     @torch.no_grad()
     def predict(self, weights: str, items: list[dict], conf: float):
@@ -77,24 +96,41 @@ class Predictor:
         for it in items:
             try:
                 img = load_image(Path(it["path"]))
+                if self.task == "classify":
+                    # 分类：前 5 个类别都返回，由桌面端按置信度决定要不要采用
+                    emit("pred", id=it["id"], boxes=[], polys=[], poses=[], tags=self._classify(img))
+                    n += 1
+                    continue
                 out = self.model([F.to_tensor(img).to(self.device)])[0]
-                masks = out["masks"].cpu().numpy() if (self.seg and "masks" in out) else None
-                boxes, polys = [], []
+                masks = out["masks"].cpu().numpy() if (self.task == "segment" and "masks" in out) else None
+                kps = out["keypoints"].cpu().numpy() if (self.task == "pose" and "keypoints" in out) else None
+                kscores = out["keypoints_scores"].cpu().numpy() if kps is not None and "keypoints_scores" in out else None
+                boxes, polys, poses = [], [], []
                 data = zip(out["boxes"].tolist(), out["scores"].tolist(), out["labels"].tolist())
                 for i, (b, s, l) in enumerate(data):
                     if s < conf:
                         continue
                     x0, y0, x1, y1 = b
-                    boxes.append([round(x0, 2), round(y0, 2), round(x1 - x0, 2), round(y1 - y0, 2), l - 1, round(s, 4)])
+                    box = [round(x0, 2), round(y0, 2), round(x1 - x0, 2), round(y1 - y0, 2)]
+                    boxes.append(box + [l - 1, round(s, 4)])
                     if masks is not None:
                         poly = mask_to_poly(masks[i, 0])
                         if poly:
                             polys.append([l - 1, round(s, 4)] + poly)
-                emit("pred", id=it["id"], boxes=boxes, polys=polys)
+                    if kps is not None:
+                        flat = []
+                        for j, (kx, ky, _) in enumerate(kps[i]):
+                            # 关键点热图分数 > 0 当成找到了（标成可见），否则当成没找到
+                            if kscores is None or kscores[i, j] > 0:
+                                flat += [round(float(kx), 1), round(float(ky), 1), 2]
+                            else:
+                                flat += [0, 0, 0]
+                        poses.append([l - 1, round(s, 4)] + box + flat)
+                emit("pred", id=it["id"], boxes=boxes, polys=polys, poses=poses, tags=[])
             except Exception as e:
-                emit("pred", id=it["id"], boxes=[], polys=[], error=str(e))
+                emit("pred", id=it["id"], boxes=[], polys=[], poses=[], tags=[], error=str(e))
             n += 1
-        emit("done", count=n, classes=self.ck["classes"], seg=self.seg)
+        emit("done", count=n, classes=self.ck["classes"], task=self.task)
 
 
 def run() -> None:
