@@ -24,6 +24,7 @@ import {
   ImportResult,
   LastImport,
   ProjectInfo,
+  StreamFrames,
   StreamInfo,
   thumbUrl,
   VideoProgress,
@@ -81,6 +82,9 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const [streamDedup, setStreamDedup] = useState(prefs.get("streamDedup", "0") === "1");
   const [streamRunning, setStreamRunning] = useState(false);
   const [streamMin, setStreamMin] = useState(false);
+  const [streamIds, setStreamIds] = useState<number[]>([]); // 最近入库的帧（最新的在后）
+  const [streamSaved, setStreamSaved] = useState(0);
+  const [streamDir, setStreamDir] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -97,6 +101,9 @@ export default function Data({ project }: { project: ProjectInfo }) {
       message.error(errText(e));
     }
   }, [filter, page, message]);
+  // 采集过程中的事件回调里总是调用最新的 load（翻页、筛选变了也对）
+  const loadRef = useRef(load);
+  loadRef.current = load;
 
   const afterDelete = async (n: number) => {
     message.success(`已删除 ${n} 张图片`);
@@ -328,25 +335,64 @@ export default function Data({ project }: { project: ProjectInfo }) {
     prefs.set("streamDedup", dedup ? "1" : "0");
     setStreamOpen(false);
     setStreamMin(false);
+    setStreamIds([]);
+    setStreamSaved(0);
+    setStreamDir(null);
     importing.current = true;
     setStreamRunning(true);
     setVideoProgress({ stage: "extract", done: 0, total: max, speed: 0, detail: "连接中…" });
     const unlisten = await listen<VideoProgress>("video-progress", (e) => setVideoProgress(e.payload));
+    // 边采边入库：弹框里显示最新的帧，后面的图片列表最多每 2 秒刷新一次
+    let lastRefresh = 0;
+    const unlistenFrames = await listen<StreamFrames>("stream-frames", (e) => {
+      const { ids, dir } = e.payload;
+      setStreamIds((prev) => [...prev, ...ids].slice(-12));
+      setStreamSaved((n) => n + ids.length);
+      setStreamDir(dir);
+      const now = Date.now();
+      if (now - lastRefresh > 2000) {
+        lastRefresh = now;
+        loadRef.current();
+        refreshStats();
+      }
+    });
     try {
       const r = await api.extractStream(url, every, max, minutes, dedup);
-      await load();
-      await refreshStats();
       const text = `采集完成：新增 ${r.added} 张` + (r.duplicated ? `，跳过重复 ${r.duplicated} 张` : "");
-      message.success(text);
+      const dir = r.dir;
+      if (dir) {
+        message.success({
+          duration: 8,
+          content: (
+            <span>
+              {text}，保存在 {shortDir(dir)}{" "}
+              <a onClick={() => openDir(dir)}>打开文件夹</a>
+            </span>
+          ),
+        });
+      } else {
+        message.success(text);
+      }
     } catch (e) {
       message.error(errText(e));
     } finally {
       unlisten();
+      unlistenFrames();
       setVideoProgress(null);
       setStreamRunning(false);
       setStreamMin(false);
       importing.current = false;
+      // 出错前可能已经入库了一部分，照样刷新
+      await loadRef.current();
+      await refreshStats();
     }
+  };
+
+  /** 绝对路径只显示项目里的那段：images/stream_xxx */
+  const shortDir = (dir: string) => dir.split(/[\\/]/).slice(-2).join("/");
+
+  const openDir = (dir: string) => {
+    api.revealPath(dir).catch((e) => message.error(errText(e)));
   };
 
   const stopStream = async () => {
@@ -637,7 +683,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
           跳过几乎相同的帧（画面静止时少存重复图）
         </Checkbox>
         <p className="dim" style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}>
-          直播是无限流,务必设「最多帧」或「最长时长」。采集中可随时停止,已抽的帧会保留并导入。首次使用会自动下载 ffmpeg。
+          图片边采边入库，保存在项目的 images/stream_地址_时间/ 文件夹里，采集时就能看到。直播是无限流，务必设「最多帧」或「最长时长」；中途停止也会保留已采的图。首次使用会自动下载 ffmpeg。
         </p>
       </Modal>
 
@@ -665,12 +711,45 @@ export default function Data({ project }: { project: ProjectInfo }) {
               vp.stage === "download"
                 ? `${vp.detail} · ${(vp.done / 2 ** 20).toFixed(0)} / ${(vp.total / 2 ** 20).toFixed(0)} MB · ${(vp.speed / 2 ** 20).toFixed(1)} MB/s`
                 : vp.stage === "extract"
-                  ? `正在抽帧：${vp.detail} · 已抽 ${vp.done} 帧${vp.total ? ` / 约 ${vp.total}` : ""}`
+                  ? streamRunning
+                    ? `已采集 ${vp.done} 帧${vp.total ? ` / 上限 ${vp.total}` : ""} · 已入库 ${streamSaved} 张`
+                    : `正在抽帧：${vp.detail} · 已抽 ${vp.done} 帧${vp.total ? ` / 约 ${vp.total}` : ""}`
                   : `正在导入 ${vp.done} / ${vp.total} 帧（生成缩略图）`;
             return (
               <>
                 <Progress percent={pct} status="active" showInfo={vp.total > 0} />
+                {streamRunning && vp.stage === "extract" && (
+                  <div className="dim" style={{ fontSize: 12, wordBreak: "break-all" }}>
+                    {vp.detail}
+                  </div>
+                )}
                 <div className="muted">{text}</div>
+                {streamRunning && vp.stage !== "download" && (
+                  <>
+                    <div className="stream-strip">
+                      {streamIds.length === 0 ? (
+                        <div className="dim" style={{ fontSize: 12 }}>
+                          等待第一帧…
+                        </div>
+                      ) : (
+                        [...streamIds].reverse().map((id, i) => (
+                          <img
+                            key={id}
+                            src={thumbUrl(project.path, id)}
+                            alt=""
+                            draggable={false}
+                            className={i === 0 ? "newest" : undefined}
+                          />
+                        ))
+                      )}
+                    </div>
+                    {streamDir && (
+                      <div className="dim" style={{ fontSize: 12 }}>
+                        保存到项目 {shortDir(streamDir)} <a onClick={() => openDir(streamDir)}>打开文件夹</a>
+                      </div>
+                    )}
+                  </>
+                )}
               </>
             );
           })()}
@@ -691,12 +770,24 @@ export default function Data({ project }: { project: ProjectInfo }) {
             minWidth: 220,
           }}
         >
-          <div style={{ fontSize: 13 }}>
-            {videoProgress.stage === "download"
-              ? "正在下载 ffmpeg…"
-              : videoProgress.stage === "import"
-                ? "正在导入…"
+          <div className="row" style={{ gap: 10, flexWrap: "nowrap" }}>
+            {streamIds.length > 0 && (
+              <img
+                key={streamIds[streamIds.length - 1]}
+                src={thumbUrl(project.path, streamIds[streamIds.length - 1])}
+                alt=""
+                draggable={false}
+                style={{ width: 64, height: 48, objectFit: "cover", borderRadius: 4, flex: "none" }}
+              />
+            )}
+            <div style={{ fontSize: 13 }}>
+              {videoProgress.stage === "download"
+                ? "正在下载 ffmpeg…"
                 : `采集中 · 已抽 ${videoProgress.done} 帧`}
+              <div className="dim" style={{ fontSize: 12 }}>
+                已入库 {streamSaved} 张
+              </div>
+            </div>
           </div>
           <div className="row" style={{ gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
             <Button size="small" onClick={() => setStreamMin(false)}>

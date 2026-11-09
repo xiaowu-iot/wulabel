@@ -63,6 +63,11 @@ main { overflow: auto; position: relative; }
 
 .drop-mask { position: fixed; inset: 0; z-index: 100; background: rgba(20, 22, 26, .85); display: grid; place-items: center; pointer-events: none; }
 .drop-mask div { border: 2px dashed var(--accent); border-radius: 16px; padding: 48px 64px; font-size: 18px; color: var(--text); text-align: center; }
+/* 视频流采集：最新入库的帧，最新的在最左边 */
+.stream-strip { display: flex; gap: 6px; overflow: hidden; margin: 10px 0 6px; min-height: 60px; align-items: center; }
+.stream-strip img { height: 60px; width: 80px; object-fit: cover; border-radius: 4px; flex: none; border: 1px solid rgba(255, 255, 255, .08); animation: stream-in .35s ease-out; }
+.stream-strip img.newest { border-color: var(--accent); }
+@keyframes stream-in { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 
 .viewer { position: relative; display: flex; align-items: center; justify-content: center; background: #0c0d10; height: 72vh; border-radius: 6px; overflow: hidden; }
 .viewer img { display: block; flex: none; }

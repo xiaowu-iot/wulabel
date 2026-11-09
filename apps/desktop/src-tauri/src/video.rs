@@ -1,17 +1,19 @@
 //! 视频抽帧：用 ffmpeg 按间隔把视频抽成图片，再走图片导入流程
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
 use crate::error::{msg, AppResult};
 use crate::images;
-use crate::project::Project;
+use crate::project::{Project, IMAGES_DIR};
 use crate::runtime::{command, Runtime};
 
 pub const VIDEO_EXTS: [&str; 9] = ["mp4", "mov", "mkv", "avi", "webm", "flv", "wmv", "m4v", "ts"];
@@ -50,6 +52,8 @@ pub struct ExtractResult {
     pub added: usize,
     pub duplicated: usize,
     pub failed: Vec<String>,
+    /// 视频流采集的帧保存在哪个文件夹（绝对路径）；本地视频抽帧为 None
+    pub dir: Option<String>,
 }
 
 /// 进度回调：阶段（download / extract / import）、已完成、总数、速度（字节/秒，仅下载阶段）、说明
@@ -132,6 +136,7 @@ pub fn extract(
         added: imp.added,
         duplicated: imp.duplicated,
         failed: imp.failed,
+        dir: None,
     })
 }
 
@@ -347,8 +352,26 @@ pub fn probe_stream(rt: &Runtime, url: &str, log: &(dyn Fn(String) + Sync), prog
     Ok(parse_stream_info(&text))
 }
 
+/// 采集文件夹 / 文件名前缀：地址里的主机名 + 开始时间，例如 119.3.176.149_20261110_153012
+fn stream_tag(url: &str) -> String {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    let authority = rest.split('/').next().unwrap_or("");
+    let host_port = authority.rsplit_once('@').map(|(_, h)| h).unwrap_or(authority); // 去掉账号密码
+    let host: String = host_port
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '-' })
+        .collect();
+    let host = if host.is_empty() { "stream".to_string() } else { host };
+    format!("{host}_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"))
+}
+
 /// 从视频流抽帧：直播流用「最多帧数 / 最长时长」做上限，回放流读到结尾为止。
-/// dedup=true 时用 mpdecimate 丢掉几乎相同的帧。可被 Extractor::stop 中途停止。
+/// 帧直接写进项目 images/stream_<主机>_<时间>/，边采边入库（约 1.5 秒一次），
+/// 新入库的图片 id 通过 on_frames 通知前端实时显示。整次采集共用一个导入批次。
+/// dedup=true 时用 mpdecimate 丢掉几乎相同的帧。可被 Extractor::stop 中途停止，已抽的帧保留。
 #[allow(clippy::too_many_arguments)]
 pub fn extract_stream(
     project: &Project,
@@ -360,6 +383,7 @@ pub fn extract_stream(
     max_minutes: f64,
     dedup: bool,
     progress: Progress,
+    on_frames: &(dyn Fn(&[i64], &str) + Sync),
     log: &(dyn Fn(String) + Sync),
 ) -> AppResult<ExtractResult> {
     let url = url.trim();
@@ -369,9 +393,15 @@ pub fn extract_stream(
     let fps = if every > 0.0 { 1.0 / every } else { 1.0 };
     let ffmpeg = rt.ffmpeg(log, &|_f, d, t, s| progress("download", d, t, s, "正在下载 ffmpeg（首次使用，约 90MB）"))?;
 
-    let frame_dir = std::env::temp_dir().join(format!("xlabel-stream-{}-{}", std::process::id(), now_nanos()));
-    fs::create_dir_all(&frame_dir)?;
-    let pattern = frame_dir.join("s_%06d.jpg");
+    // 一次采集一个文件夹，放在项目 images/ 下，名字带来源和时间，方便找
+    let tag = stream_tag(url);
+    let folder = format!("stream_{tag}");
+    let rel_dir = format!("{IMAGES_DIR}/{folder}");
+    let cap_dir = project.root.join(IMAGES_DIR).join(&folder);
+    fs::create_dir_all(&cap_dir)?;
+    let dir_str = cap_dir.to_string_lossy().into_owned();
+    let pattern = cap_dir.join(format!("{tag}_%06d.jpg"));
+    let batch = images::next_batch(project)?;
     let masked = mask_url(url);
     // 直播没有总帧数，用上限当进度分母（上限为 0 时进度条不显示百分比）
     let total = max_frames;
@@ -397,7 +427,7 @@ pub fn extract_stream(
     c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = c.spawn().map_err(|e| {
-        let _ = fs::remove_dir_all(&frame_dir);
+        let _ = fs::remove_dir_all(&cap_dir);
         msg(format!("无法启动 ffmpeg：{e}"))
     })?;
     let out = child.stdout.take().unwrap();
@@ -405,29 +435,100 @@ pub fn extract_stream(
     let child = Arc::new(Mutex::new(child));
     extractor.set(Some(child.clone()));
 
+    let mut res = ExtractResult {
+        videos: 1,
+        frames: 0,
+        added: 0,
+        duplicated: 0,
+        failed: Vec::new(),
+        dir: Some(dir_str.clone()),
+    };
+    let mut done_upto = 0usize; // 按文件名排序，前 done_upto 张已经处理过
+    // 把已经写完的帧导入项目（ffmpeg 正在写的最后一张先不碰），新入库的图通知前端。
+    // 帧本来就在项目文件夹里，所以按「只引用」方式入库，不再复制一份。
+    let mut sweep = |all: bool| {
+        let mut files: Vec<PathBuf> = match fs::read_dir(&cap_dir) {
+            Ok(rd) => rd
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("jpg")).unwrap_or(false))
+                .collect(),
+            Err(_) => return,
+        };
+        files.sort();
+        let ready = if all { files.len() } else { files.len().saturating_sub(1) };
+        if ready <= done_upto {
+            return;
+        }
+        let new_files = files[done_upto..ready].to_vec();
+        done_upto = ready;
+        let max_before: i64 =
+            project.conn.lock().query_row("SELECT COALESCE(MAX(id), 0) FROM images", [], |r| r.get(0)).unwrap_or(0);
+        match images::import_batch(project, &new_files, false, Some(batch), &|_, _| {}) {
+            Ok((r, map)) => {
+                res.added += r.added;
+                res.duplicated += r.duplicated;
+                res.failed.extend(r.failed);
+                let mut ids: Vec<i64> = map.into_values().filter(|id| *id > max_before).collect();
+                ids.sort_unstable();
+                ids.dedup();
+                if !ids.is_empty() {
+                    on_frames(&ids, &dir_str);
+                }
+            }
+            Err(e) => res.failed.push(e.to_string()),
+        }
+    };
+
     let err_buf = Mutex::new(String::new());
+    let mut last_sweep = Instant::now();
     std::thread::scope(|sc| {
         sc.spawn(|| {
             let mut buf = String::new();
             let _ = BufReader::new(err).read_to_string(&mut buf);
             *err_buf.lock().unwrap() = buf;
         });
+        // -progress 大约每 0.5 秒输出一次，顺便定时把新帧入库
         for line in BufReader::new(out).lines().map_while(Result::ok) {
             if let Some(n) = line.trim().strip_prefix("frame=") {
                 if let Ok(v) = n.trim().parse::<u64>() {
                     progress("extract", v, total, 0, &masked);
                 }
             }
+            if last_sweep.elapsed() >= Duration::from_millis(1500) {
+                sweep(false);
+                last_sweep = Instant::now();
+            }
         }
     });
     let _ = child.lock().unwrap().wait();
     extractor.set(None);
+    // 收尾：ffmpeg 已退出，最后一张也写完了。停止 / 断流导致的非零退出码不算失败
+    sweep(true);
+    let frame_count = done_upto;
 
-    // 以实际落盘的帧为准；停止 / 断流导致的非零退出码不算失败，只要抽到了就导入
-    let frames = images::collect(&[frame_dir.clone()]);
-    let frame_count = frames.len();
-    if frames.is_empty() {
-        let _ = fs::remove_dir_all(&frame_dir);
+    // 重复帧、没写完的残帧没有入库，从文件夹里删掉；文件夹空了也删掉
+    let kept: HashSet<String> = {
+        let conn = project.conn.lock();
+        let mut stmt = conn.prepare("SELECT path FROM images WHERE path LIKE ?1")?;
+        let rows = stmt.query_map([format!("{rel_dir}/%")], |r| r.get::<_, String>(0))?;
+        let set: HashSet<String> = rows.flatten().collect();
+        set
+    };
+    if let Ok(rd) = fs::read_dir(&cap_dir) {
+        for e in rd.flatten() {
+            let rel = format!("{rel_dir}/{}", e.file_name().to_string_lossy());
+            if !kept.contains(&rel) {
+                let _ = fs::remove_file(e.path());
+            }
+        }
+    }
+    if fs::read_dir(&cap_dir).map(|mut d| d.next().is_none()).unwrap_or(true) {
+        let _ = fs::remove_dir(&cap_dir);
+        res.dir = None;
+    }
+
+    if frame_count == 0 {
         let e = err_buf.lock().unwrap();
         let lines: Vec<&str> = e.lines().filter(|l| !l.trim().is_empty()).collect();
         let tail = lines[lines.len().saturating_sub(4)..].join("\n");
@@ -437,18 +538,8 @@ pub fn extract_stream(
             format!("采集失败：{tail}")
         }));
     }
-    let imp = images::import(project, &frames, true, &|done, t| {
-        progress("import", done as u64, t as u64, 0, "正在导入抽出的帧");
-    });
-    let _ = fs::remove_dir_all(&frame_dir);
-    let imp = imp?;
-    Ok(ExtractResult {
-        videos: 1,
-        frames: frame_count,
-        added: imp.added,
-        duplicated: imp.duplicated,
-        failed: imp.failed,
-    })
+    res.frames = frame_count;
+    Ok(res)
 }
 
 /// 用 `ffmpeg -i` 读视频时长（秒），从 stderr 的 "Duration: HH:MM:SS.ms" 里解析

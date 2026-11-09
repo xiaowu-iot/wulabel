@@ -114,6 +114,12 @@ struct VideoProgress {
     detail: String,
 }
 
+#[derive(Clone, Serialize)]
+struct StreamFrames {
+    ids: Vec<i64>,
+    dir: String,
+}
+
 /// 视频抽帧：按 every 秒抽 1 帧（每个视频最多 max_frames 帧，0 不限），抽出的帧导入项目
 #[tauri::command]
 pub async fn extract_video(
@@ -181,7 +187,14 @@ pub async fn extract_stream(
                 VideoProgress { stage: stage.to_string(), done, total, speed, detail: detail.to_string() },
             );
         };
-        video::extract_stream(&project, &rt, &ext, &url, every, max_frames, max_minutes, dedup, &progress, &|_line| {})
+        // 边采边入库：新入库的图片 id 推给前端实时显示
+        let b = app.clone();
+        let on_frames = move |ids: &[i64], dir: &str| {
+            let _ = b.emit("stream-frames", StreamFrames { ids: ids.to_vec(), dir: dir.to_string() });
+        };
+        video::extract_stream(
+            &project, &rt, &ext, &url, every, max_frames, max_minutes, dedup, &progress, &on_frames, &|_line| {},
+        )
     })
     .await
     .map_err(|e| msg(format!("采集任务异常：{e}")))?

@@ -174,6 +174,23 @@ pub fn import_mapped(
     copy: bool,
     on_progress: &(dyn Fn(usize, usize) + Sync),
 ) -> AppResult<(ImportResult, HashMap<PathBuf, i64>)> {
+    import_batch(project, files, copy, None, on_progress)
+}
+
+/// 下一个导入批次号
+pub fn next_batch(project: &Project) -> AppResult<i64> {
+    Ok(project.conn.lock().query_row("SELECT COALESCE(MAX(batch), 0) + 1 FROM images", [], |r| r.get(0))?)
+}
+
+/// 同 import_mapped，可以指定批次号。视频流边采边导入时分多次调用、共用一个批次，
+/// 这样「撤销上次导入」能把整次采集一起撤掉。
+pub fn import_batch(
+    project: &Project,
+    files: &[PathBuf],
+    copy: bool,
+    batch: Option<i64>,
+    on_progress: &(dyn Fn(usize, usize) + Sync),
+) -> AppResult<(ImportResult, HashMap<PathBuf, i64>)> {
     let mut map = HashMap::new();
     let total = files.len();
     let done = AtomicUsize::new(0);
@@ -201,7 +218,10 @@ pub fn import_mapped(
             "INSERT INTO images (path, width, height, hash, created_at, batch) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
         let now = db::now();
-        let batch: i64 = tx.query_row("SELECT COALESCE(MAX(batch), 0) + 1 FROM images", [], |r| r.get(0))?;
+        let batch: i64 = match batch {
+            Some(b) => b,
+            None => tx.query_row("SELECT COALESCE(MAX(batch), 0) + 1 FROM images", [], |r| r.get(0))?,
+        };
         for item in prepared {
             let p = match item {
                 Ok(p) => p,

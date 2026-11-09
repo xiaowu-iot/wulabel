@@ -67,6 +67,14 @@ export interface ExtractResult {
   added: number;
   duplicated: number;
   failed: string[];
+  /** 视频流采集的帧保存在哪个文件夹（绝对路径）；本地视频抽帧为 null */
+  dir: string | null;
+}
+
+/** 视频流边采边入库：这一批新入库的图片 id 和保存文件夹 */
+export interface StreamFrames {
+  ids: number[];
+  dir: string;
 }
 
 export interface VideoProgress {
