@@ -230,6 +230,29 @@ export interface TrainConfig {
   device: "auto" | "cpu" | "cuda";
   onlyReviewed: boolean;
   ratios: [number, number, number];
+  /** 用哪个数据集版本训练；空 = 当前数据 */
+  version?: number | null;
+}
+
+export interface VersionInfo {
+  id: number;
+  name: string;
+  note: string;
+  createdAt: number;
+  images: number;
+  annotations: number;
+  train: number;
+  val: number;
+  test: number;
+  classes: { name: string; count: number }[];
+}
+
+/** 版本和当前数据的差别：added 当前新增的图、removed 版本里有当前没有、changed 标注改过的图 */
+export interface VersionDiff {
+  added: number[];
+  removed: number[];
+  changed: number[];
+  classes: { name: string; before: number; after: number }[];
 }
 
 export type RunStatus = "running" | "done" | "stopped" | "failed" | "interrupted";
@@ -244,6 +267,8 @@ export interface RunInfo {
     classes?: string[];
     /** anns：全部标注数（框、多边形、关键点目标、分类标签合计）；老记录只有 boxes */
     images?: { train: number; val: number; test: number; boxes: number; anns?: number };
+    /** 训练用的数据集版本名（用当前数据训练时没有） */
+    versionName?: string;
   };
   bestMap50: number | null;
   createdAt: number;
@@ -434,6 +459,15 @@ export const api = {
   extractStream: (url: string, every: number, maxFrames: number, maxMinutes: number, dedup: boolean) =>
     invoke<ExtractResult>("extract_stream", { url, every, maxFrames, maxMinutes, dedup }),
   stopExtract: () => invoke<void>("stop_extract"),
+  listVersions: () => invoke<VersionInfo[]>("list_versions"),
+  createVersion: (name: string, note: string, ratios: [number, number, number]) =>
+    invoke<VersionInfo>("create_version", { name, note, ratios }),
+  renameVersion: (id: number, name: string, note: string) => invoke<void>("rename_version", { id, name, note }),
+  deleteVersion: (id: number) => invoke<void>("delete_version", { id }),
+  diffVersion: (id: number) => invoke<VersionDiff>("diff_version", { id }),
+  restoreVersion: (id: number) => invoke<{ images: number; missing: number; backup: number | null }>("restore_version", { id }),
+  exportVersion: (id: number, options: { format: DatasetFormat; outDir: string; onlyReviewed: boolean; ratios: [number, number, number] }) =>
+    invoke<ExportResult>("export_version", { id, options }),
   keypointTemplate: () => invoke<KeypointTemplate>("keypoint_template"),
   saveKeypointTemplate: (template: KeypointTemplate) => invoke<void>("save_keypoint_template", { template }),
   listImages: (status: string | null, offset: number, limit: number) =>

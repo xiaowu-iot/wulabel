@@ -16,6 +16,7 @@ mod protocol;
 mod runtime;
 mod state;
 mod training;
+mod versions;
 mod video;
 
 use std::path::PathBuf;
@@ -68,6 +69,13 @@ pub fn run() {
             commands::stop_extract,
             commands::keypoint_template,
             commands::save_keypoint_template,
+            commands::list_versions,
+            commands::create_version,
+            commands::rename_version,
+            commands::delete_version,
+            commands::diff_version,
+            commands::restore_version,
+            commands::export_version,
             commands::sam_segment,
             commands::text_detect,
             commands::text_prelabel_all,

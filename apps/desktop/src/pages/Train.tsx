@@ -8,9 +8,10 @@ import {
   StopOutlined,
 } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { api, EnvStatus, errText, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, Task, TrainConfig } from "../api";
+import { api, EnvStatus, errText, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, Task, TrainConfig, VersionInfo } from "../api";
 import { prefs, useApp } from "../store";
 import LineChart from "../components/LineChart";
+import RunCompare from "../components/RunCompare";
 
 /** 内置模型，和 worker/xlabel_worker/models.py 的 MODELS 对应。oneStage：单阶段检测，部署到 TensorRT / NPU 更顺 */
 export const MODELS: { value: string; name: string; desc: string; task: Task; oneStage?: boolean; fixedSize?: number }[] = [
@@ -88,6 +89,9 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const [prog, setProg] = useState<ProgressEv | null>(null);
   const [starting, setStarting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [versions, setVersions] = useState<VersionInfo[]>([]);
+  const [compareIds, setCompareIds] = useState<number[]>([]);
+  const [comparing, setComparing] = useState(false);
   const selRef = useRef<number | null>(null);
   selRef.current = sel;
   const logBox = useRef<HTMLDivElement>(null);
@@ -136,6 +140,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
         message.error(errText(e));
       }
       api.envStatus(false).then(setEnv).catch(() => {});
+      api.listVersions().then(setVersions).catch(() => {});
     })();
   }, [loadRuns, message]);
 
@@ -186,7 +191,8 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const start = async () => {
     setStarting(true);
     try {
-      const id = await api.startTraining(cfg);
+      // 记住的版本可能已经被删掉了，那就用当前数据
+      const id = await api.startTraining({ ...cfg, version: useVersion ? cfg.version : null });
       await loadRuns();
       setSel(id);
       setSplit(await api.splitSummary());
@@ -204,6 +210,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const metrics = detail?.metrics ?? [];
   const epochs = run?.config?.epochs ?? cfg.epochs;
   const gpuMem = env?.gpu?.vramMb ?? 0;
+  const useVersion = cfg.version != null && versions.some((v) => v.id === cfg.version);
   const recommended = recommendModel(task, gpuMem);
   const taskWord = { detect: "检测", segment: "实例分割", pose: "关键点", classify: "图像分类" }[task];
   const unitWord = task === "classify" ? "张图" : task === "pose" ? "个目标" : "个框";
@@ -318,6 +325,17 @@ export default function Train({ project }: { project: ProjectInfo }) {
                   <InputNumber min={1} max={64} value={cfg.batch} onChange={(v) => update({ batch: Number(v ?? 4) })} />
                 </Form.Item>
               </Space>
+              <Form.Item label="训练数据" tooltip="选一个数据集版本训练，方便对比不同数据的效果；版本在「数据 → 管理 → 数据集版本」里保存">
+                <Select
+                  style={{ width: "100%" }}
+                  value={cfg.version != null && versions.some((v) => v.id === cfg.version) ? cfg.version : 0}
+                  onChange={(v) => update({ version: v === 0 ? null : v })}
+                  options={[
+                    { value: 0, label: `当前数据（${trainable} 张）` },
+                    ...versions.map((v) => ({ value: v.id, label: `版本「${v.name}」（${v.images} 张，${new Date(v.createdAt * 1000).toLocaleDateString()}）` })),
+                  ]}
+                />
+              </Form.Item>
               <Form.Item label="设备">
                 <Radio.Group value={cfg.device} onChange={(e) => update({ device: e.target.value })}>
                   <Radio value="auto">自动（有显卡用显卡）</Radio>
@@ -329,7 +347,14 @@ export default function Train({ project }: { project: ProjectInfo }) {
                   只用已审核的图片
                 </Checkbox>
               </Form.Item>
-              <Button type="primary" block icon={<CaretRightOutlined />} loading={starting} disabled={running || trainable === 0 || (env != null && !env.ready)} onClick={start}>
+              <Button
+                type="primary"
+                block
+                icon={<CaretRightOutlined />}
+                loading={starting}
+                disabled={running || (!useVersion && trainable === 0) || (env != null && !env.ready)}
+                onClick={start}
+              >
                 {running ? "已有训练在进行" : "开始训练"}
               </Button>
             </Form>
@@ -422,16 +447,27 @@ export default function Train({ project }: { project: ProjectInfo }) {
             </>
           )}
           <div className="card">
-            <div className="muted" style={{ marginBottom: 6 }}>训练记录</div>
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+              <span className="muted">训练记录 <span className="dim">· 勾选两次以上可以对比</span></span>
+              <Button size="small" disabled={compareIds.length < 2} onClick={() => setComparing(true)}>
+                对比所选{compareIds.length >= 2 ? `（${compareIds.length}）` : ""}
+              </Button>
+            </div>
             <Table<RunInfo>
               size="small"
               rowKey="id"
               dataSource={runs}
               pagination={false}
+              rowSelection={{
+                selectedRowKeys: compareIds,
+                onChange: (keys) => setCompareIds((keys as number[]).slice(0, 8)),
+                getCheckboxProps: (r) => ({ disabled: r.status === "running" }),
+              }}
               onRow={(r) => ({ onClick: () => setSel(r.id), style: { cursor: "pointer", background: r.id === sel ? "rgba(61,139,253,.12)" : undefined } })}
               columns={[
                 { title: "时间", dataIndex: "createdAt", render: fmtTime },
                 { title: "模型", render: (_, r) => MODELS.find((m) => m.value === r.config?.model)?.name ?? r.config?.model },
+                { title: "数据", render: (_, r) => r.config?.versionName ?? <span className="dim">当前数据</span> },
                 { title: "轮数", render: (_, r) => r.config?.epochs },
                 { title: mn.m50, dataIndex: "bestMap50", render: (v: number | null) => (v == null ? "—" : v.toFixed(3)) },
                 { title: "状态", dataIndex: "status", render: (s: RunStatus) => <Tag color={RUN_STATUS[s].color}>{RUN_STATUS[s].text}</Tag> },
@@ -440,6 +476,12 @@ export default function Train({ project }: { project: ProjectInfo }) {
           </div>
         </div>
       </div>
+      <RunCompare
+        open={comparing}
+        task={task}
+        runs={runs.filter((r) => compareIds.includes(r.id))}
+        onClose={() => setComparing(false)}
+      />
     </div>
   );
 }

@@ -91,6 +91,40 @@ fn migrate(conn: &Connection) -> AppResult<()> {
              COMMIT;",
         )?;
     }
+    if version < 4 {
+        // 数据集版本：可训练图片和标注的快照。标注按类别名保存，之后改名、删类别都不影响已有版本
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE dataset_versions (
+                 id         INTEGER PRIMARY KEY,
+                 name       TEXT    NOT NULL,
+                 note       TEXT    NOT NULL DEFAULT '',
+                 created_at INTEGER NOT NULL,
+                 classes_json TEXT  NOT NULL      -- 快照时的类别名（按顺序）
+             );
+             CREATE TABLE version_images (
+                 version_id INTEGER NOT NULL REFERENCES dataset_versions(id) ON DELETE CASCADE,
+                 image_id   INTEGER NOT NULL,
+                 path       TEXT    NOT NULL,
+                 width      INTEGER NOT NULL,
+                 height     INTEGER NOT NULL,
+                 hash       TEXT    NOT NULL,
+                 split      TEXT    NOT NULL,
+                 status     TEXT    NOT NULL,
+                 PRIMARY KEY (version_id, image_id)
+             );
+             CREATE TABLE version_annotations (
+                 version_id INTEGER NOT NULL REFERENCES dataset_versions(id) ON DELETE CASCADE,
+                 image_id   INTEGER NOT NULL,
+                 label_name TEXT,
+                 type       TEXT    NOT NULL,
+                 data_json  TEXT    NOT NULL
+             );
+             CREATE INDEX idx_va_version ON version_annotations(version_id, image_id);
+             PRAGMA user_version = 4;
+             COMMIT;",
+        )?;
+    }
     Ok(())
 }
 

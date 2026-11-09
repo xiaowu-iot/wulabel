@@ -3,6 +3,7 @@ import { App, Button, Checkbox, Dropdown, Empty, Input, InputNumber, Modal, Pagi
 import {
   CheckSquareOutlined,
   ClearOutlined,
+  HistoryOutlined,
   DatabaseOutlined,
   DownOutlined,
   ExportOutlined,
@@ -32,6 +33,7 @@ import {
 import { prefs, useApp } from "../store";
 import ImageViewer from "../components/ImageViewer";
 import ExportModal from "../components/ExportModal";
+import VersionsModal from "../components/VersionsModal";
 
 const PAGE_SIZE = 120;
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
@@ -68,6 +70,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [last, setLast] = useState<LastImport | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
   const [videoPaths, setVideoPaths] = useState<string[]>([]);
   const [videoEvery, setVideoEvery] = useState(Number(prefs.get("videoEvery", "1")));
   const [videoMax, setVideoMax] = useState(Number(prefs.get("videoMax", "0")));
@@ -479,12 +482,14 @@ export default function Data({ project }: { project: ProjectInfo }) {
                   label: last ? `撤销上次导入（${last.count} 张）` : "撤销上次导入",
                   disabled: !last,
                 },
+                { key: "versions", icon: <HistoryOutlined />, label: "数据集版本（保存快照、对比、恢复）" },
                 { key: "select", icon: <CheckSquareOutlined />, label: "选择图片删除" },
                 { type: "divider" },
                 { key: "all", icon: <ClearOutlined />, label: `清空全部图片（${s.total} 张）`, danger: true },
               ],
               onClick: ({ key }) => {
                 if (key === "last" && last) confirmDelete(`撤销上次导入，删除这 ${last.count} 张图片？`, "last");
+                if (key === "versions") setShowVersions(true);
                 if (key === "select") {
                   setSelecting(true);
                   setSelected(new Set());
@@ -605,6 +610,14 @@ export default function Data({ project }: { project: ProjectInfo }) {
       />
 
       <ExportModal project={project} open={showExport} onClose={() => setShowExport(false)} />
+      <VersionsModal
+        project={project}
+        open={showVersions}
+        onClose={() => {
+          setShowVersions(false);
+          load();
+        }}
+      />
 
       <Modal open={!!progress} closable={false} footer={null} maskClosable={false} title="正在导入">
         <Progress percent={progress && progress.total ? Math.floor((progress.done / progress.total) * 100) : 0} />

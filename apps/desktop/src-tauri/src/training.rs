@@ -33,6 +33,9 @@ pub struct TrainConfig {
     pub only_reviewed: bool,
     #[serde(default = "default_ratios")]
     pub ratios: [f64; 3],
+    /// 用哪个数据集版本训练；为空用当前数据
+    #[serde(default)]
+    pub version: Option<i64>,
 }
 
 fn default_lr() -> f64 {
@@ -197,11 +200,11 @@ pub fn start(p: Arc<Project>, rt: &Runtime, jobs: Arc<Jobs>, cfg: TrainConfig, s
     let ds = dir.join("dataset");
     // 分类项目导出分类文件夹，其他任务导出 COCO（框、多边形、关键点都在里面）
     let format = if p.meta.task == "classify" { Format::Cls } else { Format::Coco };
-    let res = dataset::export(
-        &p,
-        &ExportOptions { format, out_dir: ds.clone(), only_reviewed: cfg.only_reviewed, ratios: cfg.ratios },
-        &|_, _| {},
-    )
+    let opts = ExportOptions { format, out_dir: ds.clone(), only_reviewed: cfg.only_reviewed, ratios: cfg.ratios };
+    let res = match cfg.version {
+        Some(v) => dataset::export_version(&p, v, &opts, &|_, _| {}),
+        None => dataset::export(&p, &opts, &|_, _| {}),
+    }
     .inspect_err(|_| {
         let _ = fs::remove_dir_all(&dir);
     })?;
@@ -235,6 +238,9 @@ pub fn start(p: Arc<Project>, rt: &Runtime, jobs: Arc<Jobs>, cfg: TrainConfig, s
         "train": res.train, "val": res.val, "test": res.test,
         "boxes": res.boxes, "polys": res.polys, "anns": res.total(),
     });
+    if let Some(v) = cfg.version {
+        saved["versionName"] = serde_json::json!(crate::versions::name_of(&p, v).unwrap_or_default());
+    }
     let id = {
         let conn = p.conn.lock();
         conn.execute(
@@ -779,6 +785,7 @@ mod tests {
             device: "cpu".into(),
             only_reviewed: false,
             ratios: [0.75, 0.25, 0.0],
+            version: None,
         };
         let id = start(p.clone(), &rt, jobs.clone(), cfg, Arc::new(move |_, e| ev2.lock().push(e))).unwrap();
         assert!(start(p.clone(), &rt, jobs.clone(), TrainConfig { epochs: 1, ..serde_json::from_value(get_run(&p, id).unwrap().config).unwrap() }, Arc::new(|_, _| {})).is_err(), "同时只能一个训练");

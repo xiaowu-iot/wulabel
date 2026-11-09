@@ -17,6 +17,7 @@ use crate::keypoints::{self, Template};
 use crate::project::{self, Project, ProjectInfo, RecentProject, Stats};
 use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
 use crate::state::AppState;
+use crate::versions;
 use crate::video;
 use crate::training::{self, Jobs, Predictor, PredResult, PrelabelResult, RunDetail, RunInfo, TrainConfig};
 
@@ -201,6 +202,54 @@ pub async fn extract_stream(
     })
     .await
     .map_err(|e| msg(format!("采集任务异常：{e}")))?
+}
+
+// ---------- 数据集版本 ----------
+
+#[tauri::command]
+pub async fn list_versions(state: State<'_, AppState>) -> AppResult<Vec<versions::VersionInfo>> {
+    versions::list(&state.current()?)
+}
+
+#[tauri::command]
+pub async fn create_version(
+    state: State<'_, AppState>,
+    name: String,
+    note: String,
+    ratios: [f64; 3],
+) -> AppResult<versions::VersionInfo> {
+    versions::create(&state.current()?, &name, &note, ratios)
+}
+
+#[tauri::command]
+pub async fn rename_version(state: State<'_, AppState>, id: i64, name: String, note: String) -> AppResult<()> {
+    versions::rename(&state.current()?, id, &name, &note)
+}
+
+#[tauri::command]
+pub async fn delete_version(state: State<'_, AppState>, id: i64) -> AppResult<()> {
+    versions::delete(&state.current()?, id)
+}
+
+#[tauri::command]
+pub async fn diff_version(state: State<'_, AppState>, id: i64) -> AppResult<versions::VersionDiff> {
+    versions::diff(&state.current()?, id)
+}
+
+#[tauri::command]
+pub async fn restore_version(state: State<'_, AppState>, id: i64) -> AppResult<versions::RestoreResult> {
+    versions::restore(&state.current()?, id)
+}
+
+#[tauri::command]
+pub async fn export_version(app: AppHandle, state: State<'_, AppState>, id: i64, options: ExportOptions) -> AppResult<ExportResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app.clone(), "export-progress");
+        dataset::export_version(&project, id, &options, &progress)
+    })
+    .await
+    .map_err(|e| msg(format!("导出异常：{e}")))?
 }
 
 /// 关键点项目的模板（点名 + 骨架），没有时返回默认的 COCO 人体 17 点

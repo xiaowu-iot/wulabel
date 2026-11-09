@@ -3,7 +3,7 @@ import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Progress, Radio
 import { FolderOpenOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, DatasetFormat, errText, ExportResult, ImportProgress, ProjectInfo, SplitSummary, Task } from "../api";
+import { api, DatasetFormat, errText, ExportResult, ImportProgress, ProjectInfo, SplitSummary, Task, VersionInfo } from "../api";
 import { prefs } from "../store";
 
 /** 各任务能导出的格式 */
@@ -41,7 +41,18 @@ const stamp = () => {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
 };
 
-export default function ExportModal({ project, open: visible, onClose }: { project: ProjectInfo; open: boolean; onClose: () => void }) {
+/** version 不为空时导出这个数据集版本（划分固定，不能改比例） */
+export default function ExportModal({
+  project,
+  open: visible,
+  onClose,
+  version = null,
+}: {
+  project: ProjectInfo;
+  open: boolean;
+  onClose: () => void;
+  version?: VersionInfo | null;
+}) {
   const { message, modal } = App.useApp();
   const formats = FORMATS[project.task];
   const [format, setFormat] = useState<DatasetFormat>(() => {
@@ -57,9 +68,10 @@ export default function ExportModal({ project, open: visible, onClose }: { proje
 
   useEffect(() => {
     if (!visible) return;
-    setName(`${project.name}_${format}_${stamp()}`);
+    const tag = version ? `${version.name}_` : "";
+    setName(`${project.name}_${tag}${format}_${stamp()}`.replace(/[\\/:*?"<>|]/g, "_"));
     api.splitSummary().then(setSummary).catch(() => {});
-  }, [visible, project.name, format]);
+  }, [visible, project.name, format, version]);
 
   const total = summary ? summary.train + summary.val + summary.test + summary.unset : 0;
   const sep = parent.includes("\\") ? "\\" : "/";
@@ -95,7 +107,8 @@ export default function ExportModal({ project, open: visible, onClose }: { proje
     setProgress({ done: 0, total: 0 });
     const un = await listen<ImportProgress>("export-progress", (e) => setProgress(e.payload));
     try {
-      const res = await api.exportDataset({ format, outDir, onlyReviewed, ratios: r() });
+      const options = { format, outDir, onlyReviewed, ratios: r() };
+      const res = version ? await api.exportVersion(version.id, options) : await api.exportDataset(options);
       prefs.set("exportFormat", format);
       prefs.set("exportParent", parent);
       onClose();
@@ -123,7 +136,7 @@ export default function ExportModal({ project, open: visible, onClose }: { proje
 
   return (
     <Modal
-      title="导出数据集"
+      title={version ? `导出数据集版本「${version.name}」` : "导出数据集"}
       open={visible}
       onCancel={onClose}
       onOk={run}
@@ -157,6 +170,13 @@ export default function ExportModal({ project, open: visible, onClose }: { proje
             只导出已审核的图片
           </Checkbox>
         </Form.Item>
+        {version ? (
+          <Form.Item label="划分">
+            <span className="muted">
+              版本里固定的划分：训练 {version.train} · 验证 {version.val} · 测试 {version.test}（共 {version.images} 张）
+            </span>
+          </Form.Item>
+        ) : (
         <Form.Item
           label="训练 / 验证 / 测试 比例（%）"
           extra={
@@ -191,6 +211,7 @@ export default function ExportModal({ project, open: visible, onClose }: { proje
             ))}
           </Space>
         </Form.Item>
+        )}
         <Form.Item label="导出到" extra={outDir && <span style={{ wordBreak: "break-all" }}>{outDir}</span>}>
           <Space.Compact style={{ width: "100%" }}>
             <Input value={parent} placeholder="选择存放位置" onChange={(e) => setParent(e.target.value)} />

@@ -240,41 +240,53 @@ pub fn collect(p: &Project, only_reviewed: bool) -> AppResult<(Vec<String>, Vec<
         let (image_id, label_id, kind, data) = row?;
         let (Some(&i), Some(label_id)) = (pos.get(&image_id), label_id) else { continue };
         let Some(&cls) = index.get(&label_id) else { continue };
-        match kind.as_str() {
-            "tag" => {
-                if images[i].tag.is_none() {
-                    images[i].tag = Some(cls);
-                }
+        push_annotation(&mut images[i], cls, &kind, &data);
+    }
+    dedupe_names(&mut images);
+    Ok((labels.into_iter().map(|(_, n)| n).collect(), images))
+}
+
+/// 把一条标注（类型 + data_json）放进导出图片
+pub fn push_annotation(im: &mut ExportImage, cls: usize, kind: &str, data: &str) {
+    match kind {
+        "tag" => {
+            if im.tag.is_none() {
+                im.tag = Some(cls);
             }
-            "keypoints" => {
-                let value: serde_json::Value = serde_json::from_str(&data).unwrap_or_default();
-                if let Some((b, k)) = crate::keypoints::parse(&value) {
-                    if b[2] > 0.0 && b[3] > 0.0 {
-                        images[i].kpts.push((cls, b, k));
-                    }
-                }
-            }
-            _ => {
-                let v: Vec<f64> = serde_json::from_str(&data).unwrap_or_default();
-                if kind == "bbox" {
-                    if v.len() == 4 && v[2] > 0.0 && v[3] > 0.0 {
-                        images[i].boxes.push((cls, v[0], v[1], v[2], v[3]));
-                    }
-                } else if v.len() >= 6 && v.len() % 2 == 0 {
-                    images[i].polys.push((cls, v));
+        }
+        "keypoints" => {
+            let value: serde_json::Value = serde_json::from_str(data).unwrap_or_default();
+            if let Some((b, k)) = crate::keypoints::parse(&value) {
+                if b[2] > 0.0 && b[3] > 0.0 {
+                    im.kpts.push((cls, b, k));
                 }
             }
         }
+        "bbox" => {
+            let v: Vec<f64> = serde_json::from_str(data).unwrap_or_default();
+            if v.len() == 4 && v[2] > 0.0 && v[3] > 0.0 {
+                im.boxes.push((cls, v[0], v[1], v[2], v[3]));
+            }
+        }
+        "polygon" => {
+            let v: Vec<f64> = serde_json::from_str(data).unwrap_or_default();
+            if v.len() >= 6 && v.len() % 2 == 0 {
+                im.polys.push((cls, v));
+            }
+        }
+        _ => {}
     }
-    // 不同文件夹里的同名图片，导出时加上 id 区分
+}
+
+/// 不同文件夹里的同名图片，导出时加上 id 区分
+pub fn dedupe_names(images: &mut [ExportImage]) {
     let mut seen = HashSet::new();
-    for im in &mut images {
+    for im in images.iter_mut() {
         if !seen.insert(im.file_name.to_lowercase()) {
             im.file_name = format!("{}_{}", im.id, im.file_name);
             seen.insert(im.file_name.to_lowercase());
         }
     }
-    Ok((labels.into_iter().map(|(_, n)| n).collect(), images))
 }
 
 /// 优先硬链接（不占额外空间），跨盘时退回复制
@@ -301,17 +313,41 @@ fn yaml_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)) -> AppResult<ExportResult> {
+fn check_format(p: &Project, f: Format) -> AppResult<()> {
     let classify = p.meta.task == "classify";
-    if classify && opts.format != Format::Cls {
+    if classify && f != Format::Cls {
         return Err(msg("图像分类项目请导出为「分类文件夹」格式"));
     }
-    if !classify && opts.format == Format::Cls {
+    if !classify && f == Format::Cls {
         return Err(msg("「分类文件夹」格式只适合图像分类项目"));
     }
+    Ok(())
+}
+
+/// 导出当前数据
+pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)) -> AppResult<ExportResult> {
+    check_format(p, opts.format)?;
     // 还没划分的图先按比例划分，并记到库里，下次导出结果一致
     assign_splits(p, opts.ratios, false)?;
-    let (classes, mut images) = collect(p, opts.only_reviewed)?;
+    let (classes, images) = collect(p, opts.only_reviewed)?;
+    write(p, opts, classes, images, progress)
+}
+
+/// 导出某个数据集版本（划分用版本里记下的，不重新分配）
+pub fn export_version(p: &Project, version_id: i64, opts: &ExportOptions, progress: &dyn Fn(usize, usize)) -> AppResult<ExportResult> {
+    check_format(p, opts.format)?;
+    let (classes, images) = crate::versions::collect(p, version_id, opts.only_reviewed)?;
+    write(p, opts, classes, images, progress)
+}
+
+fn write(
+    p: &Project,
+    opts: &ExportOptions,
+    classes: Vec<String>,
+    mut images: Vec<ExportImage>,
+    progress: &dyn Fn(usize, usize),
+) -> AppResult<ExportResult> {
+    let classify = p.meta.task == "classify";
     if classify {
         // 没打类别标签的图对分类没有用
         images.retain(|im| im.tag.is_some());
