@@ -1,9 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Descriptions, Input, Radio, Select, Space, Spin, Tag } from "antd";
-import { CheckCircleOutlined, FolderOpenOutlined, ReloadOutlined, ToolOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Descriptions, Input, Progress, Radio, Select, Space, Spin, Tag } from "antd";
+import { CheckCircleOutlined, FolderOpenOutlined, ReloadOutlined, ThunderboltOutlined, ToolOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, EnvStatus, errText } from "../api";
+import { api, EnvStatus, errText, SpeedResult } from "../api";
+
+interface DlProgress {
+  file: string;
+  downloaded: number;
+  total: number;
+  speed: number;
+}
+
+const fmtSize = (b: number) => (b >= 1 << 30 ? `${(b / 2 ** 30).toFixed(2)} GB` : `${(b / 2 ** 20).toFixed(1)} MB`);
+const fmtSpeed = (b: number) => (b >= 1 << 20 ? `${(b / 2 ** 20).toFixed(1)} MB/s` : `${(b / 1024).toFixed(0)} KB/s`);
+const fmtEta = (p: DlProgress) => {
+  if (!p.speed || p.total <= p.downloaded) return "";
+  const s = Math.round((p.total - p.downloaded) / p.speed);
+  return s >= 60 ? ` · 剩余约 ${Math.floor(s / 60)} 分 ${s % 60} 秒` : ` · 剩余约 ${s} 秒`;
+};
 
 const VARIANTS = [
   { value: "cu130", label: "CUDA 13.0（需要较新的驱动）" },
@@ -20,8 +35,11 @@ export default function Settings() {
   const [installing, setInstalling] = useState(false);
   const [variant, setVariant] = useState<string | null>(null);
   const [lines, setLines] = useState<string[]>([]);
+  const [progress, setProgress] = useState<DlProgress | null>(null);
   const [python, setPython] = useState("");
   const [root, setRoot] = useState("");
+  const [speed, setSpeed] = useState<SpeedResult | null>(null);
+  const [testing, setTesting] = useState(false);
   const logBox = useRef<HTMLDivElement>(null);
 
   const load = useCallback(
@@ -51,8 +69,10 @@ export default function Settings() {
       setLines((ls) => [...ls.slice(-400), e.payload]);
       requestAnimationFrame(() => logBox.current?.scrollTo(0, logBox.current.scrollHeight));
     });
+    const up = listen<DlProgress>("env-progress", (e) => setProgress(e.payload));
     return () => {
       un.then((f) => f());
+      up.then((f) => f());
     };
   }, []);
 
@@ -60,6 +80,7 @@ export default function Settings() {
     const v = variant ?? st?.variant ?? "cpu";
     setInstalling(true);
     setLines([]);
+    setProgress(null);
     try {
       await api.envInstall(v);
       message.success("训练环境安装完成");
@@ -67,7 +88,26 @@ export default function Settings() {
       modal.error({ title: "安装没有完成", content: <pre style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{errText(e)}</pre>, width: 640 });
     } finally {
       setInstalling(false);
+      setProgress(null);
       load(true);
+    }
+  };
+
+  const runSpeedTest = async () => {
+    const v = variant ?? st?.variant ?? "cpu";
+    setTesting(true);
+    setSpeed(null);
+    try {
+      const r = await api.speedTest(v);
+      setSpeed(r);
+      if (r.recommend !== (st?.settings.mirror ?? "china")) {
+        await saveSettings({ mirror: r.recommend });
+      }
+      message.success(`推荐使用${r.recommend === "china" ? "国内镜像" : "官方源"}，已自动选择`);
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -155,6 +195,16 @@ export default function Settings() {
               </div>
             )}
 
+            {installing && progress && progress.total > 0 && (
+              <div style={{ marginTop: 12 }}>
+                <Progress percent={Math.floor((progress.downloaded / progress.total) * 100)} status="active" />
+                <div className="dim" style={{ fontSize: 12 }}>
+                  {progress.file} · {fmtSize(progress.downloaded)} / {fmtSize(progress.total)} · {fmtSpeed(progress.speed)}
+                  {fmtEta(progress)}
+                </div>
+              </div>
+            )}
+
             {(installing || lines.length > 0) && (
               <div
                 ref={logBox}
@@ -168,13 +218,27 @@ export default function Settings() {
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 15, marginTop: 0 }}>下载源</h2>
+        <div className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+          <h2 style={{ fontSize: 15, margin: 0 }}>下载源</h2>
+          <Button size="small" icon={<ThunderboltOutlined />} loading={testing} onClick={runSpeedTest}>
+            测速并推荐
+          </Button>
+        </div>
         <Radio.Group value={st?.settings.mirror ?? "china"} onChange={(e) => saveSettings({ mirror: e.target.value })}>
           <Space direction="vertical">
-            <Radio value="china">国内镜像（阿里云、清华、npmmirror，推荐国内使用）</Radio>
-            <Radio value="official">官方源（PyPI、download.pytorch.org）</Radio>
+            <Radio value="china">
+              国内镜像（阿里云、清华、npmmirror，推荐国内使用）
+              {speed?.china != null && <Tag style={{ marginLeft: 8 }} color={speed.recommend === "china" ? "success" : "default"}>{speed.china.toFixed(1)} MB/s{speed.recommend === "china" ? " · 更快" : ""}</Tag>}
+              {speed != null && speed.china == null && <Tag style={{ marginLeft: 8 }}>连不上</Tag>}
+            </Radio>
+            <Radio value="official">
+              官方源（PyPI、download.pytorch.org）
+              {speed?.official != null && <Tag style={{ marginLeft: 8 }} color={speed.recommend === "official" ? "success" : "default"}>{speed.official.toFixed(1)} MB/s{speed.recommend === "official" ? " · 更快" : ""}</Tag>}
+              {speed != null && speed.official == null && <Tag style={{ marginLeft: 8 }}>连不上</Tag>}
+            </Radio>
           </Space>
         </Radio.Group>
+        <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>点「测速并推荐」会分别从两个源各拉几 MB 实测，自动勾选更快的。</div>
       </div>
 
       <div className="card">

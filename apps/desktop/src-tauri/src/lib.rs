@@ -76,6 +76,7 @@ pub fn run() {
             commands::env_status,
             commands::save_settings,
             commands::env_install,
+            commands::speed_test,
             commands::list_runs,
             commands::run_detail,
             commands::running_run,

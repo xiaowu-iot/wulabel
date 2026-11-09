@@ -1,7 +1,7 @@
 //! 训练环境：设置、显卡检测、uv 下载、Python + PyTorch 安装、运行 worker
 
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -226,8 +226,14 @@ impl Runtime {
         run_logged(c, log)
     }
 
-    /// 安装训练环境：uv → Python → PyTorch → 其他依赖 → 自检。log 收到每一行输出。
-    pub fn install(&self, variant: &str, log: &(dyn Fn(String) + Sync)) -> AppResult<()> {
+    /// 安装训练环境：uv → Python → PyTorch → 其他依赖 → 自检。
+    /// log 收到每一行输出；progress 收到大文件下载进度（文件名、已下载字节、总字节、瞬时速度 字节/秒）。
+    pub fn install(
+        &self,
+        variant: &str,
+        log: &(dyn Fn(String) + Sync),
+        progress: &(dyn Fn(&str, u64, u64, u64) + Sync),
+    ) -> AppResult<()> {
         {
             let mut g = self.installing.lock();
             if *g {
@@ -235,13 +241,18 @@ impl Runtime {
             }
             *g = true;
         }
-        let r = self.install_inner(variant, log);
+        let r = self.install_inner(variant, log, progress);
         *self.installing.lock() = false;
         *self.check_cache.lock() = None;
         r
     }
 
-    fn install_inner(&self, variant: &str, log: &(dyn Fn(String) + Sync)) -> AppResult<()> {
+    fn install_inner(
+        &self,
+        variant: &str,
+        log: &(dyn Fn(String) + Sync),
+        progress: &(dyn Fn(&str, u64, u64, u64) + Sync),
+    ) -> AppResult<()> {
         let china = self.settings().mirror == "china";
         log(format!("【1/5】准备 uv（Python 环境管理工具）"));
         let uv = match self.uv() {
@@ -264,10 +275,11 @@ impl Runtime {
         log(format!("【3/5】安装 PyTorch（{variant}，约 {}，耗时最长）", if variant == "cpu" { "200MB" } else { "3GB" }));
         let pypi = if china { "https://mirrors.aliyun.com/pypi/simple" } else { "https://pypi.org/simple" };
         let official = format!("https://download.pytorch.org/whl/{variant}");
-        let mut c = command(&uv);
-        c.args(["pip", "install", "--python"]).arg(&py);
         if variant == "cpu" {
+            let mut c = command(&uv);
+            c.args(["pip", "install", "--python"]).arg(&py);
             c.args(["torch", "torchvision", "--index-url"]).arg(&official).args(["--extra-index-url", pypi]);
+            run_logged(c, log)?;
         } else {
             // 精确指定带 +cuXXX 的版本，避免装成同版本号的 CPU 包
             let page = http_get_text(&format!("{official}/torch/"))
@@ -276,23 +288,44 @@ impl Runtime {
                 .ok_or_else(|| msg(format!("PyTorch 官方没有适合这台电脑的 {variant} 版本")))?;
             let vision_v = torchvision_for(&torch_v);
             log(format!("选择 torch {torch_v}+{variant}、torchvision {vision_v}+{variant}"));
-            c.arg(format!("torch=={torch_v}+{variant}")).arg(format!("torchvision=={vision_v}+{variant}"));
             let on_aliyun = china
                 && http_get_text(&format!("https://mirrors.aliyun.com/pytorch-wheels/{variant}/"))
                     .ok()
                     .and_then(|p| best_version_matching(&p, "torch", variant, &torch_v))
                     .is_some();
-            if on_aliyun {
+            let base = if on_aliyun {
                 log("阿里云镜像有这个版本，从国内镜像下载".into());
-                c.args(["--index-url", pypi, "--find-links"]).arg(format!("https://mirrors.aliyun.com/pytorch-wheels/{variant}/"));
+                format!("https://mirrors.aliyun.com/pytorch-wheels/{variant}")
             } else {
                 if china {
                     log("国内镜像还没有这个版本，从 PyTorch 官方下载".into());
                 }
-                c.args(["--index-url"]).arg(&official).args(["--extra-index-url", pypi]);
+                official.clone()
+            };
+            // 先把两个大 wheel 自己下下来（带进度条），再本地安装；任何环节出错则退回 uv 直接装
+            match self.download_wheels(&base, &torch_v, &vision_v, variant, log, progress) {
+                Ok((torch_whl, vision_whl)) => {
+                    log("下载完成，正在安装…".into());
+                    let mut c = command(&uv);
+                    c.args(["pip", "install", "--python"]).arg(&py).arg(&torch_whl).arg(&vision_whl);
+                    c.args(["--index-url", pypi]);
+                    run_logged(c, log)?;
+                    let _ = fs::remove_dir_all(self.root().join("wheels"));
+                }
+                Err(e) => {
+                    log(format!("自带下载不可用（{e}），改用 uv 下载"));
+                    let mut c = command(&uv);
+                    c.args(["pip", "install", "--python"]).arg(&py);
+                    c.arg(format!("torch=={torch_v}+{variant}")).arg(format!("torchvision=={vision_v}+{variant}"));
+                    if on_aliyun {
+                        c.args(["--index-url", pypi, "--find-links"]).arg(format!("https://mirrors.aliyun.com/pytorch-wheels/{variant}/"));
+                    } else {
+                        c.args(["--index-url"]).arg(&official).args(["--extra-index-url", pypi]);
+                    }
+                    run_logged(c, log)?;
+                }
             }
         }
-        run_logged(c, log)?;
         if !cuda_matches(&py, variant, &self.worker_dir) {
             return Err(msg("装好的 PyTorch 不是显卡版本，请改用「官方源」后重新安装"));
         }
@@ -314,6 +347,122 @@ impl Runtime {
         }
         Ok(())
     }
+
+    /// 自己下载 torch / torchvision 两个大 wheel（带进度回调），返回本地文件路径
+    fn download_wheels(
+        &self,
+        base: &str,
+        torch_v: &str,
+        vision_v: &str,
+        variant: &str,
+        log: &(dyn Fn(String) + Sync),
+        progress: &(dyn Fn(&str, u64, u64, u64) + Sync),
+    ) -> AppResult<(PathBuf, PathBuf)> {
+        let dir = self.root().join("wheels");
+        fs::create_dir_all(&dir)?;
+        let torch_whl = dir.join(format!("torch-{torch_v}+{variant}{}", wheel_suffix()));
+        let vision_whl = dir.join(format!("torchvision-{vision_v}+{variant}{}", wheel_suffix()));
+        log(format!("下载 torch（{torch_v}+{variant}）"));
+        download_file(&wheel_url(base, "torch", torch_v, variant), &torch_whl, &|d, t, s| progress("torch", d, t, s))?;
+        log(format!("下载 torchvision（{vision_v}+{variant}）"));
+        download_file(&wheel_url(base, "torchvision", vision_v, variant), &vision_whl, &|d, t, s| progress("torchvision", d, t, s))?;
+        Ok((torch_whl, vision_whl))
+    }
+}
+
+/// torch / torchvision 的 wheel 直链（URL 里 + 要转义成 %2B）
+fn wheel_url(base: &str, pkg: &str, version: &str, variant: &str) -> String {
+    format!("{base}/{pkg}-{version}%2B{variant}{}", wheel_suffix())
+}
+
+/// 流式下载到文件，边下边回调（已下载字节、总字节、瞬时速度 字节/秒）
+fn download_file(url: &str, dest: &Path, progress: &(dyn Fn(u64, u64, u64) + Sync)) -> AppResult<()> {
+    let resp = ureq::get(url).timeout(std::time::Duration::from_secs(1800)).call().map_err(|e| msg(e.to_string()))?;
+    let total: u64 = resp.header("Content-Length").and_then(|s| s.parse().ok()).unwrap_or(0);
+    if let Some(p) = dest.parent() {
+        fs::create_dir_all(p)?;
+    }
+    let tmp = dest.with_extension("part");
+    let mut file = fs::File::create(&tmp)?;
+    let mut reader = resp.into_reader();
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut downloaded: u64 = 0;
+    let start = std::time::Instant::now();
+    let mut last = std::time::Instant::now();
+    let mut last_bytes: u64 = 0;
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n])?;
+        downloaded += n as u64;
+        if last.elapsed() >= std::time::Duration::from_millis(300) {
+            let dt = last.elapsed().as_secs_f64().max(0.001);
+            let speed = ((downloaded - last_bytes) as f64 / dt) as u64;
+            progress(downloaded, total, speed);
+            last = std::time::Instant::now();
+            last_bytes = downloaded;
+        }
+    }
+    file.flush()?;
+    drop(file);
+    let avg = (downloaded as f64 / start.elapsed().as_secs_f64().max(0.001)) as u64;
+    progress(downloaded, total.max(downloaded), avg);
+    fs::rename(&tmp, dest)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeedResult {
+    /// 国内镜像（阿里云）下载速度，MB/s；测不到为 null
+    pub china: Option<f64>,
+    /// 官方源（download.pytorch.org）下载速度，MB/s；测不到为 null
+    pub official: Option<f64>,
+    /// 推荐使用的下载源："china" 或 "official"
+    pub recommend: String,
+}
+
+/// 实测当前网络下「国内镜像」vs「官方源」下载 torch 的速度，推荐更快的那个
+pub fn speed_test(variant: &str) -> AppResult<SpeedResult> {
+    let official = format!("https://download.pytorch.org/whl/{variant}");
+    let page = http_get_text(&format!("{official}/torch/")).map_err(|e| msg(format!("无法访问 PyTorch 下载站：{e}")))?;
+    let torch_v = best_version(&page, "torch", variant).ok_or_else(|| msg(format!("没有找到适合的 {variant} 版本")))?;
+    let file = format!("torch-{torch_v}%2B{variant}{}", wheel_suffix());
+    let china = measure_speed(&format!("https://mirrors.aliyun.com/pytorch-wheels/{variant}/{file}"));
+    let official_speed = measure_speed(&format!("{official}/{file}"));
+    let recommend = match (china, official_speed) {
+        (Some(c), Some(o)) => if c >= o { "china" } else { "official" },
+        (None, Some(_)) => "official",
+        _ => "china",
+    }
+    .to_string();
+    Ok(SpeedResult { china, official: official_speed, recommend })
+}
+
+/// 从 url 拉最多 20MB（限时 6 秒），返回速度 MB/s；连不上或拉到的太少返回 None
+fn measure_speed(url: &str) -> Option<f64> {
+    let resp = ureq::get(url).set("Range", "bytes=0-20971519").timeout(std::time::Duration::from_secs(10)).call().ok()?;
+    let mut reader = resp.into_reader();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut got: u64 = 0;
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(6) {
+        match reader.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => got += n as u64,
+            Err(_) => break,
+        }
+        if got >= 20 * 1024 * 1024 {
+            break;
+        }
+    }
+    let secs = start.elapsed().as_secs_f64().max(0.001);
+    if got < 64 * 1024 {
+        return None;
+    }
+    Some(got as f64 / (1024.0 * 1024.0) / secs)
 }
 
 /// 装好的 torch 是不是想要的 CUDA 版本（镜像有时会装成 CPU 版）
@@ -538,7 +687,7 @@ mod tests {
         }
         let variant =std::env::var("XLABEL_VARIANT").unwrap_or_else(|_| torch_variant(detect_gpu().as_ref()).to_string());
         eprintln!("安装 {variant}");
-        rt.install(&variant, &|l| eprintln!("{l}")).unwrap();
+        rt.install(&variant, &|l| eprintln!("{l}"), &|f, d, t, s| eprintln!("{f}: {d}/{t} {s}B/s")).unwrap();
         eprintln!("{:?}", rt.check(true).unwrap());
     }
 

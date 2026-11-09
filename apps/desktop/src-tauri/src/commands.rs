@@ -12,7 +12,7 @@ use crate::error::{msg, AppResult};
 use crate::health::{self, HealthReport};
 use crate::images::{self, DeleteScope, ImagePage, ImportResult, LastImport};
 use crate::project::{self, Project, ProjectInfo, RecentProject, Stats};
-use crate::runtime::{EnvStatus, Runtime, Settings};
+use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
 use crate::state::AppState;
 use crate::training::{self, Jobs, Predictor, PredBox, PrelabelResult, RunDetail, RunInfo, TrainConfig};
 
@@ -159,12 +159,30 @@ pub async fn env_install(app: AppHandle, variant: String) -> AppResult<()> {
     tauri::async_runtime::spawn_blocking(move || {
         let rt = app.state::<Runtime>();
         let a = app.clone();
-        rt.install(&variant, &move |line| {
-            let _ = a.emit("env-log", line);
-        })
+        let ap = app.clone();
+        rt.install(
+            &variant,
+            &move |line| {
+                let _ = a.emit("env-log", line);
+            },
+            &move |file, downloaded, total, speed| {
+                let _ = ap.emit(
+                    "env-progress",
+                    serde_json::json!({ "file": file, "downloaded": downloaded, "total": total, "speed": speed }),
+                );
+            },
+        )
     })
     .await
     .map_err(|e| msg(format!("安装任务异常：{e}")))?
+}
+
+/// 实测当前网络下国内镜像 / 官方源的下载速度，推荐更快的
+#[tauri::command]
+pub async fn speed_test(variant: String) -> AppResult<SpeedResult> {
+    tauri::async_runtime::spawn_blocking(move || runtime::speed_test(&variant))
+        .await
+        .map_err(|e| msg(format!("测速任务异常：{e}")))?
 }
 
 // ---------- 训练 ----------

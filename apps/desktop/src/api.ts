@@ -141,6 +141,12 @@ export interface EnvStatus {
   envDir: string;
 }
 
+export interface SpeedResult {
+  china: number | null;
+  official: number | null;
+  recommend: "china" | "official";
+}
+
 export interface TrainConfig {
   model: string;
   epochs: number;
@@ -273,6 +279,7 @@ export const api = {
   envStatus: (refresh: boolean) => invoke<EnvStatus>("env_status", { refresh }),
   saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
   envInstall: (variant: string) => invoke<void>("env_install", { variant }),
+  speedTest: (variant: string) => invoke<SpeedResult>("speed_test", { variant }),
   listRuns: () => invoke<RunInfo[]>("list_runs"),
   runDetail: (id: number) => invoke<RunDetail>("run_detail", { id }),
   runningRun: () => invoke<number | null>("running_run"),
