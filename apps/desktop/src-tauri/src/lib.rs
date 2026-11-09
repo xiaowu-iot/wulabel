@@ -15,6 +15,7 @@ mod keypoints;
 mod project;
 mod protocol;
 mod quality;
+mod report;
 mod runtime;
 mod state;
 mod training;
@@ -81,6 +82,7 @@ pub fn run() {
             commands::import_negatives,
             commands::aug_preview,
             commands::quality_scan,
+            commands::export_report,
             commands::uncertain_images,
             commands::list_versions,
             commands::create_version,

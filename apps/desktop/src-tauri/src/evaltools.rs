@@ -323,15 +323,32 @@ pub fn fp_test(
     let cfg_arg = cfg_path.to_string_lossy().to_string();
     let mut summary = None;
     let set_stdin = |s: Option<ChildStdin>| *job.stdin.lock().unwrap() = s;
-    worker_events(rt, &["fptest", cfg_arg.as_str()], &mut |v| {
+    let r = worker_events(rt, &["fptest", cfg_arg.as_str()], &mut |v| {
         if v["type"] == "done" {
             summary = Some(v.clone());
         } else {
             sink(v);
         }
-    }, Some(&set_stdin))?;
+    }, Some(&set_stdin));
+    // 配置里有原始的视频流地址（可能带密码），用完就删，不留在项目文件夹里
+    let _ = fs::remove_file(&cfg_path);
+    r?;
     let mut s = summary.ok_or_else(|| msg("误报测试没有返回结果"))?;
     s["dir"] = serde_json::json!(out.to_string_lossy());
+    // 记到训练记录里，交付报告会用到最近一次的结果
+    let mut rec = s.clone();
+    // 视频流地址里可能有账号密码，报告里只放脱敏后的地址
+    let shown = if source.contains("://") {
+        crate::video::mask_url(source)
+    } else {
+        Path::new(source).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    };
+    rec["source"] = serde_json::json!(shown);
+    rec["conf"] = serde_json::json!(cfg.conf);
+    rec["at"] = serde_json::json!(db::now());
+    if let Ok(run) = training::get_run(p, cfg.run_id) {
+        let _ = fs::write(PathBuf::from(run.dir).join("fptest.json"), serde_json::to_string(&rec)?);
+    }
     Ok(s)
 }
 

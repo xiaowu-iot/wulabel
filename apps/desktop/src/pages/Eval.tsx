@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { App, Button, Empty, Segmented, Select, Table, Tooltip } from "antd";
-import { ReloadOutlined } from "@ant-design/icons";
+import { FileTextOutlined, ReloadOutlined } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 import { api, ClassEval, errText, ProjectInfo, RunDetail, RunInfo, thumbUrl } from "../api";
 import { useApp } from "../store";
 import { fmtTime, metricNames, modelName } from "./Train";
@@ -51,6 +52,31 @@ export default function Eval({ project }: { project: ProjectInfo }) {
   // 用现在的数据重新评估（导入的外部模型第一次评估也走这里）
   const [evaluating, setEvaluating] = useState(false);
   const [evalLog, setEvalLog] = useState("");
+
+  /** 导出交付报告（HTML，浏览器打开后可以打印成 PDF） */
+  const exportReport = async () => {
+    if (sel == null || !detail) return;
+    const path = await save({
+      title: "保存交付报告",
+      defaultPath: `${project.name}_${detail.run.name}_模型报告.html`,
+      filters: [{ name: "网页报告", extensions: ["html"] }],
+    });
+    if (!path) return;
+    try {
+      await api.exportReport(sel, path);
+      message.success({
+        duration: 8,
+        content: (
+          <span>
+            报告已导出，用浏览器打开后可以「打印 → 另存为 PDF」。{" "}
+            <a onClick={() => api.revealPath(path).catch(() => {})}>打开所在文件夹</a>
+          </span>
+        ),
+      });
+    } catch (e) {
+      message.error(errText(e));
+    }
+  };
   const reevaluate = async () => {
     if (sel == null) return;
     setEvaluating(true);
@@ -106,6 +132,11 @@ export default function Eval({ project }: { project: ProjectInfo }) {
           <Tooltip title="用现在的已标注数据（验证集 / 测试集）重新算一遍指标。补了数据、或者导入的外部模型，都用这个">
             <Button icon={<ReloadOutlined />} loading={evaluating} onClick={reevaluate}>
               用当前数据评估
+            </Button>
+          </Tooltip>
+          <Tooltip title="把数据、训练过程、评估、推荐阈值、误报测试整理成一份报告，交给客户验收">
+            <Button icon={<FileTextOutlined />} disabled={!detail?.eval} onClick={exportReport}>
+              导出报告
             </Button>
           </Tooltip>
           {Object.keys(detail?.eval?.splits ?? {}).length > 1 && (

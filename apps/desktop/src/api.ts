@@ -561,6 +561,7 @@ export const api = {
   stopFpTest: () => invoke<void>("stop_fp_test"),
   importNegatives: (paths: string[]) => invoke<number>("import_negatives", { paths }),
   augPreview: (aug: AugConfig, imgSize: number) => invoke<string[]>("aug_preview", { aug, imgSize }),
+  exportReport: (runId: number, path: string) => invoke<void>("export_report", { runId, path }),
   qualityScan: (onlyTodo: boolean) => invoke<QualityReport>("quality_scan", { onlyTodo }),
   uncertainImages: (runId: number, limit: number) =>
     invoke<{ imageId: number; score: number; detail: string }[]>("uncertain_images", { runId, limit }),

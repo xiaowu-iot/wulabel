@@ -19,6 +19,7 @@ use crate::project::{self, Project, ProjectInfo, RecentProject, Stats};
 use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
 use crate::state::AppState;
 use crate::quality;
+use crate::report;
 use crate::versions;
 use crate::video;
 use crate::training::{self, Jobs, Predictor, PredResult, PrelabelResult, RunDetail, RunInfo, TrainConfig};
@@ -256,6 +257,14 @@ pub async fn fp_test(app: AppHandle, state: State<'_, AppState>, config: evaltoo
 pub async fn stop_fp_test(job: State<'_, evaltools::FpTest>) -> AppResult<()> {
     job.stop();
     Ok(())
+}
+
+#[tauri::command]
+pub async fn export_report(state: State<'_, AppState>, run_id: i64, path: String) -> AppResult<()> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || report::export(&project, run_id, &PathBuf::from(path)))
+        .await
+        .map_err(|e| msg(format!("导出报告异常：{e}")))?
 }
 
 #[tauri::command]

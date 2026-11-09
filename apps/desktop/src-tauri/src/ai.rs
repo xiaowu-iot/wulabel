@@ -103,7 +103,7 @@ pub fn models(rt: &Runtime) -> AppResult<Vec<AiModel>> {
 }
 
 /// 标准 base64 编码（带 = 补齐）
-fn b64(data: &[u8]) -> String {
+pub fn b64(data: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
     for c in data.chunks(3) {

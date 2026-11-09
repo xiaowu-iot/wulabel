@@ -238,7 +238,7 @@ impl Extractor {
 }
 
 /// 地址里的账号密码脱敏：rtsp://user:pass@host → rtsp://***@host
-fn mask_url(url: &str) -> String {
+pub fn mask_url(url: &str) -> String {
     if let Some(i) = url.find("://") {
         let (scheme, rest) = url.split_at(i + 3);
         if let Some(at) = rest.find('@') {
