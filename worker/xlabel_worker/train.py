@@ -26,7 +26,7 @@ import torch
 
 from . import models
 from .data import ClsFolder, CocoDetection, collate, has_cls_split, has_split
-from .metrics import ImageGt, ImagePred, classify_eval, evaluate
+from .metrics import ImageGt, ImagePred, classify_eval, classify_threshold_curve, evaluate, threshold_curve
 from .protocol import emit, log
 
 
@@ -96,9 +96,12 @@ class DetTask:
         tgts = [{k: v.to(device) for k, v in t.items() if k in self.keys} for t in tgts]
         return sum(model(imgs, tgts).values())
 
-    def evaluate(self, model, ds, device, batch, n_classes):
+    def evaluate(self, model, ds, device, batch, n_classes, thresholds: bool = False):
         preds, gts = predict_dataset(model, ds, device, batch)
-        return evaluate(preds, gts, n_classes)
+        r = evaluate(preds, gts, n_classes)
+        if thresholds:
+            r.thresholds = threshold_curve(preds, gts, n_classes)
+        return r
 
     def save_extra(self) -> dict:
         return {"num_keypoints": self.nk} if self.nk else {}
@@ -128,7 +131,7 @@ class ClsTask:
         return self.criterion(model(imgs.to(device, non_blocking=True)), labels.to(device))
 
     @torch.no_grad()
-    def evaluate(self, model, ds, device, batch, n_classes):
+    def evaluate(self, model, ds, device, batch, n_classes, thresholds: bool = False):
         model.eval()
         loader = torch.utils.data.DataLoader(ds, batch_size=max(batch, 16), shuffle=False, collate_fn=self.collate, num_workers=0)
         y_true, y_pred, ids, scores = [], [], [], []
@@ -139,10 +142,32 @@ class ClsTask:
             y_pred += pred.tolist()
             scores += conf.tolist()
             ids += idl
-        return classify_eval(y_true, y_pred, ids, n_classes, scores=np.array(scores))
+        r = classify_eval(y_true, y_pred, ids, n_classes, scores=np.array(scores))
+        if thresholds:
+            r.thresholds = classify_threshold_curve(y_true, y_pred, scores)
+        return r
 
     def save_extra(self) -> dict:
         return {}
+
+
+def split_report(r, classes: list[str], images: int) -> dict:
+    """评估结果写进 eval.json 的格式（训练结束时、重新评估时共用）"""
+    for c in r.per_class:
+        c["name"] = classes[c["index"]]
+    for c in r.thresholds.get("perClass", []):
+        c["name"] = classes[c["index"]]
+    return {
+        "images": images,
+        "map50": r.map50,
+        "map": r.map,
+        "precision": r.precision,
+        "recall": r.recall,
+        "perClass": r.per_class,
+        "confusion": r.confusion,
+        "errors": r.errors[:500],
+        "thresholds": r.thresholds,
+    }
 
 
 # ---------- 训练主流程 ----------
@@ -286,18 +311,7 @@ def run(cfg: dict) -> None:
         if not task.has_split(split):
             continue
         ds = task.dataset(split, False)
-        r = task.evaluate(model, ds, device, batch, len(classes))
-        for c in r.per_class:
-            c["name"] = classes[c["index"]]
-        report["splits"][split] = {
-            "images": len(ds),
-            "map50": r.map50,
-            "map": r.map,
-            "precision": r.precision,
-            "recall": r.recall,
-            "perClass": r.per_class,
-            "confusion": r.confusion,
-            "errors": r.errors[:500],
-        }
+        r = task.evaluate(model, ds, device, batch, len(classes), thresholds=True)
+        report["splits"][split] = split_report(r, classes, len(ds))
     (out / "eval.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
     emit("done", stopped=stopped, bestMap50=best_map50, bestEpoch=best_epoch)

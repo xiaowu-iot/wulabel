@@ -54,10 +54,18 @@ class Predictor:
 
     def ensure(self, weights: str):
         p = Path(weights)
-        key = (str(p), p.stat().st_mtime)
+        key = (str(p), p.stat().st_mtime, p.with_suffix(".json").stat().st_mtime if p.suffix == ".onnx" else 0)
         if key != self.key:
-            self.model, self.ck = models.load(p, self.device)
-            self.task = models.task_of(self.ck.get("model", ""))
+            if p.suffix.lower() == ".onnx":
+                # 导入的外部模型（YOLO 等）
+                from . import onnx_model
+
+                self.model, info = onnx_model.load(p)
+                self.ck = {"classes": info.get("classes", []), "model": "external", "use": info.get("use")}
+                self.task = "external"
+            else:
+                self.model, self.ck = models.load(p, self.device)
+                self.task = models.task_of(self.ck.get("model", ""))
             self.key = key
 
     def _classify(self, img) -> list:
@@ -74,6 +82,16 @@ class Predictor:
         for it in items:
             try:
                 img = load_image(Path(it["path"]))
+                if self.task == "external":
+                    use = self.ck.get("use")
+                    boxes = [
+                        [round(x0, 2), round(y0, 2), round(x1 - x0, 2), round(y1 - y0, 2), c, round(s, 4)]
+                        for x0, y0, x1, y1, c, s in self.model.predict(img, conf)
+                        if use is None or c in use
+                    ]
+                    emit("pred", id=it["id"], boxes=boxes, polys=[], poses=[], tags=[])
+                    n += 1
+                    continue
                 if self.task == "classify":
                     # 分类：前 5 个类别都返回，由桌面端按置信度决定要不要采用
                     emit("pred", id=it["id"], boxes=[], polys=[], poses=[], tags=self._classify(img))

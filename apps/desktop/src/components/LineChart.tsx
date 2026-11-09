@@ -13,9 +13,13 @@ interface Props {
   yMax?: number;
   height?: number;
   format?: (v: number) => string;
+  /** 横轴刻度文字（参数是从 0 开始的点序号），默认显示 1、2、3… */
+  xLabel?: (i: number) => string;
+  /** 在第 i 个点画一条竖线（比如标出推荐阈值） */
+  marker?: number | null;
 }
 
-export default function LineChart({ series, xMax, yMin, yMax, height = 200, format = (v) => v.toFixed(2) }: Props) {
+export default function LineChart({ series, xMax, yMin, yMax, height = 200, format = (v) => v.toFixed(2), xLabel, marker = null }: Props) {
   const W = 600;
   const H = height;
   const pad = { l: 44, r: 12, t: 10, b: 22 };
@@ -41,9 +45,12 @@ export default function LineChart({ series, xMax, yMin, yMax, height = 200, form
       ))}
       {xTicks.map((t) => (
         <text key={t} x={x(t - 1)} y={H - 6} fill="var(--dim)" fontSize={11} textAnchor="middle">
-          {t}
+          {xLabel ? xLabel(t - 1) : t}
         </text>
       ))}
+      {marker != null && (
+        <line x1={x(marker)} x2={x(marker)} y1={pad.t} y2={H - pad.b} stroke="var(--accent, #3d8bfd)" strokeWidth={1.5} strokeDasharray="4 3" />
+      )}
       {series.map((s) => {
         const pts = s.values
           .map((v, i) => (v == null || !Number.isFinite(v) ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`))

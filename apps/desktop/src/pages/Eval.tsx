@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { App, Empty, Segmented, Select, Table, Tooltip } from "antd";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { App, Button, Empty, Segmented, Select, Table, Tooltip } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
+import { listen } from "@tauri-apps/api/event";
 import { api, ClassEval, errText, ProjectInfo, RunDetail, RunInfo, thumbUrl } from "../api";
 import { useApp } from "../store";
-import { fmtTime, metricNames, MODELS } from "./Train";
+import { fmtTime, metricNames, modelName } from "./Train";
+import { FpTestPanel, ThresholdPanel } from "../components/EvalTools";
 
 const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)}%`);
 
@@ -28,17 +31,43 @@ export default function Eval({ project }: { project: ProjectInfo }) {
       .catch((e) => message.error(errText(e)));
   }, [message]);
 
+  const loadDetail = useCallback(
+    (id: number) =>
+      api
+        .runDetail(id)
+        .then((d) => {
+          setDetail(d);
+          const splits = Object.keys(d.eval?.splits ?? {});
+          setSplit((cur) => (splits.includes(cur) ? cur : splits.includes("val") ? "val" : splits[0] ?? "val"));
+        })
+        .catch((e) => message.error(errText(e))),
+    [message],
+  );
+
   useEffect(() => {
+    if (sel != null) loadDetail(sel);
+  }, [sel, loadDetail]);
+
+  // 用现在的数据重新评估（导入的外部模型第一次评估也走这里）
+  const [evaluating, setEvaluating] = useState(false);
+  const [evalLog, setEvalLog] = useState("");
+  const reevaluate = async () => {
     if (sel == null) return;
-    api
-      .runDetail(sel)
-      .then((d) => {
-        setDetail(d);
-        const splits = Object.keys(d.eval?.splits ?? {});
-        setSplit(splits.includes("val") ? "val" : splits[0] ?? "val");
-      })
-      .catch((e) => message.error(errText(e)));
-  }, [sel, message]);
+    setEvaluating(true);
+    setEvalLog("");
+    const un = await listen<string>("eval-log", (e) => setEvalLog(e.payload));
+    try {
+      await api.evaluateRun(sel);
+      await loadDetail(sel);
+      setRuns(await api.listRuns().then((rs) => rs.filter((r) => r.hasWeights)));
+      message.success("评估完成");
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      un();
+      setEvaluating(false);
+    }
+  };
 
   const ev = detail?.eval?.splits?.[split];
   const classes = detail?.eval?.classes ?? [];
@@ -65,12 +94,20 @@ export default function Eval({ project }: { project: ProjectInfo }) {
         <div>
           <h1>评估</h1>
           <p className="desc" style={{ margin: 0 }}>
-            用第 {detail?.eval?.bestEpoch ?? "—"} 轮的最好模型在{split === "val" ? "验证集" : "测试集"}上评估（{ev?.images ?? 0} 张）。
+            {detail?.eval?.reevaluated
+              ? `用 ${detail.eval.evaluatedAt ? fmtTime(detail.eval.evaluatedAt) : ""} 时的数据重新评估，`
+              : `用第 ${detail?.eval?.bestEpoch ?? "—"} 轮的最好模型，`}
+            在{split === "val" ? "验证集" : "测试集"}上（{ev?.images ?? 0} 张）。
             {isCls ? "每张图取模型分数最高的类别。" : "置信度阈值 0.25，IoU 0.5。"}
             {(project.task === "segment" || project.task === "pose") && "分割和关键点模型这里按目标框计算指标。"}
           </p>
         </div>
         <div className="row">
+          <Tooltip title="用现在的已标注数据（验证集 / 测试集）重新算一遍指标。补了数据、或者导入的外部模型，都用这个">
+            <Button icon={<ReloadOutlined />} loading={evaluating} onClick={reevaluate}>
+              用当前数据评估
+            </Button>
+          </Tooltip>
           {Object.keys(detail?.eval?.splits ?? {}).length > 1 && (
             <Segmented value={split} onChange={(v) => setSplit(v as string)} options={Object.keys(detail!.eval!.splits).map((s) => ({ value: s, label: s === "val" ? "验证集" : "测试集" }))} />
           )}
@@ -80,15 +117,22 @@ export default function Eval({ project }: { project: ProjectInfo }) {
             onChange={setSel}
             options={runs.map((r) => ({
               value: r.id,
-              label: `${fmtTime(r.createdAt)} · ${MODELS.find((m) => m.value === r.config?.model)?.name ?? r.config?.model} · ${mn.m50} ${r.bestMap50?.toFixed(3) ?? "—"}`,
+              label: `${fmtTime(r.createdAt)} · ${modelName(r)} · ${mn.m50} ${r.bestMap50?.toFixed(3) ?? "—"}`,
             }))}
           />
         </div>
       </div>
 
+      {evaluating && evalLog && <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>{evalLog}</div>}
       {!ev ? (
         <div className="card" style={{ padding: 48 }}>
-          <Empty description="这次训练没有评估结果（可能是中途停止的）" />
+          <Empty
+            description={
+              detail?.run.engine === "external"
+                ? "导入的外部模型还没有评估，点「用当前数据评估」算一下它在你数据上的表现"
+                : "这次训练没有评估结果（可能是中途停止的），可以点「用当前数据评估」"
+            }
+          />
         </div>
       ) : (
         <>
@@ -109,6 +153,14 @@ export default function Eval({ project }: { project: ProjectInfo }) {
               <div className="card"><div className="muted">{isCls ? "平均召回率" : "召回率"}</div><div className="kpi">{pct(ev.recall)}</div></div>
             </Tooltip>
           </div>
+
+          {ev.thresholds ? (
+            <ThresholdPanel th={ev.thresholds} isCls={isCls} />
+          ) : (
+            <div className="dim" style={{ fontSize: 12, marginBottom: 12 }}>
+              这次评估没有阈值曲线（旧版本训练的），点「用当前数据评估」就能算出推荐阈值。
+            </div>
+          )}
 
           <div className="cards" style={{ gridTemplateColumns: "1fr 1fr", marginBottom: 12 }}>
             <div className="card">
@@ -211,6 +263,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
           </div>
         </>
       )}
+      {detail && !isCls && <FpTestPanel run={detail.run} defaultConf={ev?.thresholds?.best.conf ?? 0.5} />}
     </div>
   );
 }

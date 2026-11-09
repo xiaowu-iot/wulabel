@@ -7,6 +7,7 @@ mod dataset_import;
 mod deploy;
 mod db;
 mod error;
+mod evaltools;
 mod feedback;
 mod health;
 mod images;
@@ -47,6 +48,7 @@ pub fn run() {
         .manage(Arc::new(training::Jobs::default()))
         .manage(training::Predictor::default())
         .manage(video::Extractor::default())
+        .manage(evaltools::FpTest::default())
         .manage(Arc::new(deploy::Live::default()))
         .setup(|app| {
             // 训练环境有好几 GB，放本机目录（Local），不放会漫游同步的 Roaming
@@ -69,6 +71,13 @@ pub fn run() {
             commands::stop_extract,
             commands::keypoint_template,
             commands::save_keypoint_template,
+            commands::inspect_onnx,
+            commands::import_onnx,
+            commands::update_external,
+            commands::evaluate_run,
+            commands::fp_test,
+            commands::stop_fp_test,
+            commands::import_negatives,
             commands::list_versions,
             commands::create_version,
             commands::rename_version,

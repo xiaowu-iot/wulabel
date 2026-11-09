@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { App, Empty, Modal, Spin, Table } from "antd";
 import { api, errText, RunDetail, RunInfo, Task } from "../api";
 import LineChart from "./LineChart";
-import { fmtTime, metricNames, MODELS } from "../pages/Train";
+import { fmtTime, metricNames, modelName } from "../pages/Train";
 
 const COLORS = ["#3d8bfd", "#e5534b", "#2fb67c", "#e7a33e", "#9b7bf2", "#14b8a6", "#f472b6", "#a3e635"];
 
@@ -34,7 +34,7 @@ export default function RunCompare({ runs, task, open, onClose }: { runs: RunInf
   // 参数对比：一行一个参数，一列一次训练；各次不一样的参数加粗
   const rows: { key: string; name: string; values: string[] }[] = details
     ? [
-        { key: "model", name: "模型", values: details.map((d) => MODELS.find((m) => m.value === d.run.config?.model)?.name ?? String(d.run.config?.model)) },
+        { key: "model", name: "模型", values: details.map((d) => modelName(d.run)) },
         { key: "data", name: "训练数据", values: details.map((d) => d.run.config?.versionName ?? "当前数据") },
         {
           key: "images",

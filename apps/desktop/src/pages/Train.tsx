@@ -12,6 +12,7 @@ import { api, EnvStatus, errText, ProjectInfo, RunDetail, RunInfo, RunStatus, Sp
 import { prefs, useApp } from "../store";
 import LineChart from "../components/LineChart";
 import RunCompare from "../components/RunCompare";
+import ImportModelModal from "../components/ImportModelModal";
 
 /** 内置模型，和 worker/xlabel_worker/models.py 的 MODELS 对应。oneStage：单阶段检测，部署到 TensorRT / NPU 更顺 */
 export const MODELS: { value: string; name: string; desc: string; task: Task; oneStage?: boolean; fixedSize?: number }[] = [
@@ -44,6 +45,12 @@ const recommendModel = (task: Task, gpuMem: number) =>
     pose: "keypointrcnn_r50",
     classify: gpuMem >= 6000 ? "cls_efficientnet" : "cls_mobilenet",
   })[task];
+
+/** 训练记录显示的模型名（导入的外部模型显示导入时起的名字） */
+export const modelName = (r: RunInfo) =>
+  r.engine === "external"
+    ? `${(r.config as { displayName?: string })?.displayName || "外部模型"}（外部）`
+    : MODELS.find((m) => m.value === r.config?.model)?.name ?? String(r.config?.model ?? "");
 
 /** 各任务主指标的叫法（分类没有 mAP，worker 把准确率放在 map50、宏 F1 放在 map） */
 export const metricNames = (task: Task) =>
@@ -92,6 +99,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const [versions, setVersions] = useState<VersionInfo[]>([]);
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [comparing, setComparing] = useState(false);
+  const [importing, setImporting] = useState(false);
   const selRef = useRef<number | null>(null);
   selRef.current = sel;
   const logBox = useRef<HTMLDivElement>(null);
@@ -374,7 +382,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                     <h2 style={{ fontSize: 15, margin: 0 }}>{run.name}</h2>
                     <Tag color={RUN_STATUS[run.status].color}>{RUN_STATUS[run.status].text}</Tag>
                     <span className="muted">
-                      {MODELS.find((m) => m.value === run.config?.model)?.name ?? run.config?.model} · {run.config?.imgSize}px ·{" "}
+                      {modelName(run)} · {run.config?.imgSize}px ·{" "}
                       {run.config?.images
                         ? `训练 ${run.config.images.train} 张 / 验证 ${run.config.images.val} 张 / ${run.config.images.anns ?? run.config.images.boxes} 个标注`
                         : ""}
@@ -389,9 +397,11 @@ export default function Train({ project }: { project: ProjectInfo }) {
                     {run.hasWeights && (
                       <>
                         <Button size="small" onClick={() => setPage("eval")}>看评估</Button>
-                        <Button size="small" icon={<ExportOutlined />} loading={exporting} onClick={doExport}>
-                          {run.hasOnnx ? "重新导出 ONNX" : "导出 ONNX"}
-                        </Button>
+                        {run.engine !== "external" && (
+                          <Button size="small" icon={<ExportOutlined />} loading={exporting} onClick={doExport}>
+                            {run.hasOnnx ? "重新导出 ONNX" : "导出 ONNX"}
+                          </Button>
+                        )}
                       </>
                     )}
                     <Tooltip title="打开训练文件夹">
@@ -449,9 +459,18 @@ export default function Train({ project }: { project: ProjectInfo }) {
           <div className="card">
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <span className="muted">训练记录 <span className="dim">· 勾选两次以上可以对比</span></span>
-              <Button size="small" disabled={compareIds.length < 2} onClick={() => setComparing(true)}>
-                对比所选{compareIds.length >= 2 ? `（${compareIds.length}）` : ""}
-              </Button>
+              <Space>
+                {task === "detect" && (
+                  <Tooltip title="导入别处训好的 YOLO 等 ONNX 模型，用来预标注、评估、误报测试">
+                    <Button size="small" onClick={() => setImporting(true)}>
+                      导入外部模型
+                    </Button>
+                  </Tooltip>
+                )}
+                <Button size="small" disabled={compareIds.length < 2} onClick={() => setComparing(true)}>
+                  对比所选{compareIds.length >= 2 ? `（${compareIds.length}）` : ""}
+                </Button>
+              </Space>
             </div>
             <Table<RunInfo>
               size="small"
@@ -466,7 +485,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
               onRow={(r) => ({ onClick: () => setSel(r.id), style: { cursor: "pointer", background: r.id === sel ? "rgba(61,139,253,.12)" : undefined } })}
               columns={[
                 { title: "时间", dataIndex: "createdAt", render: fmtTime },
-                { title: "模型", render: (_, r) => MODELS.find((m) => m.value === r.config?.model)?.name ?? r.config?.model },
+                { title: "模型", render: (_, r) => modelName(r) },
                 { title: "数据", render: (_, r) => r.config?.versionName ?? <span className="dim">当前数据</span> },
                 { title: "轮数", render: (_, r) => r.config?.epochs },
                 { title: mn.m50, dataIndex: "bestMap50", render: (v: number | null) => (v == null ? "—" : v.toFixed(3)) },
@@ -476,6 +495,14 @@ export default function Train({ project }: { project: ProjectInfo }) {
           </div>
         </div>
       </div>
+      <ImportModelModal
+        open={importing}
+        onClose={() => setImporting(false)}
+        onDone={async (id) => {
+          await loadRuns();
+          setSel(id);
+        }}
+      />
       <RunCompare
         open={comparing}
         task={task}

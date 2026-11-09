@@ -95,21 +95,26 @@ fn run_dir(p: &Project, name: &str) -> PathBuf {
     p.root.join("runs").join(name)
 }
 
+/// 导入的外部模型（别处训好的 ONNX），训练记录里 engine 记为这个
+pub const EXTERNAL: &str = "external";
+
 fn row_to_info(p: &Project, r: &rusqlite::Row) -> rusqlite::Result<RunInfo> {
     let dir: String = r.get(1)?;
     let abs = run_dir(p, &dir);
     let config: String = r.get(4)?;
+    let engine: String = r.get(2)?;
+    let external = engine == EXTERNAL;
     Ok(RunInfo {
         id: r.get(0)?,
         name: dir.clone(),
         dir: abs.to_string_lossy().into_owned(),
-        engine: r.get(2)?,
         status: r.get(3)?,
         config: serde_json::from_str(&config).unwrap_or(serde_json::Value::Null),
         best_map50: r.get(5)?,
         created_at: r.get(6)?,
-        has_weights: abs.join("best.pt").exists(),
+        has_weights: abs.join("best.pt").exists() || (external && abs.join("model.onnx").exists()),
         has_onnx: abs.join("model.onnx").exists(),
+        engine,
     })
 }
 
@@ -383,6 +388,13 @@ pub enum Deploy {
 /// 不是每种模型都支持全部部署方式，提前拦住给出清楚提示
 pub fn ensure_deployable(p: &Project, id: i64, what: Deploy) -> AppResult<()> {
     let run = get_run(p, id)?;
+    if run.engine == EXTERNAL {
+        return Err(msg(if what == Deploy::Onnx {
+            "导入的外部模型本身就是 ONNX，直接用原来的模型文件部署即可"
+        } else {
+            "导入的外部模型暂不支持实时验证和推理服务包，可以用来预标注、评估和误报测试"
+        }));
+    }
     let task = model_task(run.config["model"].as_str().unwrap_or(""));
     let err = match (task, what) {
         ("detect", _) => None,
@@ -616,8 +628,11 @@ pub fn class_map(p: &Project, classes: &[String]) -> AppResult<Vec<i64>> {
     Ok(out)
 }
 
-fn weights_of(p: &Project, run_id: i64) -> AppResult<PathBuf> {
-    let w = PathBuf::from(get_run(p, run_id)?.dir).join("best.pt");
+/// 模型文件：训练出的 best.pt，或导入的外部模型 model.onnx
+pub fn weights_of(p: &Project, run_id: i64) -> AppResult<PathBuf> {
+    let run = get_run(p, run_id)?;
+    let dir = PathBuf::from(&run.dir);
+    let w = if run.engine == EXTERNAL { dir.join("model.onnx") } else { dir.join("best.pt") };
     if !w.exists() {
         return Err(msg("这次训练没有产出模型"));
     }

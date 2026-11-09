@@ -297,7 +297,69 @@ export interface ClassEval {
   ap: number | null;
 }
 
+/** 某个置信度阈值下的结果 */
+export interface ThresholdPoint {
+  conf: number;
+  precision: number;
+  recall: number;
+  f1: number;
+  tp?: number;
+  fp?: number;
+  fn?: number;
+}
+
+export interface Thresholds {
+  curve: ThresholdPoint[];
+  /** F1 最高的阈值 */
+  best: ThresholdPoint;
+  /** 每个类别 F1 最高的阈值（分类没有） */
+  perClass: { index: number; name?: string; conf: number | null; precision: number | null; recall: number | null; f1: number | null }[];
+}
+
+/** 外部 ONNX 模型的识别结果 */
+export interface OnnxInfo {
+  kind: string;
+  classes: string[];
+  numClasses: number;
+  imgSize: number;
+  note: string;
+  inputs: { name: string; shape: string[] }[];
+  outputs: { name: string; shape: string[] }[];
+}
+
+export interface ExternalModel {
+  name: string;
+  kind: string;
+  classes: string[];
+  imgSize: number;
+  /** 只用这些类别（模型类别序号），null 表示全用 */
+  useClasses: number[] | null;
+}
+
+export interface FpConfig {
+  runId: number;
+  source: string;
+  conf: number;
+  fps: number;
+  maxSeconds: number;
+  consecutive: number;
+  cooldown: number;
+}
+
+/** 误报测试的统计 */
+export interface FpSummary {
+  seconds: number;
+  frames: number;
+  hitFrames: number;
+  alarms: number;
+  perHour: number;
+  perClass: Record<string, number>;
+  stopped: boolean;
+  dir: string;
+}
+
 export interface SplitEval {
+  thresholds?: Thresholds;
   images: number;
   map50: number;
   map: number;
@@ -312,7 +374,8 @@ export interface SplitEval {
 export interface RunDetail {
   run: RunInfo;
   metrics: Metric[];
-  eval: { classes: string[]; bestEpoch: number; splits: Record<string, SplitEval> } | null;
+  /** reevaluated：用「重新评估」按当时的数据算的（evaluatedAt 是时间） */
+  eval: { classes: string[]; bestEpoch: number | null; splits: Record<string, SplitEval>; reevaluated?: boolean; evaluatedAt?: number } | null;
   log: string[];
   error: string | null;
 }
@@ -459,6 +522,13 @@ export const api = {
   extractStream: (url: string, every: number, maxFrames: number, maxMinutes: number, dedup: boolean) =>
     invoke<ExtractResult>("extract_stream", { url, every, maxFrames, maxMinutes, dedup }),
   stopExtract: () => invoke<void>("stop_extract"),
+  inspectOnnx: (path: string) => invoke<OnnxInfo>("inspect_onnx", { path }),
+  importOnnx: (path: string, model: ExternalModel) => invoke<number>("import_onnx", { path, model }),
+  updateExternal: (runId: number, model: ExternalModel) => invoke<void>("update_external", { runId, model }),
+  evaluateRun: (runId: number) => invoke<number>("evaluate_run", { runId }),
+  fpTest: (config: FpConfig) => invoke<FpSummary>("fp_test", { config }),
+  stopFpTest: () => invoke<void>("stop_fp_test"),
+  importNegatives: (paths: string[]) => invoke<number>("import_negatives", { paths }),
   listVersions: () => invoke<VersionInfo[]>("list_versions"),
   createVersion: (name: string, note: string, ratios: [number, number, number]) =>
     invoke<VersionInfo>("create_version", { name, note, ratios }),

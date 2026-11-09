@@ -88,6 +88,77 @@ class EvalResult:
     recall: float = 0.0
     confusion: list[list[int]] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
+    # 各置信度阈值下的精确率 / 召回率 / F1，以及推荐阈值（见 threshold_curve）
+    thresholds: dict = field(default_factory=dict)
+
+
+# 阈值曲线取的置信度：0.05、0.10 … 0.95
+CONF_STEPS = [round(0.05 * i, 2) for i in range(1, 20)]
+
+
+def _prf(tp: int, fp: int, n_gt: int) -> tuple[float, float, float]:
+    p = tp / max(tp + fp, 1)
+    r = tp / max(n_gt, 1)
+    f = 2 * p * r / (p + r) if p + r else 0.0
+    return p, r, f
+
+
+def _curve(scores: np.ndarray, ok: np.ndarray, n_gt: int) -> list[dict]:
+    rows = []
+    for c in CONF_STEPS:
+        m = scores >= c
+        tp = int(ok[m].sum())
+        fp = int((~ok[m]).sum())
+        p, r, f = _prf(tp, fp, n_gt)
+        rows.append({"conf": c, "precision": p, "recall": r, "f1": f, "tp": tp, "fp": fp, "fn": max(n_gt - tp, 0)})
+    return rows
+
+
+def threshold_curve(preds: list[ImagePred], gts: list[ImageGt], num_classes: int, iou: float = 0.5) -> dict:
+    """检测：各置信度阈值下的精确率、召回率、F1（IoU ≥ 0.5 且类别对才算对），推荐 F1 最高的阈值，另给每个类别的推荐阈值。
+    每张图按分数从高到低贪心匹配一次就够了：低阈值的结果只是在高阈值结果后面多加几个框，前面的匹配不变。"""
+    scores, oks, clss = [], [], []
+    n_gt = np.zeros(num_classes, dtype=int)
+    for p, g in zip(preds, gts):
+        for c in g.labels:
+            if 0 <= int(c) < num_classes:
+                n_gt[int(c)] += 1
+        order = np.argsort(-p.scores, kind="stable")
+        ious = box_iou(p.boxes[order], g.boxes)
+        used = np.zeros(len(g.boxes), dtype=bool)
+        for k, i in enumerate(order):
+            c = int(p.labels[i])
+            ok = False
+            if len(g.boxes):
+                cand = np.where(~used & (g.labels == c) & (ious[k] >= iou))[0]
+                if len(cand):
+                    used[cand[np.argmax(ious[k, cand])]] = True
+                    ok = True
+            scores.append(float(p.scores[i]))
+            oks.append(ok)
+            clss.append(c)
+    s = np.array(scores, dtype=float)
+    ok = np.array(oks, dtype=bool)
+    cl = np.array(clss, dtype=int)
+    curve = _curve(s, ok, int(n_gt.sum()))
+    per_class = []
+    for k in range(num_classes):
+        if n_gt[k] == 0:
+            per_class.append({"index": k, "conf": None, "precision": None, "recall": None, "f1": None})
+            continue
+        m = cl == k
+        best = max(_curve(s[m], ok[m], int(n_gt[k])), key=lambda r: r["f1"])
+        per_class.append({"index": k, "conf": best["conf"], "precision": best["precision"], "recall": best["recall"], "f1": best["f1"]})
+    return {"curve": curve, "best": max(curve, key=lambda r: r["f1"]), "perClass": per_class}
+
+
+def classify_threshold_curve(y_true, y_pred, scores) -> dict:
+    """分类：模型最高分低于阈值时当作「拿不准、不下结论」。精确率 = 下结论的图里分对的比例，召回率 = 分对且下了结论的图占全部的比例"""
+    y_true = np.asarray(y_true, dtype=int)
+    y_pred = np.asarray(y_pred, dtype=int)
+    s = np.asarray(scores, dtype=float)
+    curve = _curve(s, y_true == y_pred, len(y_true))
+    return {"curve": curve, "best": max(curve, key=lambda r: r["f1"]), "perClass": []}
 
 
 def evaluate(preds: list[ImagePred], gts: list[ImageGt], num_classes: int, conf: float = 0.25) -> EvalResult:

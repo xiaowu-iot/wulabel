@@ -10,6 +10,7 @@ use crate::assist;
 use crate::dataset::{self, ExportOptions, ExportResult, SplitSummary};
 use crate::dataset_import::{self, DatasetImportResult};
 use crate::deploy;
+use crate::evaltools;
 use crate::error::{msg, AppResult};
 use crate::health::{self, HealthReport};
 use crate::images::{self, DeleteScope, ImagePage, ImportResult, LastImport};
@@ -202,6 +203,63 @@ pub async fn extract_stream(
     })
     .await
     .map_err(|e| msg(format!("采集任务异常：{e}")))?
+}
+
+// ---------- 外部模型、重新评估、误报测试 ----------
+
+#[tauri::command]
+pub async fn inspect_onnx(app: AppHandle, path: String) -> AppResult<serde_json::Value> {
+    tauri::async_runtime::spawn_blocking(move || evaltools::inspect_onnx(&app.state::<Runtime>(), &path))
+        .await
+        .map_err(|e| msg(format!("读取模型异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn import_onnx(state: State<'_, AppState>, path: String, model: evaltools::ExternalModel) -> AppResult<i64> {
+    evaltools::import_onnx(&state.current()?, &path, &model)
+}
+
+#[tauri::command]
+pub async fn update_external(state: State<'_, AppState>, run_id: i64, model: evaltools::ExternalModel) -> AppResult<()> {
+    evaltools::update_external(&state.current()?, run_id, &model)
+}
+
+#[tauri::command]
+pub async fn evaluate_run(app: AppHandle, state: State<'_, AppState>, run_id: i64) -> AppResult<f64> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let a = app.clone();
+        evaltools::evaluate_run(&project, &app.state::<Runtime>(), run_id, &move |l| {
+            let _ = a.emit("eval-log", l);
+        })
+    })
+    .await
+    .map_err(|e| msg(format!("评估异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn fp_test(app: AppHandle, state: State<'_, AppState>, config: evaltools::FpConfig) -> AppResult<serde_json::Value> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let a = app.clone();
+        let sink = move |v: &serde_json::Value| {
+            let _ = a.emit("fptest", v);
+        };
+        evaltools::fp_test(&project, &app.state::<Runtime>(), &app.state::<evaltools::FpTest>(), &config, &sink)
+    })
+    .await
+    .map_err(|e| msg(format!("误报测试异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn stop_fp_test(job: State<'_, evaltools::FpTest>) -> AppResult<()> {
+    job.stop();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn import_negatives(state: State<'_, AppState>, paths: Vec<String>) -> AppResult<usize> {
+    evaltools::import_negatives(&state.current()?, &paths)
 }
 
 // ---------- 数据集版本 ----------
