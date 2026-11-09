@@ -18,7 +18,6 @@ use crate::project::Project;
 use crate::runtime::Runtime;
 
 const PACKAGE_FILE: &str = "package.json";
-const PALETTE: [&str; 10] = ["#3d8bfd", "#e5534b", "#2fb67c", "#e7a33e", "#9b7bf2", "#14b8a6", "#f472b6", "#a3e635", "#f97316", "#60a5fa"];
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
