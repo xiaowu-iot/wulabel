@@ -987,6 +987,69 @@ pub fn predict_many(
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Uncertain {
+    pub image_id: i64,
+    /// 模型拿不准的程度，越大越值得先标
+    pub score: f64,
+    /// 模型在这张图上看到了什么（简短说明）
+    pub detail: String,
+}
+
+/// 主动学习：用模型把「未标注」的图都看一遍，挑出模型最拿不准的，这些图先标对模型提升最大。
+/// 检测类：分数在 0.1~0.9 之间的框越多越拿不准，什么都不确定也算；分类：第一名和第二名分数越接近越拿不准。
+pub fn uncertain_images(
+    p: &Project,
+    rt: &Runtime,
+    pr: &Predictor,
+    run_id: i64,
+    limit: usize,
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> AppResult<Vec<Uncertain>> {
+    let w = weights_of(p, run_id)?;
+    let items: Vec<(i64, PathBuf)> = {
+        let conn = p.conn.lock();
+        let mut stmt = conn.prepare("SELECT id, path FROM images WHERE status = 'todo' ORDER BY id LIMIT 5000")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.map(|r| r.map(|(id, path)| (id, p.resolve(&path)))).collect::<Result<_, _>>()?
+    };
+    if items.is_empty() {
+        return Err(msg("没有未标注的图片"));
+    }
+    let total = items.len();
+    let mut out = Vec::new();
+    progress(0, total);
+    let mut done = 0;
+    for chunk in items.chunks(16) {
+        let mut got: Vec<(i64, RawPred)> = Vec::new();
+        pr.request(rt, &w, chunk, 0.05, &mut |id, r| got.push((id, r)))?;
+        for (id, r) in got {
+            let (score, detail) = if r.tags.len() >= 1 {
+                let a = r.tags[0].1;
+                let b = r.tags.get(1).map(|t| t.1).unwrap_or(0.0);
+                (1.0 - (a - b), format!("前两名分数 {a:.2} / {b:.2}"))
+            } else {
+                let scores: Vec<f64> = r.boxes.iter().map(|b| b[5]).collect();
+                let mid: Vec<f64> = scores.iter().copied().filter(|s| (0.1..0.9).contains(s)).collect();
+                let mut u: f64 = mid.iter().map(|s| 1.0 - (2.0 * s - 1.0).abs()).sum();
+                let sure = scores.iter().filter(|s| **s >= 0.5).count();
+                // 一个有把握的目标都没有、又有些模糊的框：可能是新场景
+                if sure == 0 && !mid.is_empty() {
+                    u += 0.5;
+                }
+                (u, format!("{} 个拿不准的目标，{} 个有把握", mid.len(), sure))
+            };
+            out.push(Uncertain { image_id: id, score, detail });
+        }
+        done += chunk.len();
+        progress(done, total);
+    }
+    out.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    out.truncate(limit.max(1));
+    Ok(out)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrelabelResult {
     pub images: usize,
     pub boxes: usize,

@@ -18,6 +18,7 @@ use crate::keypoints::{self, Template};
 use crate::project::{self, Project, ProjectInfo, RecentProject, Stats};
 use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
 use crate::state::AppState;
+use crate::quality;
 use crate::versions;
 use crate::video;
 use crate::training::{self, Jobs, Predictor, PredResult, PrelabelResult, RunDetail, RunInfo, TrainConfig};
@@ -255,6 +256,28 @@ pub async fn fp_test(app: AppHandle, state: State<'_, AppState>, config: evaltoo
 pub async fn stop_fp_test(job: State<'_, evaltools::FpTest>) -> AppResult<()> {
     job.stop();
     Ok(())
+}
+
+#[tauri::command]
+pub async fn quality_scan(app: AppHandle, state: State<'_, AppState>, only_todo: bool) -> AppResult<quality::QualityReport> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app.clone(), "quality-progress");
+        quality::scan(&project, only_todo, &progress)
+    })
+    .await
+    .map_err(|e| msg(format!("质量筛查异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn uncertain_images(app: AppHandle, state: State<'_, AppState>, run_id: i64, limit: usize) -> AppResult<Vec<training::Uncertain>> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app.clone(), "prelabel-progress");
+        training::uncertain_images(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), run_id, limit, &progress)
+    })
+    .await
+    .map_err(|e| msg(format!("挑图异常：{e}")))?
 }
 
 #[tauri::command]

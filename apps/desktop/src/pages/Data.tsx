@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Checkbox, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Progress, Segmented, Tag, Tooltip } from "antd";
 import {
+  AimOutlined,
   CheckSquareOutlined,
+  EyeInvisibleOutlined,
   ClearOutlined,
   HistoryOutlined,
   DatabaseOutlined,
@@ -34,6 +36,7 @@ import { prefs, useApp } from "../store";
 import ImageViewer from "../components/ImageViewer";
 import ExportModal from "../components/ExportModal";
 import VersionsModal from "../components/VersionsModal";
+import { PickModal, QualityModal } from "../components/DataTools";
 
 const PAGE_SIZE = 120;
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
@@ -71,6 +74,8 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const [last, setLast] = useState<LastImport | null>(null);
   const [showExport, setShowExport] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
+  const [showQuality, setShowQuality] = useState(false);
+  const [showPick, setShowPick] = useState(false);
   const [videoPaths, setVideoPaths] = useState<string[]>([]);
   const [videoEvery, setVideoEvery] = useState(Number(prefs.get("videoEvery", "1")));
   const [videoMax, setVideoMax] = useState(Number(prefs.get("videoMax", "0")));
@@ -483,6 +488,8 @@ export default function Data({ project }: { project: ProjectInfo }) {
                   disabled: !last,
                 },
                 { key: "versions", icon: <HistoryOutlined />, label: "数据集版本（保存快照、对比、恢复）" },
+                { key: "quality", icon: <EyeInvisibleOutlined />, label: "图片质量筛查（模糊、过暗、过曝）" },
+                { key: "pick", icon: <AimOutlined />, label: "挑选最值得标的图（用模型）" },
                 { key: "select", icon: <CheckSquareOutlined />, label: "选择图片删除" },
                 { type: "divider" },
                 { key: "all", icon: <ClearOutlined />, label: `清空全部图片（${s.total} 张）`, danger: true },
@@ -490,6 +497,8 @@ export default function Data({ project }: { project: ProjectInfo }) {
               onClick: ({ key }) => {
                 if (key === "last" && last) confirmDelete(`撤销上次导入，删除这 ${last.count} 张图片？`, "last");
                 if (key === "versions") setShowVersions(true);
+                if (key === "quality") setShowQuality(true);
+                if (key === "pick") setShowPick(true);
                 if (key === "select") {
                   setSelecting(true);
                   setSelected(new Set());
@@ -610,6 +619,8 @@ export default function Data({ project }: { project: ProjectInfo }) {
       />
 
       <ExportModal project={project} open={showExport} onClose={() => setShowExport(false)} />
+      <QualityModal project={project} open={showQuality} onClose={() => setShowQuality(false)} onChanged={load} />
+      <PickModal project={project} open={showPick} onClose={() => setShowPick(false)} />
       <VersionsModal
         project={project}
         open={showVersions}

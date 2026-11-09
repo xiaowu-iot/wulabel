@@ -382,6 +382,13 @@ export interface FpSummary {
   dir: string;
 }
 
+/** 图片质量筛查结果。issues：blur 模糊 / dark 过暗 / bright 过曝 / flat 对比度低 */
+export interface QualityReport {
+  checked: number;
+  failed: number;
+  items: { imageId: number; issues: string[]; sharpness: number; brightness: number; overexposed: number; contrast: number }[];
+}
+
 export interface SplitEval {
   thresholds?: Thresholds;
   images: number;
@@ -554,6 +561,9 @@ export const api = {
   stopFpTest: () => invoke<void>("stop_fp_test"),
   importNegatives: (paths: string[]) => invoke<number>("import_negatives", { paths }),
   augPreview: (aug: AugConfig, imgSize: number) => invoke<string[]>("aug_preview", { aug, imgSize }),
+  qualityScan: (onlyTodo: boolean) => invoke<QualityReport>("quality_scan", { onlyTodo }),
+  uncertainImages: (runId: number, limit: number) =>
+    invoke<{ imageId: number; score: number; detail: string }[]>("uncertain_images", { runId, limit }),
   listVersions: () => invoke<VersionInfo[]>("list_versions"),
   createVersion: (name: string, note: string, ratios: [number, number, number]) =>
     invoke<VersionInfo>("create_version", { name, note, ratios }),

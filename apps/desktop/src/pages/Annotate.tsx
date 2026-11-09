@@ -170,6 +170,8 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const setPage = useApp((s) => s.setPage);
   const takeFocusImage = useApp((s) => s.takeFocusImage);
   const highlight = useApp((s) => s.highlight);
+  const queue = useApp((s) => s.queue);
+  const clearQueue = useApp((s) => s.clearQueue);
 
   const task = project.task;
   const isSeg = task === "segment";
@@ -179,7 +181,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
 
   const [labels, setLabels] = useState<Label[]>([]);
   const [curLabel, setCurLabel] = useState<number | null>(null);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState(queue ? "queue" : "all");
   const [ids, setIds] = useState<number[] | null>(null);
   const [idx, setIdx] = useState(0);
   const [meta, setMeta] = useState<ImageAnnotations | null>(null);
@@ -416,7 +418,14 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     let alive = true;
     (async () => {
       await flush();
-      const all = await api.listImageIds(filter === "all" ? null : filter);
+      let all: number[];
+      if (filter === "queue" && queue) {
+        // 指定的一批图：按给定顺序，去掉已经删除的
+        const exist = new Set(await api.listImageIds(null));
+        all = queue.ids.filter((id) => exist.has(id));
+      } else {
+        all = await api.listImageIds(filter === "all" || filter === "queue" ? null : filter);
+      }
       if (!alive) return;
       let start = 0;
       const focus = takeFocusImage();
@@ -432,7 +441,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     return () => {
       alive = false;
     };
-  }, [filter, flush, takeFocusImage, message]);
+  }, [filter, flush, takeFocusImage, message, queue]);
 
   const clearSam = () => {
     setSamPoints([]);
@@ -1079,7 +1088,26 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
         </span>
         <Button size="small" icon={<RightOutlined />} disabled={!ids || idx >= ids.length - 1} onClick={() => go(idx + 1)} />
         {meta && <Tag color={STATUS_TEXT[meta.status].color}>{STATUS_TEXT[meta.status].text}</Tag>}
-        <Segmented size="small" value={filter} options={FILTERS} onChange={(v) => setFilter(v as string)} />
+        <Segmented
+          size="small"
+          value={filter}
+          options={queue ? [...FILTERS, { label: `${queue.name} ${queue.ids.length}`, value: "queue" }] : FILTERS}
+          onChange={(v) => setFilter(v as string)}
+        />
+        {queue && (
+          <Tooltip title="不再显示这批图">
+            <Button
+              size="small"
+              type="text"
+              onClick={() => {
+                clearQueue();
+                setFilter("all");
+              }}
+            >
+              ×
+            </Button>
+          </Tooltip>
+        )}
         <div className="spacer" />
         <span className="dim" style={{ fontSize: 12 }}>
           {Math.round(scale * 100)}%
