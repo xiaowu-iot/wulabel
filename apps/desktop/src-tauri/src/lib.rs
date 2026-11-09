@@ -42,6 +42,7 @@ pub fn run() {
         .manage(state::AppState::default())
         .manage(Arc::new(training::Jobs::default()))
         .manage(training::Predictor::default())
+        .manage(video::Extractor::default())
         .manage(Arc::new(deploy::Live::default()))
         .setup(|app| {
             // 训练环境有好几 GB，放本机目录（Local），不放会漫游同步的 Roaming
@@ -59,6 +60,9 @@ pub fn run() {
             commands::remove_recent,
             commands::import_images,
             commands::extract_video,
+            commands::probe_stream,
+            commands::extract_stream,
+            commands::stop_extract,
             commands::list_images,
             commands::project_stats,
             commands::last_import,

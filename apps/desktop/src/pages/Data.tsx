@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { App, Button, Checkbox, Dropdown, Empty, InputNumber, Modal, Pagination, Progress, Segmented, Tag, Tooltip } from "antd";
+import { App, Button, Checkbox, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Progress, Segmented, Tag, Tooltip } from "antd";
 import {
   CheckSquareOutlined,
   ClearOutlined,
@@ -8,6 +8,7 @@ import {
   ExportOutlined,
   FileImageOutlined,
   FolderAddOutlined,
+  LinkOutlined,
   RollbackOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
@@ -23,6 +24,7 @@ import {
   ImportResult,
   LastImport,
   ProjectInfo,
+  StreamInfo,
   thumbUrl,
   VideoProgress,
 } from "../api";
@@ -69,6 +71,16 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const [videoEvery, setVideoEvery] = useState(Number(prefs.get("videoEvery", "1")));
   const [videoMax, setVideoMax] = useState(Number(prefs.get("videoMax", "0")));
   const [videoProgress, setVideoProgress] = useState<VideoProgress | null>(null);
+  const [streamOpen, setStreamOpen] = useState(false);
+  const [streamUrl, setStreamUrl] = useState(prefs.get("streamUrl", ""));
+  const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
+  const [probing, setProbing] = useState(false);
+  const [streamEvery, setStreamEvery] = useState(Number(prefs.get("streamEvery", "1")));
+  const [streamMax, setStreamMax] = useState(Number(prefs.get("streamMax", "200")));
+  const [streamMinutes, setStreamMinutes] = useState(Number(prefs.get("streamMinutes", "5")));
+  const [streamDedup, setStreamDedup] = useState(prefs.get("streamDedup", "0") === "1");
+  const [streamRunning, setStreamRunning] = useState(false);
+  const [streamMin, setStreamMin] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -279,6 +291,72 @@ export default function Data({ project }: { project: ProjectInfo }) {
     }
   };
 
+  const fmtSecs = (d: number | null) =>
+    d == null ? "—" : d < 60 ? `${Math.round(d)} 秒` : `${Math.floor(d / 60)} 分 ${Math.round(d % 60)} 秒`;
+
+  const testStream = async () => {
+    const url = streamUrl.trim();
+    if (!url) return;
+    setProbing(true);
+    setStreamInfo(null);
+    try {
+      const info = await api.probeStream(url);
+      setStreamInfo(info);
+      if (info.isLive && streamMax === 0) setStreamMax(200);
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  const startStream = async () => {
+    const url = streamUrl.trim();
+    if (!url || importing.current) return;
+    const every = streamEvery;
+    const max = streamMax;
+    const minutes = streamInfo && !streamInfo.isLive ? 0 : streamMinutes; // 回放不需要时长上限
+    if (streamInfo?.isLive && max === 0 && minutes === 0) {
+      message.warning("直播是无限流，请至少设一个上限：最多帧数，或最长采集时长");
+      return;
+    }
+    const dedup = streamDedup;
+    prefs.set("streamUrl", url);
+    prefs.set("streamEvery", String(every));
+    prefs.set("streamMax", String(max));
+    prefs.set("streamMinutes", String(minutes));
+    prefs.set("streamDedup", dedup ? "1" : "0");
+    setStreamOpen(false);
+    setStreamMin(false);
+    importing.current = true;
+    setStreamRunning(true);
+    setVideoProgress({ stage: "extract", done: 0, total: max, speed: 0, detail: "连接中…" });
+    const unlisten = await listen<VideoProgress>("video-progress", (e) => setVideoProgress(e.payload));
+    try {
+      const r = await api.extractStream(url, every, max, minutes, dedup);
+      await load();
+      await refreshStats();
+      const text = `采集完成：新增 ${r.added} 张` + (r.duplicated ? `，跳过重复 ${r.duplicated} 张` : "");
+      message.success(text);
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      unlisten();
+      setVideoProgress(null);
+      setStreamRunning(false);
+      setStreamMin(false);
+      importing.current = false;
+    }
+  };
+
+  const stopStream = async () => {
+    try {
+      await api.stopExtract();
+    } catch (e) {
+      message.error(errText(e));
+    }
+  };
+
   const s = project.stats;
   const pct = s.total ? Math.round(((s.labeled + s.reviewed) / s.total) * 100) : 0;
 
@@ -314,9 +392,15 @@ export default function Data({ project }: { project: ProjectInfo }) {
               items: [
                 { key: "files", icon: <FileImageOutlined />, label: "导入图片文件" },
                 { key: "video", icon: <VideoCameraOutlined />, label: "导入视频（抽帧）" },
+                { key: "stream", icon: <LinkOutlined />, label: "从视频流抽帧（RTSP / 直播 / 回放）" },
                 { key: "dataset", icon: <DatabaseOutlined />, label: "导入带标注的数据集（YOLO / COCO / VOC）" },
               ],
-              onClick: ({ key }) => (key === "files" ? pickFiles() : key === "video" ? pickVideos() : pickDataset()),
+              onClick: ({ key }) => {
+                if (key === "files") pickFiles();
+                else if (key === "video") pickVideos();
+                else if (key === "stream") setStreamOpen(true);
+                else pickDataset();
+              },
             }}
           >
             <Button>
@@ -499,7 +583,80 @@ export default function Data({ project }: { project: ProjectInfo }) {
         </p>
       </Modal>
 
-      <Modal open={!!videoProgress} closable={false} footer={null} maskClosable={false} title="正在处理视频">
+      <Modal
+        open={streamOpen}
+        title="从视频流抽帧"
+        okText="开始采集"
+        cancelText="取消"
+        okButtonProps={{ disabled: !streamUrl.trim() }}
+        onOk={startStream}
+        onCancel={() => setStreamOpen(false)}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          支持 RTSP 摄像头 / 直播流,以及 http(s) 的回放、点播地址(mp4、m3u8、flv)。
+        </p>
+        <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+          <Input
+            placeholder="rtsp://…  或  https://…"
+            value={streamUrl}
+            onChange={(e) => {
+              setStreamUrl(e.target.value);
+              setStreamInfo(null);
+            }}
+            onPressEnter={testStream}
+          />
+          <Button loading={probing} onClick={testStream}>
+            测试连接
+          </Button>
+        </div>
+        {streamInfo && (
+          <div style={{ fontSize: 12, marginBottom: 10, color: "var(--good, #2fb67c)" }}>
+            ✓ {streamInfo.width}×{streamInfo.height} · {streamInfo.codec || "视频"}
+            {streamInfo.fps ? ` · ${streamInfo.fps.toFixed(0)} fps` : ""} ·{" "}
+            {streamInfo.isLive ? "直播流（无限，需设上限）" : `回放流 · 时长 ${fmtSecs(streamInfo.durationSecs)}`}
+          </div>
+        )}
+        <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+          <span>每隔</span>
+          <InputNumber min={0.1} max={600} step={0.5} value={streamEvery} onChange={(v) => setStreamEvery(v ?? 1)} />
+          <span>秒抽 1 帧</span>
+        </div>
+        <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+          <span>最多抽</span>
+          <InputNumber min={0} max={100000} step={50} value={streamMax} onChange={(v) => setStreamMax(v ?? 0)} />
+          <span>帧（0 = 不限）</span>
+        </div>
+        {(!streamInfo || streamInfo.isLive) && (
+          <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+            <span>最长采集</span>
+            <InputNumber min={0} max={1440} step={1} value={streamMinutes} onChange={(v) => setStreamMinutes(v ?? 0)} />
+            <span>分钟（0 = 不限，仅直播）</span>
+          </div>
+        )}
+        <Checkbox checked={streamDedup} onChange={(e) => setStreamDedup(e.target.checked)}>
+          跳过几乎相同的帧（画面静止时少存重复图）
+        </Checkbox>
+        <p className="dim" style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}>
+          直播是无限流,务必设「最多帧」或「最长时长」。采集中可随时停止,已抽的帧会保留并导入。首次使用会自动下载 ffmpeg。
+        </p>
+      </Modal>
+
+      <Modal
+        open={!!videoProgress && !streamMin}
+        closable={false}
+        maskClosable={false}
+        title={streamRunning ? "正在采集视频流" : "正在处理视频"}
+        footer={
+          streamRunning ? (
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+              <Button onClick={() => setStreamMin(true)}>最小化</Button>
+              <Button danger onClick={stopStream}>
+                停止采集
+              </Button>
+            </div>
+          ) : null
+        }
+      >
         {videoProgress &&
           (() => {
             const vp = videoProgress;
@@ -518,6 +675,39 @@ export default function Data({ project }: { project: ProjectInfo }) {
             );
           })()}
       </Modal>
+
+      {streamRunning && streamMin && videoProgress && (
+        <div
+          style={{
+            position: "fixed",
+            right: 20,
+            bottom: 20,
+            zIndex: 1000,
+            background: "var(--panel, #20242b)",
+            border: "1px solid var(--border, #3a3f47)",
+            borderRadius: 8,
+            padding: "10px 14px",
+            boxShadow: "0 4px 16px rgba(0,0,0,.35)",
+            minWidth: 220,
+          }}
+        >
+          <div style={{ fontSize: 13 }}>
+            {videoProgress.stage === "download"
+              ? "正在下载 ffmpeg…"
+              : videoProgress.stage === "import"
+                ? "正在导入…"
+                : `采集中 · 已抽 ${videoProgress.done} 帧`}
+          </div>
+          <div className="row" style={{ gap: 8, marginTop: 8, justifyContent: "flex-end" }}>
+            <Button size="small" onClick={() => setStreamMin(false)}>
+              展开
+            </Button>
+            <Button size="small" danger onClick={stopStream}>
+              停止
+            </Button>
+          </div>
+        </div>
+      )}
 
       {dragging && (
         <div className="drop-mask">

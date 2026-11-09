@@ -77,6 +77,15 @@ export interface VideoProgress {
   detail: string;
 }
 
+export interface StreamInfo {
+  width: number;
+  height: number;
+  fps: number;
+  durationSecs: number | null;
+  isLive: boolean;
+  codec: string;
+}
+
 export interface LastImport {
   count: number;
   createdAt: number;
@@ -346,6 +355,10 @@ export const api = {
   importImages: (paths: string[], copy: boolean) => invoke<ImportResult>("import_images", { paths, copy }),
   extractVideo: (paths: string[], every: number, maxFrames: number) =>
     invoke<ExtractResult>("extract_video", { paths, every, maxFrames }),
+  probeStream: (url: string) => invoke<StreamInfo>("probe_stream", { url }),
+  extractStream: (url: string, every: number, maxFrames: number, maxMinutes: number, dedup: boolean) =>
+    invoke<ExtractResult>("extract_stream", { url, every, maxFrames, maxMinutes, dedup }),
+  stopExtract: () => invoke<void>("stop_extract"),
   listImages: (status: string | null, offset: number, limit: number) =>
     invoke<ImagePage>("list_images", { status, offset, limit }),
   projectStats: () => invoke<Stats>("project_stats"),

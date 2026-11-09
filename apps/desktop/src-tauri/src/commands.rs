@@ -140,6 +140,60 @@ pub async fn extract_video(
     .map_err(|e| msg(format!("抽帧任务异常：{e}")))?
 }
 
+/// 测试连接：探测视频流信息（可达性、分辨率、直播还是回放）
+#[tauri::command]
+pub async fn probe_stream(app: AppHandle, url: String) -> AppResult<video::StreamInfo> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let rt = app.state::<Runtime>();
+        let a = app.clone();
+        let progress = move |stage: &str, done: u64, total: u64, speed: u64, detail: &str| {
+            let _ = a.emit(
+                "video-progress",
+                VideoProgress { stage: stage.to_string(), done, total, speed, detail: detail.to_string() },
+            );
+        };
+        video::probe_stream(&rt, &url, &|_line| {}, &progress)
+    })
+    .await
+    .map_err(|e| msg(format!("探测任务异常：{e}")))?
+}
+
+/// 从视频流抽帧：直播用最多帧数 / 最长时长做上限，回放读到结尾；dedup 跳过相似帧
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn extract_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    every: f64,
+    max_frames: u64,
+    max_minutes: f64,
+    dedup: bool,
+) -> AppResult<video::ExtractResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let rt = app.state::<Runtime>();
+        let ext = app.state::<video::Extractor>();
+        let a = app.clone();
+        let progress = move |stage: &str, done: u64, total: u64, speed: u64, detail: &str| {
+            let _ = a.emit(
+                "video-progress",
+                VideoProgress { stage: stage.to_string(), done, total, speed, detail: detail.to_string() },
+            );
+        };
+        video::extract_stream(&project, &rt, &ext, &url, every, max_frames, max_minutes, dedup, &progress, &|_line| {})
+    })
+    .await
+    .map_err(|e| msg(format!("采集任务异常：{e}")))?
+}
+
+/// 停止正在进行的视频流采集，已抽的帧会照常导入
+#[tauri::command]
+pub async fn stop_extract(ext: State<'_, video::Extractor>) -> AppResult<()> {
+    ext.stop();
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_images(
     state: State<'_, AppState>,
