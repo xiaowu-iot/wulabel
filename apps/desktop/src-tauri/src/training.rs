@@ -200,18 +200,18 @@ pub fn start(p: Arc<Project>, rt: &Runtime, jobs: Arc<Jobs>, cfg: TrainConfig, s
     .inspect_err(|_| {
         let _ = fs::remove_dir_all(&dir);
     })?;
-    if res.boxes == 0 {
+    if res.boxes + res.polys == 0 {
         let _ = fs::remove_dir_all(&dir);
-        return Err(msg("没有任何标注框，先标注一些图片再训练"));
+        return Err(msg("没有任何标注，先标注一些图片再训练"));
     }
     let worker_cfg = serde_json::json!({
-        "dataset": ds, "out": dir, "model": cfg.model, "classes": res.classes,
+        "dataset": ds, "out": dir, "model": cfg.model, "classes": res.classes, "task": p.meta.task,
         "epochs": cfg.epochs, "img_size": cfg.img_size, "batch": cfg.batch, "lr": cfg.lr, "device": cfg.device,
     });
     fs::write(dir.join("config.json"), serde_json::to_string_pretty(&worker_cfg)?)?;
     let mut saved = serde_json::to_value(&cfg)?;
     saved["classes"] = serde_json::json!(res.classes);
-    saved["images"] = serde_json::json!({ "train": res.train, "val": res.val, "test": res.test, "boxes": res.boxes });
+    saved["images"] = serde_json::json!({ "train": res.train, "val": res.val, "test": res.test, "boxes": res.boxes, "polys": res.polys });
     let id = {
         let conn = p.conn.lock();
         conn.execute(
@@ -330,7 +330,17 @@ pub fn stop(jobs: &Jobs, id: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// 分割模型（Mask R-CNN）不支持当前的 ONNX / 部署流程，提前拦住给出清楚提示
+pub fn ensure_exportable(p: &Project, id: i64) -> AppResult<()> {
+    let run = get_run(p, id)?;
+    if run.config["model"].as_str().map(is_seg_model).unwrap_or(false) {
+        return Err(msg("分割模型暂不支持导出 ONNX / 生成部署包，可以在软件内直接用它做预标注"));
+    }
+    Ok(())
+}
+
 pub fn export_onnx(p: &Project, rt: &Runtime, id: i64, log: &(dyn Fn(String) + Sync)) -> AppResult<String> {
+    ensure_exportable(p, id)?;
     let run = get_run(p, id)?;
     let dir = PathBuf::from(&run.dir);
     let w = dir.join("best.pt");
@@ -377,6 +387,37 @@ pub struct PredBox {
     pub score: f64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PredPoly {
+    pub label_id: i64,
+    /// 多边形点 [x1, y1, x2, y2, ...]，原图像素坐标
+    pub points: Vec<f64>,
+    pub score: f64,
+}
+
+/// 预测结果：检测模型给框，分割模型给多边形
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PredResult {
+    pub boxes: Vec<PredBox>,
+    pub polys: Vec<PredPoly>,
+}
+
+/// 推理进程返回的一张图的原始结果
+#[derive(Debug, Clone, Default)]
+pub struct RawPred {
+    /// [x, y, w, h, 类别序号, 分数]
+    pub boxes: Vec<[f64; 6]>,
+    /// (类别序号, 分数, [x1, y1, ...])
+    pub polys: Vec<(usize, f64, Vec<f64>)>,
+}
+
+/// 分割模型是不是 Mask R-CNN（Rust 侧判断，和 worker 的 MODELS 对应）
+fn is_seg_model(model: &str) -> bool {
+    model.starts_with("maskrcnn")
+}
+
 impl Predictor {
     pub fn shutdown(&self) {
         if let Some(mut s) = self.proc.lock().take() {
@@ -392,7 +433,7 @@ impl Predictor {
         weights: &Path,
         items: &[(i64, PathBuf)],
         conf: f64,
-        on_pred: &mut dyn FnMut(i64, Vec<[f64; 6]>),
+        on_pred: &mut dyn FnMut(i64, RawPred),
     ) -> AppResult<Vec<String>> {
         let mut guard = self.proc.lock();
         let alive = guard.as_mut().map(|s| matches!(s.child.try_wait(), Ok(None))).unwrap_or(false);
@@ -424,7 +465,23 @@ impl Predictor {
             match v["type"].as_str() {
                 Some("pred") => {
                     let boxes: Vec<[f64; 6]> = serde_json::from_value(v["boxes"].clone()).unwrap_or_default();
-                    on_pred(v["id"].as_i64().unwrap_or(-1), boxes);
+                    let mut polys = Vec::new();
+                    if let Some(arr) = v["polys"].as_array() {
+                        for pl in arr {
+                            let Some(a) = pl.as_array() else { continue };
+                            // [类别序号, 分数, x1, y1, ...]，至少 3 个点
+                            if a.len() < 8 {
+                                continue;
+                            }
+                            let cls = a[0].as_f64().unwrap_or(0.0) as usize;
+                            let score = a[1].as_f64().unwrap_or(0.0);
+                            let pts: Vec<f64> = a[2..].iter().filter_map(|x| x.as_f64()).collect();
+                            if pts.len() >= 6 && pts.len() % 2 == 0 {
+                                polys.push((cls, score, pts));
+                            }
+                        }
+                    }
+                    on_pred(v["id"].as_i64().unwrap_or(-1), RawPred { boxes, polys });
                 }
                 Some("done") => {
                     return Ok(serde_json::from_value(v["classes"].clone()).unwrap_or_default());
@@ -468,6 +525,15 @@ fn to_boxes(raw: Vec<[f64; 6]>, map: &[i64]) -> Vec<PredBox> {
         .filter_map(|b| {
             let label_id = *map.get(b[4] as usize)?;
             Some(PredBox { label_id, x: b[0], y: b[1], w: b[2], h: b[3], score: b[5] })
+        })
+        .collect()
+}
+
+fn to_polys(raw: Vec<(usize, f64, Vec<f64>)>, map: &[i64]) -> Vec<PredPoly> {
+    raw.into_iter()
+        .filter_map(|(cls, score, points)| {
+            let label_id = *map.get(cls)?;
+            Some(PredPoly { label_id, points, score })
         })
         .collect()
 }
@@ -613,13 +679,13 @@ mod tests {
 }
 
 /// 预测单张图，结果交给前端放进画布（不直接保存）
-pub fn predict_one(p: &Project, rt: &Runtime, pr: &Predictor, run_id: i64, image_id: i64, conf: f64) -> AppResult<Vec<PredBox>> {
+pub fn predict_one(p: &Project, rt: &Runtime, pr: &Predictor, run_id: i64, image_id: i64, conf: f64) -> AppResult<PredResult> {
     let w = weights_of(p, run_id)?;
     let (stored, _) = crate::images::locate(p, image_id)?;
-    let mut raw = Vec::new();
-    let classes = pr.request(rt, &w, &[(image_id, p.resolve(&stored))], conf, &mut |_, b| raw = b)?;
+    let mut raw = RawPred::default();
+    let classes = pr.request(rt, &w, &[(image_id, p.resolve(&stored))], conf, &mut |_, r| raw = r)?;
     let map = class_map(p, &classes)?;
-    Ok(to_boxes(raw, &map))
+    Ok(PredResult { boxes: to_boxes(raw.boxes, &map), polys: to_polys(raw.polys, &map) })
 }
 
 /// 批量预测指定图片，返回每张图的预测框（体检用）
@@ -647,7 +713,7 @@ pub fn predict_many(
     let mut done = 0;
     for chunk in items.chunks(16) {
         let mut got = Vec::new();
-        let classes = pr.request(rt, &w, chunk, conf, &mut |id, b| got.push((id, b)))?;
+        let classes = pr.request(rt, &w, chunk, conf, &mut |id, r| got.push((id, r.boxes)))?;
         if map.is_none() {
             map = Some(class_map(p, &classes)?);
         }
@@ -696,16 +762,28 @@ pub fn prelabel_all(
     let mut done = 0;
     progress(0, total);
     for chunk in items.chunks(16) {
-        let mut got: Vec<(i64, Vec<[f64; 6]>)> = Vec::new();
-        let classes = pr.request(rt, &w, chunk, conf, &mut |id, b| got.push((id, b)))?;
+        let mut got: Vec<(i64, RawPred)> = Vec::new();
+        let classes = pr.request(rt, &w, chunk, conf, &mut |id, r| got.push((id, r)))?;
         if map.is_none() {
             map = Some(class_map(p, &classes)?);
         }
         let m = map.as_ref().unwrap();
         for (id, raw) in got {
-            let boxes = to_boxes(raw, m);
-            if !boxes.is_empty() {
-                let anns: Vec<Annotation> = boxes
+            // 分割模型给多边形，检测模型给框
+            let polys = to_polys(raw.polys, m);
+            let anns: Vec<Annotation> = if !polys.is_empty() {
+                polys
+                    .iter()
+                    .map(|pl| Annotation {
+                        label_id: Some(pl.label_id),
+                        kind: "polygon".into(),
+                        data: serde_json::json!(pl.points),
+                        score: Some(pl.score),
+                        source: "model".into(),
+                    })
+                    .collect()
+            } else {
+                to_boxes(raw.boxes, m)
                     .iter()
                     .map(|b| Annotation {
                         label_id: Some(b.label_id),
@@ -714,7 +792,9 @@ pub fn prelabel_all(
                         score: Some(b.score),
                         source: "model".into(),
                     })
-                    .collect();
+                    .collect()
+            };
+            if !anns.is_empty() {
                 result.boxes += anns.len();
                 result.images += 1;
                 annotations::save_predictions(p, id, &anns)?;

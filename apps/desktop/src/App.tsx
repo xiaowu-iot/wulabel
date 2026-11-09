@@ -134,7 +134,7 @@ export default function App() {
         {page === "data" && project && <Data project={project} />}
         {page === "annotate" && project && <Annotate project={project} />}
         {page === "health" && project && <Health project={project} />}
-        {page === "train" && project && <Train />}
+        {page === "train" && project && <Train project={project} />}
         {page === "eval" && project && <Eval project={project} />}
         {page === "deploy" && project && <Deploy project={project} />}
         {page === "settings" && <Settings />}

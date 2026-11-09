@@ -15,7 +15,7 @@ use crate::project::{self, Project, ProjectInfo, RecentProject, Stats};
 use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
 use crate::state::AppState;
 use crate::video;
-use crate::training::{self, Jobs, Predictor, PredBox, PrelabelResult, RunDetail, RunInfo, TrainConfig};
+use crate::training::{self, Jobs, Predictor, PredResult, PrelabelResult, RunDetail, RunInfo, TrainConfig};
 
 fn config_dir(app: &AppHandle) -> AppResult<PathBuf> {
     Ok(app.path().app_config_dir()?)
@@ -280,7 +280,7 @@ pub async fn export_onnx(app: AppHandle, state: State<'_, AppState>, id: i64) ->
 }
 
 #[tauri::command]
-pub async fn predict_image(app: AppHandle, state: State<'_, AppState>, run_id: i64, image_id: i64, conf: f64) -> AppResult<Vec<PredBox>> {
+pub async fn predict_image(app: AppHandle, state: State<'_, AppState>, run_id: i64, image_id: i64, conf: f64) -> AppResult<PredResult> {
     let project = state.current()?;
     tauri::async_runtime::spawn_blocking(move || {
         training::predict_one(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), run_id, image_id, conf)
@@ -367,6 +367,7 @@ pub async fn export_formats(
     out_dir: String,
 ) -> AppResult<Vec<deploy::FormatResult>> {
     let project = state.current()?;
+    training::ensure_exportable(&project, run_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let a = app.clone();
         deploy::export_formats(&project, &app.state::<Runtime>(), run_id, &formats, size, &PathBuf::from(out_dir), &move |l| {
@@ -386,6 +387,7 @@ pub async fn build_service(
     out_dir: String,
 ) -> AppResult<String> {
     let project = state.current()?;
+    training::ensure_exportable(&project, run_id)?;
     tauri::async_runtime::spawn_blocking(move || {
         let a = app.clone();
         deploy::build_service(&project, &app.state::<Runtime>(), run_id, &config, &PathBuf::from(out_dir), &move |l| {

@@ -8,6 +8,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   ExpandOutlined,
+  HighlightOutlined,
   LeftOutlined,
   PlusOutlined,
   RedoOutlined,
@@ -19,7 +20,7 @@ import {
 } from "@ant-design/icons";
 import { api, Annotation, errText, ImageAnnotations, ImageStatus, imageUrl, Label, ProjectInfo, RunInfo, thumbUrl } from "../api";
 import { prefs, useApp } from "../store";
-import AnnotCanvas, { Box, RectXYWH, Tool } from "../components/AnnotCanvas";
+import AnnotCanvas, { Box, Poly, RectXYWH, Tool } from "../components/AnnotCanvas";
 
 const PALETTE = ["#3d8bfd", "#e5534b", "#2fb67c", "#e7a33e", "#9b7bf2", "#14b8a6", "#f472b6", "#a3e635", "#f97316", "#60a5fa"];
 const FILTERS = [
@@ -59,7 +60,32 @@ const toAnn = (b: Box): Annotation => ({
   source: b.source,
 });
 
+const toPoly = (a: Annotation): Poly => ({
+  key: newKey(),
+  labelId: a.labelId,
+  points: a.data,
+  source: a.source,
+  score: a.score,
+});
+
+const polyToAnn = (pl: Poly): Annotation => ({
+  labelId: pl.labelId,
+  type: "polygon",
+  data: pl.points,
+  score: pl.score ?? null,
+  source: pl.source,
+});
+
+const polyBox = (pts: number[]): RectXYWH => {
+  const xs = pts.filter((_, i) => i % 2 === 0);
+  const ys = pts.filter((_, i) => i % 2 === 1);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+};
+
 type SaveState = "saved" | "dirty" | "saving" | "error";
+type Snap = { boxes: Box[]; polys: Poly[] };
 
 export default function Annotate({ project }: { project: ProjectInfo }) {
   const { message, modal } = App.useApp();
@@ -68,6 +94,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const takeFocusImage = useApp((s) => s.takeFocusImage);
   const highlight = useApp((s) => s.highlight);
 
+  const isSeg = project.task === "segment";
+  const drawTool: Tool = isSeg ? "polygon" : "rect";
+
   const [labels, setLabels] = useState<Label[]>([]);
   const [curLabel, setCurLabel] = useState<number | null>(null);
   const [filter, setFilter] = useState("all");
@@ -75,8 +104,10 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const [idx, setIdx] = useState(0);
   const [meta, setMeta] = useState<ImageAnnotations | null>(null);
   const [boxes, setBoxes] = useState<Box[]>([]);
+  const [polys, setPolys] = useState<Poly[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  const [tool, setTool] = useState<Tool>("rect");
+  const [tool, setTool] = useState<Tool>(drawTool);
+  const [drawingPoly, setDrawingPoly] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [fitSignal, setFitSignal] = useState(0);
   const [showNames, setShowNames] = useState(true);
@@ -86,9 +117,10 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const [histLen, setHistLen] = useState({ past: 0, future: 0 });
 
   const boxesRef = useRef<Box[]>([]);
+  const polysRef = useRef<Poly[]>([]);
   const metaRef = useRef<ImageAnnotations | null>(null);
-  const othersRef = useRef<Annotation[]>([]); // 非矩形框的标注原样保留
-  const history = useRef<{ past: Box[][]; future: Box[][] }>({ past: [], future: [] });
+  const othersRef = useRef<Annotation[]>([]); // 矩形框和多边形以外的标注原样保留
+  const history = useRef<{ past: Snap[]; future: Snap[] }>({ past: [], future: [] });
   const dirty = useRef(false);
   const timer = useRef<number>();
 
@@ -105,7 +137,11 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     dirty.current = false;
     setSaveState("saving");
     try {
-      const status = await api.saveAnnotations(m.id, [...boxesRef.current.map(toAnn), ...othersRef.current]);
+      const status = await api.saveAnnotations(m.id, [
+        ...boxesRef.current.map(toAnn),
+        ...polysRef.current.map(polyToAnn),
+        ...othersRef.current,
+      ]);
       if (metaRef.current?.id === m.id) {
         metaRef.current = { ...metaRef.current, status };
         setMeta(metaRef.current);
@@ -125,46 +161,68 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     timer.current = window.setTimeout(flush, 400);
   }, [flush]);
 
-  const setAll = (next: Box[]) => {
+  const setAllBoxes = (next: Box[]) => {
     boxesRef.current = next;
     setBoxes(next);
   };
+  const setAllPolys = (next: Poly[]) => {
+    polysRef.current = next;
+    setPolys(next);
+  };
+  const snap = (): Snap => ({ boxes: boxesRef.current, polys: polysRef.current });
+  const restore = (s: Snap) => {
+    setAllBoxes(s.boxes);
+    setAllPolys(s.polys);
+  };
+  const pushHistory = () => {
+    const h = history.current;
+    h.past.push(snap());
+    if (h.past.length > HISTORY_MAX) h.past.shift();
+    h.future = [];
+    setHistLen({ past: h.past.length, future: 0 });
+  };
 
-  /** 修改标注都走这里：记历史、自动保存 */
+  /** 改矩形框：记历史、自动保存 */
   const commit = useCallback(
     (next: Box[]) => {
-      const h = history.current;
-      h.past.push(boxesRef.current);
-      if (h.past.length > HISTORY_MAX) h.past.shift();
-      h.future = [];
-      setHistLen({ past: h.past.length, future: 0 });
-      setAll(next);
+      pushHistory();
+      setAllBoxes(next);
       schedule();
     },
-    [schedule],
+    [schedule], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  /** 改多边形：记历史、自动保存 */
+  const commitPoly = useCallback(
+    (next: Poly[]) => {
+      pushHistory();
+      setAllPolys(next);
+      schedule();
+    },
+    [schedule], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const undo = useCallback(() => {
     const h = history.current;
     const prev = h.past.pop();
     if (!prev) return;
-    h.future.push(boxesRef.current);
+    h.future.push(snap());
     setHistLen({ past: h.past.length, future: h.future.length });
-    setAll(prev);
+    restore(prev);
     setSelected(null);
     schedule();
-  }, [schedule]);
+  }, [schedule]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const redo = useCallback(() => {
     const h = history.current;
     const next = h.future.pop();
     if (!next) return;
-    h.past.push(boxesRef.current);
+    h.past.push(snap());
     setHistLen({ past: h.past.length, future: h.future.length });
-    setAll(next);
+    restore(next);
     setSelected(null);
     schedule();
-  }, [schedule]);
+  }, [schedule]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 离开页面前保存
   useEffect(
@@ -231,14 +289,18 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     });
   };
 
-  /** 选类别：同时把选中的框改成这个类别 */
+  /** 选类别：同时把选中的框/多边形改成这个类别 */
   const pickLabel = (id: number) => {
     setCurLabel(id);
-    if (selected) {
-      const b = boxesRef.current.find((x) => x.key === selected);
-      if (b && b.labelId !== id)
-        commit(boxesRef.current.map((x) => (x.key === selected ? { ...x, labelId: id, source: "manual", score: null } : x)));
+    if (!selected) return;
+    const b = boxesRef.current.find((x) => x.key === selected);
+    if (b && b.labelId !== id) {
+      commit(boxesRef.current.map((x) => (x.key === selected ? { ...x, labelId: id, source: "manual", score: null } : x)));
+      return;
     }
+    const pl = polysRef.current.find((x) => x.key === selected);
+    if (pl && pl.labelId !== id)
+      commitPoly(polysRef.current.map((x) => (x.key === selected ? { ...x, labelId: id, source: "manual", score: null } : x)));
   };
 
   // ---------- 图片列表与翻图 ----------
@@ -268,8 +330,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const applyLoaded = (m: ImageAnnotations) => {
     metaRef.current = m;
     setMeta(m);
-    othersRef.current = m.annotations.filter((a) => a.type !== "bbox");
-    setAll(m.annotations.filter((a) => a.type === "bbox").map(toBox));
+    othersRef.current = m.annotations.filter((a) => a.type !== "bbox" && a.type !== "polygon");
+    setAllBoxes(m.annotations.filter((a) => a.type === "bbox").map(toBox));
+    setAllPolys(m.annotations.filter((a) => a.type === "polygon").map(toPoly));
     history.current = { past: [], future: [] };
     setHistLen({ past: 0, future: 0 });
     setSelected(null);
@@ -285,7 +348,8 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     if (imageId === undefined) {
       metaRef.current = null;
       setMeta(null);
-      setAll([]);
+      setAllBoxes([]);
+      setAllPolys([]);
       return;
     }
     let alive = true;
@@ -340,6 +404,19 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const onUpdate = (key: string, r: RectXYWH) =>
     commit(boxesRef.current.map((b) => (b.key === key ? { ...b, ...r, source: "manual", score: null } : b)));
 
+  const onCreatePoly = (points: number[]) => {
+    if (curLabel == null) {
+      message.warning("先在右侧添加一个类别");
+      return;
+    }
+    const pl: Poly = { key: newKey(), labelId: curLabel, points, source: "manual" };
+    commitPoly([...polysRef.current, pl]);
+    setSelected(pl.key);
+  };
+
+  const onUpdatePoly = (key: string, points: number[]) =>
+    commitPoly(polysRef.current.map((pl) => (pl.key === key ? { ...pl, points, source: "manual", score: null } : pl)));
+
   // ---------- AI 预标注 ----------
 
   const [models, setModels] = useState<RunInfo[]>([]);
@@ -366,21 +443,34 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     try {
       const preds = await api.predictImage(modelId, m.id, conf);
       await loadLabels();
-      // 和已有框重叠很大的不重复添加
+      // 和已有标注重叠很大的不重复添加
       const iou = (a: RectXYWH, b: RectXYWH) => {
         const ix = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
         const iy = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
         const inter = ix * iy;
         return inter / (a.w * a.h + b.w * b.h - inter);
       };
-      const fresh = preds
-        .filter((p) => !boxesRef.current.some((b) => iou(b, p) > 0.7))
-        .map((p) => ({ key: newKey(), labelId: p.labelId, x: p.x, y: p.y, w: p.w, h: p.h, source: "model", score: p.score }));
-      if (fresh.length === 0) {
-        message.info(preds.length ? "模型找到的目标都已经标过了" : "模型没有找到目标，可以调低置信度试试");
+      if (isSeg) {
+        const have = polysRef.current.map((pl) => polyBox(pl.points));
+        const fresh = preds.polys
+          .filter((p) => !have.some((b) => iou(b, polyBox(p.points)) > 0.7))
+          .map((p) => ({ key: newKey(), labelId: p.labelId, points: p.points, source: "model", score: p.score }));
+        if (fresh.length === 0) {
+          message.info(preds.polys.length ? "模型找到的目标都已经标过了" : "模型没有找到目标，可以调低置信度试试");
+        } else {
+          commitPoly([...polysRef.current, ...fresh]);
+          message.success(`添加了 ${fresh.length} 个预标注轮廓（虚线），检查后按 Enter 通过`);
+        }
       } else {
-        commit([...boxesRef.current, ...fresh]);
-        message.success(`添加了 ${fresh.length} 个预标注框（虚线），检查后按 Enter 通过`);
+        const fresh = preds.boxes
+          .filter((p) => !boxesRef.current.some((b) => iou(b, p) > 0.7))
+          .map((p) => ({ key: newKey(), labelId: p.labelId, x: p.x, y: p.y, w: p.w, h: p.h, source: "model", score: p.score }));
+        if (fresh.length === 0) {
+          message.info(preds.boxes.length ? "模型找到的目标都已经标过了" : "模型没有找到目标，可以调低置信度试试");
+        } else {
+          commit([...boxesRef.current, ...fresh]);
+          message.success(`添加了 ${fresh.length} 个预标注框（虚线），检查后按 Enter 通过`);
+        }
       }
     } catch (e) {
       message.error(errText(e));
@@ -404,7 +494,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
           const r = await api.prelabelAll(modelId, conf);
           await loadLabels();
           await reloadCurrent();
-          message.success(`已预标注 ${r.images} 张图片，共 ${r.boxes} 个框`);
+          message.success(`已预标注 ${r.images} 张图片，共 ${r.boxes} 个${isSeg ? "轮廓" : "框"}`);
         } catch (e) {
           message.error(errText(e));
         } finally {
@@ -417,7 +507,8 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
 
   const deleteBox = (key: string | null) => {
     if (!key) return;
-    commit(boxesRef.current.filter((b) => b.key !== key));
+    if (boxesRef.current.some((b) => b.key === key)) commit(boxesRef.current.filter((b) => b.key !== key));
+    else if (polysRef.current.some((pl) => pl.key === key)) commitPoly(polysRef.current.filter((pl) => pl.key !== key));
     setSelected(null);
   };
 
@@ -426,17 +517,36 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     try {
       const prev = await api.loadAnnotations(ids[idx - 1]);
       const { width: W, height: H } = metaRef.current;
-      const copied = prev.annotations
-        .filter((a) => a.type === "bbox")
-        .map(toBox)
-        .map((b) => ({ ...b, x: Math.min(b.x, W - 1), y: Math.min(b.y, H - 1) }))
-        .map((b) => ({ ...b, w: Math.min(b.w, W - b.x), h: Math.min(b.h, H - b.y), source: "manual" }));
-      if (copied.length === 0) {
-        message.info("上一张没有标注");
-        return;
+      if (isSeg) {
+        const copied = prev.annotations
+          .filter((a) => a.type === "polygon")
+          .map(toPoly)
+          .map((pl) => ({
+            ...pl,
+            key: newKey(),
+            points: pl.points.map((v, i) => (i % 2 === 0 ? Math.min(Math.max(v, 0), W) : Math.min(Math.max(v, 0), H))),
+            source: "manual",
+            score: null,
+          }));
+        if (copied.length === 0) {
+          message.info("上一张没有标注");
+          return;
+        }
+        commitPoly([...polysRef.current, ...copied]);
+        message.success(`已复制上一张的 ${copied.length} 个轮廓`);
+      } else {
+        const copied = prev.annotations
+          .filter((a) => a.type === "bbox")
+          .map(toBox)
+          .map((b) => ({ ...b, x: Math.min(b.x, W - 1), y: Math.min(b.y, H - 1) }))
+          .map((b) => ({ ...b, w: Math.min(b.w, W - b.x), h: Math.min(b.h, H - b.y), source: "manual" }));
+        if (copied.length === 0) {
+          message.info("上一张没有标注");
+          return;
+        }
+        commit([...boxesRef.current, ...copied]);
+        message.success(`已复制上一张的 ${copied.length} 个框`);
       }
-      commit([...boxesRef.current, ...copied]);
-      message.success(`已复制上一张的 ${copied.length} 个框`);
     } catch (e) {
       message.error(errText(e));
     }
@@ -448,6 +558,8 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   keyHandler.current = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
     if (t?.tagName === "INPUT" || t?.tagName === "TEXTAREA" || t?.closest?.(".ant-modal")) return;
+    // 正在画多边形时，Enter/Esc/退格等交给画布处理，别触发翻图、审核等快捷键
+    if (drawingPoly) return;
     const k = e.key.toLowerCase();
     const ctrl = e.ctrlKey || e.metaKey;
     // 焦点在按钮上时 Enter 由按钮自己处理，避免触发两次
@@ -457,7 +569,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     else if (ctrl && k === "d") copyPrev();
     else if (ctrl) return;
     else if (k === "v") setTool("select");
-    else if (k === "r") setTool("rect");
+    else if (k === "r") setTool(drawTool);
     else if (/^[1-9]$/.test(k)) {
       const l = labels[Number(k) - 1];
       if (l) pickLabel(l.id);
@@ -497,6 +609,12 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const curColor = colorOf(curLabel);
   const saveText = { saved: "已保存", dirty: "未保存", saving: "保存中…", error: "保存失败" }[saveState];
 
+  // 右侧「本图对象」：矩形框和多边形合并成一个列表，连续编号
+  const objects = [
+    ...boxes.map((b) => ({ key: b.key, labelId: b.labelId, source: b.source, desc: `${Math.round(b.w)}×${Math.round(b.h)}` })),
+    ...polys.map((pl) => ({ key: pl.key, labelId: pl.labelId, source: pl.source, desc: `${pl.points.length / 2} 点` })),
+  ];
+
   return (
     <div className="annot">
       <div className="annot-top">
@@ -525,9 +643,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             <span className="k">V</span>
           </button>
         </Tooltip>
-        <Tooltip title="画矩形框 (R)" placement="right">
-          <button className={tool === "rect" ? "on" : ""} onClick={() => setTool("rect")}>
-            <BorderOutlined />
+        <Tooltip title={isSeg ? "画多边形轮廓 (R)" : "画矩形框 (R)"} placement="right">
+          <button className={tool === drawTool ? "on" : ""} onClick={() => setTool(drawTool)}>
+            {isSeg ? <HighlightOutlined /> : <BorderOutlined />}
             <span className="k">R</span>
           </button>
         </Tooltip>
@@ -561,6 +679,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             imgW={meta.width}
             imgH={meta.height}
             boxes={boxes}
+            polys={polys}
             colorOf={colorOf}
             nameOf={nameOf}
             selected={selected}
@@ -571,6 +690,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             onSelect={setSelected}
             onCreate={onCreate}
             onUpdate={onUpdate}
+            onCreatePoly={onCreatePoly}
+            onUpdatePoly={onUpdatePoly}
+            onDrawing={setDrawingPoly}
             onScale={setScale}
             highlight={highlight && highlight.imageId === imageId ? highlight : null}
           />
@@ -578,7 +700,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
           ids?.length === 0 && <Empty description="没有符合筛选条件的图片" />
         )}
         <div className="annot-hint">
-          R 画框 · V 选择 · 1–9 切换类别 · Del 删除 · A/D 翻图 · Enter 审核通过 · P 模型预标注 · 滚轮缩放 · 空格或右键拖动 · H 隐藏类别名
+          {isSeg ? "R 画轮廓（逐点点击，双击或 Enter 闭合，退格撤点）" : "R 画框"} · V 选择 · 1–9 切换类别 · Del 删除 · A/D 翻图 · Enter 审核通过 · P 模型预标注 · 滚轮缩放 · 空格或右键拖动 · H 隐藏类别名
         </div>
       </div>
 
@@ -670,35 +792,37 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
 
         <section>
           <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
-            <h3 style={{ margin: 0 }}>本图对象 <span className="dim">{boxes.length}</span></h3>
+            <h3 style={{ margin: 0 }}>本图对象 <span className="dim">{objects.length}</span></h3>
             <span className="row" style={{ gap: 6, fontSize: 12 }}>
               <span className="dim">类别名</span>
               <Switch size="small" checked={showNames} onChange={setShowNames} />
             </span>
           </div>
-          {boxes.length === 0 && <div className="dim">还没有框，按 R 在图上拖动画框</div>}
-          {boxes.map((b, i) => (
+          {objects.length === 0 && (
+            <div className="dim">{isSeg ? "还没有轮廓，按 R 在目标边缘逐点点击" : "还没有框，按 R 在图上拖动画框"}</div>
+          )}
+          {objects.map((o, i) => (
             <div
-              key={b.key}
-              className={b.key === selected ? "obj on" : "obj"}
+              key={o.key}
+              className={o.key === selected ? "obj on" : "obj"}
               onClick={() => {
-                setSelected(b.key);
+                setSelected(o.key);
                 setTool("select");
               }}
             >
-              <span className="sw" style={{ background: colorOf(b.labelId) }} />
+              <span className="sw" style={{ background: colorOf(o.labelId) }} />
               <span className="n">
-                {i + 1}. {nameOf(b.labelId)}
+                {i + 1}. {nameOf(o.labelId)}
               </span>
               <span className="dim" style={{ fontSize: 11 }}>
-                {Math.round(b.w)}×{Math.round(b.h)}
+                {o.desc}
               </span>
-              {b.source !== "manual" && <Tag style={{ marginInlineEnd: 0 }}>{SOURCE_TEXT[b.source] ?? b.source}</Tag>}
+              {o.source !== "manual" && <Tag style={{ marginInlineEnd: 0 }}>{SOURCE_TEXT[o.source] ?? o.source}</Tag>}
               <DeleteOutlined
                 className="del"
                 onClick={(e) => {
                   e.stopPropagation();
-                  deleteBox(b.key);
+                  deleteBox(o.key);
                 }}
               />
             </div>
@@ -715,7 +839,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
               跳过
             </Button>
             {meta && (meta.status === "reviewed" || meta.status === "skipped") && (
-              <Button size="small" onClick={() => setStatus(boxes.length ? "labeled" : "todo", false)}>
+              <Button size="small" onClick={() => setStatus(objects.length ? "labeled" : "todo", false)}>
                 撤回
               </Button>
             )}

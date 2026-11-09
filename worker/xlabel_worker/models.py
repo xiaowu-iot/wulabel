@@ -8,25 +8,44 @@ import torch
 
 from .protocol import log
 
-# 名称和说明给界面展示
+# 名称和说明给界面展示。seg=True 的是实例分割模型（Mask R-CNN）。
 MODELS = {
     "frcnn_mobilenet": {
         "name": "Faster R-CNN MobileNetV3",
         "desc": "速度快、显存占用小，适合入门和没有独立显卡的电脑",
         "builder": "fasterrcnn_mobilenet_v3_large_fpn",
+        "seg": False,
     },
     "frcnn_resnet50": {
         "name": "Faster R-CNN ResNet50 v2",
         "desc": "精度更高，训练和推理更慢，建议有 6GB 以上显存",
         "builder": "fasterrcnn_resnet50_fpn_v2",
+        "seg": False,
+    },
+    "maskrcnn_r50": {
+        "name": "Mask R-CNN ResNet50",
+        "desc": "实例分割，速度一般，建议有 6GB 以上显存",
+        "builder": "maskrcnn_resnet50_fpn",
+        "seg": True,
+    },
+    "maskrcnn_r50_v2": {
+        "name": "Mask R-CNN ResNet50 v2",
+        "desc": "实例分割，精度更高、更慢，建议 8GB 以上显存",
+        "builder": "maskrcnn_resnet50_fpn_v2",
+        "seg": True,
     },
 }
+
+
+def is_seg(key: str) -> bool:
+    return bool(MODELS.get(key, {}).get("seg", False))
 
 
 def build(key: str, num_classes: int, img_size: int, pretrained: bool = True) -> torch.nn.Module:
     """num_classes 不含背景。预训练权重下载失败时退回只用骨干网络权重，再不行就随机初始化。"""
     from torchvision.models import detection as D
     from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
+    from torchvision.models.detection.mask_rcnn import MaskRCNNPredictor
 
     if key not in MODELS:
         raise ValueError(f"不支持的模型：{key}")
@@ -50,6 +69,9 @@ def build(key: str, num_classes: int, img_size: int, pretrained: bool = True) ->
         model = builder(weights=None, weights_backbone=None, **size)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes + 1)
+    if is_seg(key):
+        in_mask = model.roi_heads.mask_predictor.conv5_mask.in_channels
+        model.roi_heads.mask_predictor = MaskRCNNPredictor(in_mask, 256, num_classes + 1)
     return model
 
 

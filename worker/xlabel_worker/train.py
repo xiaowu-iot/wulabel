@@ -65,15 +65,16 @@ def run(cfg: dict) -> None:
     batch = int(cfg.get("batch", 4))
     lr = float(cfg.get("lr", 0.01))
     key = cfg.get("model", "frcnn_mobilenet")
+    seg = models.is_seg(key)
     device = pick_device(cfg.get("device", "auto"))
     torch.manual_seed(int(cfg.get("seed", 0)))
 
     log(f"设备：{torch.cuda.get_device_name(0) if device.type == 'cuda' else 'CPU'}，模型：{models.MODELS[key]['name']}")
-    train_ds = CocoDetection(root, "train", train=True)
+    train_ds = CocoDetection(root, "train", train=True, seg=seg)
     val_split = "val" if has_split(root, "val") else "train"
     if val_split == "train":
         log("没有验证集，用训练集评估（指标会偏高）。建议划分出 10%~20% 作为验证集。")
-    val_ds = CocoDetection(root, val_split, train=False)
+    val_ds = CocoDetection(root, val_split, train=False, seg=seg)
     log(f"训练集 {len(train_ds)} 张，验证集 {len(val_ds)} 张，类别 {len(classes)} 个")
     if len(train_ds) == 0:
         raise RuntimeError("训练集是空的")
@@ -114,7 +115,7 @@ def run(cfg: dict) -> None:
                 stopped = True
                 break
             imgs = [x.to(device, non_blocking=True) for x in imgs]
-            tgts = [{"boxes": t["boxes"].to(device), "labels": t["labels"].to(device)} for t in tgts]
+            tgts = [{k: v.to(device) for k, v in t.items() if k in ("boxes", "labels", "masks")} for t in tgts]
             with torch.autocast(device.type, enabled=use_amp):
                 loss_dict = model(imgs, tgts)
                 loss = sum(loss_dict.values())
@@ -182,7 +183,7 @@ def run(cfg: dict) -> None:
     for split in ("val", "test"):
         if not has_split(root, split):
             continue
-        preds, gts = predict_dataset(model, CocoDetection(root, split, train=False), device, batch)
+        preds, gts = predict_dataset(model, CocoDetection(root, split, train=False, seg=seg), device, batch)
         r = evaluate(preds, gts, len(classes))
         for c in r.per_class:
             c["name"] = classes[c["index"]]

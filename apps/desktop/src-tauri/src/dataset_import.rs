@@ -22,11 +22,19 @@ enum Coords {
     Abs(f64, f64, f64, f64),
 }
 
+/// 分割多边形坐标：归一化点对（YOLO）或像素点对（COCO）
+#[derive(Debug, Clone, PartialEq)]
+enum PolyCoords {
+    Norm(Vec<f64>),
+    Abs(Vec<f64>),
+}
+
 #[derive(Debug, Clone)]
 struct Item {
     src: PathBuf,
     split: Option<String>,
     boxes: Vec<(String, Coords)>,
+    polys: Vec<(String, PolyCoords)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,6 +148,7 @@ fn read_yolo(dir: &Path) -> AppResult<Vec<Item>> {
     let mut items = Vec::new();
     for img in all_images(dir) {
         let mut boxes = Vec::new();
+        let mut polys = Vec::new();
         if let Some(lf) = yolo_label_file(&img) {
             for line in fs::read_to_string(&lf)?.lines() {
                 let v: Vec<f64> = line.split_whitespace().filter_map(|s| s.parse().ok()).collect();
@@ -148,20 +157,15 @@ fn read_yolo(dir: &Path) -> AppResult<Vec<Item>> {
                 }
                 let cls = v[0] as usize;
                 let name = classes.get(cls).cloned().unwrap_or_else(|| format!("class_{cls}"));
-                let c = if v.len() == 5 {
-                    Coords::Norm(v[1], v[2], v[3], v[4])
-                } else {
-                    // 分割格式：多边形点，取外接框
-                    let xs: Vec<f64> = v[1..].iter().step_by(2).copied().collect();
-                    let ys: Vec<f64> = v[2..].iter().step_by(2).copied().collect();
-                    let (x0, x1) = (xs.iter().cloned().fold(f64::MAX, f64::min), xs.iter().cloned().fold(f64::MIN, f64::max));
-                    let (y0, y1) = (ys.iter().cloned().fold(f64::MAX, f64::min), ys.iter().cloned().fold(f64::MIN, f64::max));
-                    Coords::Norm((x0 + x1) / 2.0, (y0 + y1) / 2.0, x1 - x0, y1 - y0)
-                };
-                boxes.push((name, c));
+                if v.len() == 5 {
+                    boxes.push((name, Coords::Norm(v[1], v[2], v[3], v[4])));
+                } else if v.len() >= 7 && v.len() % 2 == 1 {
+                    // 分割格式：class 后面是多边形点，原样保留
+                    polys.push((name, PolyCoords::Norm(v[1..].to_vec())));
+                }
             }
         }
-        items.push(Item { split: split_from_path(&img), src: img, boxes });
+        items.push(Item { split: split_from_path(&img), src: img, boxes, polys });
     }
     Ok(items)
 }
@@ -208,15 +212,24 @@ fn read_coco(dir: &Path, jsons: &[PathBuf]) -> AppResult<Vec<Item>> {
                 .or_else(|| names.get(&base).cloned());
             if let Some(src) = found {
                 by_id.insert(id, items.len());
-                items.push(Item { split: split.clone().or_else(|| split_from_path(&src)), src, boxes: Vec::new() });
+                items.push(Item { split: split.clone().or_else(|| split_from_path(&src)), src, boxes: Vec::new(), polys: Vec::new() });
             }
         }
         for a in v["annotations"].as_array().into_iter().flatten() {
             let (Some(img), Some(cat)) = (a["image_id"].as_i64(), a["category_id"].as_i64()) else { continue };
             let Some(&i) = by_id.get(&img) else { continue };
+            let name = cats.get(&cat).cloned().unwrap_or_else(|| format!("class_{cat}"));
+            // 有多边形分割就按多边形导入，否则用检测框
+            let seg = a["segmentation"].as_array().and_then(|arr| arr.first()).and_then(|s| s.as_array());
+            if let Some(poly) = seg {
+                let pts: Vec<f64> = poly.iter().filter_map(|x| x.as_f64()).collect();
+                if pts.len() >= 6 && pts.len() % 2 == 0 {
+                    items[i].polys.push((name, PolyCoords::Abs(pts)));
+                    continue;
+                }
+            }
             let b: Vec<f64> = a["bbox"].as_array().into_iter().flatten().filter_map(|x| x.as_f64()).collect();
             if b.len() == 4 {
-                let name = cats.get(&cat).cloned().unwrap_or_else(|| format!("class_{cat}"));
                 items[i].boxes.push((name, Coords::Abs(b[0], b[1], b[2], b[3])));
             }
         }
@@ -275,7 +288,7 @@ fn read_voc(dir: &Path, xmls: &[PathBuf]) -> AppResult<Vec<Item>> {
                 boxes.push((name, Coords::Abs(x0, y0, x1 - x0, y1 - y0)));
             }
         }
-        items.push(Item { split: sets.get(&stem).cloned().or_else(|| split_from_path(&src)), src, boxes });
+        items.push(Item { split: sets.get(&stem).cloned().or_else(|| split_from_path(&src)), src, boxes, polys: Vec::new() });
     }
     Ok(items)
 }
@@ -297,7 +310,7 @@ fn read(dir: &Path) -> AppResult<(String, Vec<Item>)> {
         }
     }
     let items = read_yolo(dir)?;
-    if items.iter().any(|i| !i.boxes.is_empty()) {
+    if items.iter().any(|i| !i.boxes.is_empty() || !i.polys.is_empty()) {
         return Ok(("YOLO".into(), items));
     }
     Err(msg("没有识别出数据集格式。支持 YOLO（images + labels + data.yaml）、COCO（json）、VOC（Annotations/*.xml）"))
@@ -317,7 +330,8 @@ pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync))
         annotations::list_labels(p)?.into_iter().map(|l| (l.name, l.id)).collect();
     let mut labels_added = Vec::new();
     for it in &items {
-        for (name, _) in &it.boxes {
+        let names = it.boxes.iter().map(|(n, _)| n).chain(it.polys.iter().map(|(n, _)| n));
+        for name in names {
             if !labels.contains_key(name) {
                 let color = PALETTE[labels.len() % PALETTE.len()];
                 let l = annotations::add_label(p, name, color)?;
@@ -338,7 +352,8 @@ pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync))
             continue;
         }
         let (w, h) = (current.width as f64, current.height as f64);
-        let anns: Vec<Annotation> = it
+        let r2 = |v: f64| (v * 100.0).round() / 100.0;
+        let mut anns: Vec<Annotation> = it
             .boxes
             .iter()
             .filter_map(|(name, c)| {
@@ -354,7 +369,6 @@ pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync))
                 if x1 - x0 < 1.0 || y1 - y0 < 1.0 {
                     return None;
                 }
-                let r2 = |v: f64| (v * 100.0).round() / 100.0;
                 Some(Annotation {
                     label_id: labels.get(name).copied(),
                     kind: "bbox".into(),
@@ -364,6 +378,27 @@ pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync))
                 })
             })
             .collect();
+        // 分割多边形
+        for (name, pc) in &it.polys {
+            let pts: Vec<f64> = match pc {
+                PolyCoords::Norm(v) => v.iter().enumerate().map(|(k, val)| if k % 2 == 0 { val * w } else { val * h }).collect(),
+                PolyCoords::Abs(v) => v.clone(),
+            };
+            let pts: Vec<f64> = pts
+                .chunks(2)
+                .filter(|p| p.len() == 2)
+                .flat_map(|p| [r2(p[0].clamp(0.0, w)), r2(p[1].clamp(0.0, h))])
+                .collect();
+            if pts.len() >= 6 {
+                anns.push(Annotation {
+                    label_id: labels.get(name).copied(),
+                    kind: "polygon".into(),
+                    data: serde_json::json!(pts),
+                    score: None,
+                    source: "manual".into(),
+                });
+            }
+        }
         if !anns.is_empty() {
             boxes += anns.len();
             annotations::save(p, id, &anns)?;

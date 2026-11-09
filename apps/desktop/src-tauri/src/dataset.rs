@@ -112,6 +112,8 @@ pub struct ExportResult {
     pub out_dir: String,
     pub images: usize,
     pub boxes: usize,
+    /// 分割多边形数量
+    pub polys: usize,
     pub train: usize,
     pub val: usize,
     pub test: usize,
@@ -127,6 +129,37 @@ pub struct ExportImage {
     pub split: String,
     /// (类别序号, x, y, w, h)
     pub boxes: Vec<(usize, f64, f64, f64, f64)>,
+    /// 分割多边形：(类别序号, [x1, y1, x2, y2, ...])，原图像素坐标
+    pub polys: Vec<(usize, Vec<f64>)>,
+}
+
+/// 多边形外接框 (x, y, w, h)
+fn poly_bbox(pts: &[f64]) -> (f64, f64, f64, f64) {
+    let xs = pts.iter().step_by(2);
+    let ys = pts.iter().skip(1).step_by(2);
+    let x0 = xs.clone().cloned().fold(f64::MAX, f64::min);
+    let x1 = xs.cloned().fold(f64::MIN, f64::max);
+    let y0 = ys.clone().cloned().fold(f64::MAX, f64::min);
+    let y1 = ys.cloned().fold(f64::MIN, f64::max);
+    (x0, y0, x1 - x0, y1 - y0)
+}
+
+/// 多边形面积（鞋带公式）
+fn poly_area(pts: &[f64]) -> f64 {
+    let n = pts.len() / 2;
+    let mut a = 0.0;
+    for i in 0..n {
+        let (x1, y1) = (pts[2 * i], pts[2 * i + 1]);
+        let j = (i + 1) % n;
+        let (x2, y2) = (pts[2 * j], pts[2 * j + 1]);
+        a += x1 * y2 - x2 * y1;
+    }
+    a.abs() / 2.0
+}
+
+/// 把矩形框转成 4 点多边形（YOLO-seg 混合导出时用）
+fn box_to_poly(x: f64, y: f64, w: f64, h: f64) -> Vec<f64> {
+    vec![x, y, x + w, y, x + w, y + h, x, y + h]
 }
 
 /// 读出要导出的图和框。类别序号按类别列表顺序从 0 开始。
@@ -154,22 +187,28 @@ pub fn collect(p: &Project, only_reviewed: bool) -> AppResult<(Vec<String>, Vec<
             let (id, path, width, height, split) = row?;
             let src = p.resolve(&path);
             let file_name = src.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| format!("{id}.jpg"));
-            images.push(ExportImage { id, src, file_name, width, height, split, boxes: Vec::new() });
+            images.push(ExportImage { id, src, file_name, width, height, split, boxes: Vec::new(), polys: Vec::new() });
         }
     }
     if images.is_empty() {
         return Err(msg(if only_reviewed { "没有已审核的图片" } else { "没有已标注的图片" }));
     }
     let pos: HashMap<i64, usize> = images.iter().enumerate().map(|(i, im)| (im.id, i)).collect();
-    let mut stmt = conn.prepare("SELECT image_id, label_id, data_json FROM annotations WHERE type = 'bbox'")?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?)))?;
+    let mut stmt = conn.prepare("SELECT image_id, label_id, type, data_json FROM annotations WHERE type IN ('bbox', 'polygon')")?;
+    let rows = stmt.query_map([], |r| {
+        Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+    })?;
     for row in rows {
-        let (image_id, label_id, data) = row?;
+        let (image_id, label_id, kind, data) = row?;
         let (Some(&i), Some(label_id)) = (pos.get(&image_id), label_id) else { continue };
         let Some(&cls) = index.get(&label_id) else { continue };
         let v: Vec<f64> = serde_json::from_str(&data).unwrap_or_default();
-        if v.len() == 4 && v[2] > 0.0 && v[3] > 0.0 {
-            images[i].boxes.push((cls, v[0], v[1], v[2], v[3]));
+        if kind == "bbox" {
+            if v.len() == 4 && v[2] > 0.0 && v[3] > 0.0 {
+                images[i].boxes.push((cls, v[0], v[1], v[2], v[3]));
+            }
+        } else if v.len() >= 6 && v.len() % 2 == 0 {
+            images[i].polys.push((cls, v));
         }
     }
     // 不同文件夹里的同名图片，导出时加上 id 区分
@@ -218,6 +257,7 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
         out_dir: out.to_string_lossy().into_owned(),
         images: total,
         boxes: images.iter().map(|i| i.boxes.len()).sum(),
+        polys: images.iter().map(|i| i.polys.len()).sum(),
         train: 0,
         val: 0,
         test: 0,
@@ -230,6 +270,8 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
             _ => result.train += 1,
         }
     }
+    // 只要有多边形，YOLO 就按分割格式导出（矩形框转成四点多边形），避免同一数据集里混两种格式
+    let seg_mode = result.polys > 0;
     let split_of = |im: &ExportImage| if SPLITS.contains(&im.split.as_str()) { im.split.clone() } else { "train".into() };
     let used: Vec<&str> = SPLITS.iter().copied().filter(|s| images.iter().any(|im| split_of(im) == *s)).collect();
 
@@ -243,13 +285,26 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
                 let s = split_of(im);
                 link_or_copy(&im.src, &out.join("images").join(&s).join(&im.file_name))?;
                 let (w, h) = (im.width as f64, im.height as f64);
-                let lines: Vec<String> = im
-                    .boxes
-                    .iter()
-                    .map(|(c, x, y, bw, bh)| {
-                        format!("{c} {:.6} {:.6} {:.6} {:.6}", (x + bw / 2.0) / w, (y + bh / 2.0) / h, bw / w, bh / h)
-                    })
-                    .collect();
+                let norm_poly = |pts: &[f64]| -> String {
+                    pts.chunks(2).map(|p| format!("{:.6} {:.6}", p[0] / w, p[1] / h)).collect::<Vec<_>>().join(" ")
+                };
+                let lines: Vec<String> = if seg_mode {
+                    let mut ls = Vec::new();
+                    for (c, pts) in &im.polys {
+                        ls.push(format!("{c} {}", norm_poly(pts)));
+                    }
+                    for (c, x, y, bw, bh) in &im.boxes {
+                        ls.push(format!("{c} {}", norm_poly(&box_to_poly(*x, *y, *bw, *bh))));
+                    }
+                    ls
+                } else {
+                    im.boxes
+                        .iter()
+                        .map(|(c, x, y, bw, bh)| {
+                            format!("{c} {:.6} {:.6} {:.6} {:.6}", (x + bw / 2.0) / w, (y + bh / 2.0) / h, bw / w, bh / h)
+                        })
+                        .collect()
+                };
                 let stem = Path::new(&im.file_name).file_stem().unwrap().to_string_lossy().into_owned();
                 fs::write(out.join("labels").join(&s).join(format!("{stem}.txt")), lines.join("\n"))?;
                 progress(n + 1, total);
@@ -290,6 +345,15 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
                         }));
                         ann_id += 1;
                     }
+                    for (c, pts) in &im.polys {
+                        let (bx, by, bw, bh) = poly_bbox(pts);
+                        anns.push(serde_json::json!({
+                            "id": ann_id, "image_id": im.id, "category_id": c + 1,
+                            "bbox": [bx, by, bw, bh], "area": poly_area(pts), "iscrowd": 0,
+                            "segmentation": [pts]
+                        }));
+                        ann_id += 1;
+                    }
                     n += 1;
                     progress(n, total);
                 }
@@ -312,11 +376,19 @@ pub fn export(p: &Project, opts: &ExportOptions, progress: &dyn Fn(usize, usize)
                     "<annotation>\n  <folder>JPEGImages</folder>\n  <filename>{}</filename>\n  <size>\n    <width>{}</width>\n    <height>{}</height>\n    <depth>3</depth>\n  </size>\n  <segmented>0</segmented>\n",
                     xml_escape(&im.file_name), im.width, im.height
                 );
-                for (c, x, y, bw, bh) in &im.boxes {
+                let mut voc_obj = |cls: usize, x: f64, y: f64, bw: f64, bh: f64| {
                     xml += &format!(
                         "  <object>\n    <name>{}</name>\n    <pose>Unspecified</pose>\n    <truncated>0</truncated>\n    <difficult>0</difficult>\n    <bndbox>\n      <xmin>{:.0}</xmin>\n      <ymin>{:.0}</ymin>\n      <xmax>{:.0}</xmax>\n      <ymax>{:.0}</ymax>\n    </bndbox>\n  </object>\n",
-                        xml_escape(&classes[*c]), x, y, x + bw, y + bh
+                        xml_escape(&classes[cls]), x, y, x + bw, y + bh
                     );
+                };
+                for (c, x, y, bw, bh) in &im.boxes {
+                    voc_obj(*c, *x, *y, *bw, *bh);
+                }
+                // VOC 不支持多边形，用外接框导出
+                for (c, pts) in &im.polys {
+                    let (bx, by, bw, bh) = poly_bbox(pts);
+                    voc_obj(*c, bx, by, bw, bh);
                 }
                 xml += "</annotation>\n";
                 fs::write(out.join("Annotations").join(format!("{stem}.xml")), xml)?;

@@ -8,13 +8,15 @@ import {
   StopOutlined,
 } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { api, EnvStatus, errText, RunDetail, RunInfo, RunStatus, SplitSummary, TrainConfig } from "../api";
+import { api, EnvStatus, errText, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, TrainConfig } from "../api";
 import { prefs, useApp } from "../store";
 import LineChart from "../components/LineChart";
 
 export const MODELS = [
-  { value: "frcnn_mobilenet", name: "Faster R-CNN MobileNetV3", desc: "速度快、显存占用小，适合入门和没有独立显卡的电脑" },
-  { value: "frcnn_resnet50", name: "Faster R-CNN ResNet50 v2", desc: "精度更高，训练和推理更慢，建议 6GB 以上显存" },
+  { value: "frcnn_mobilenet", name: "Faster R-CNN MobileNetV3", desc: "速度快、显存占用小，适合入门和没有独立显卡的电脑", seg: false },
+  { value: "frcnn_resnet50", name: "Faster R-CNN ResNet50 v2", desc: "精度更高，训练和推理更慢，建议 6GB 以上显存", seg: false },
+  { value: "maskrcnn_r50", name: "Mask R-CNN ResNet50", desc: "实例分割，速度一般，建议有 6GB 以上显存", seg: true },
+  { value: "maskrcnn_r50_v2", name: "Mask R-CNN ResNet50 v2", desc: "实例分割，精度更高、更慢，建议 8GB 以上显存", seg: true },
 ];
 
 export const RUN_STATUS: Record<RunStatus, { text: string; color: string }> = {
@@ -42,9 +44,11 @@ interface ProgressEv {
   eta: number | null;
 }
 
-export default function Train() {
+export default function Train({ project }: { project: ProjectInfo }) {
   const { message, modal } = App.useApp();
   const setPage = useApp((s) => s.setPage);
+  const isSeg = project.task === "segment";
+  const models = MODELS.filter((m) => m.seg === isSeg);
   const [env, setEnv] = useState<EnvStatus | null>(null);
   const [split, setSplit] = useState<SplitSummary | null>(null);
   const [runs, setRuns] = useState<RunInfo[]>([]);
@@ -127,6 +131,13 @@ export default function Train() {
     prefs.set("trainConfig", JSON.stringify(next));
   };
 
+  // 项目任务和当前选的模型对不上（比如分割项目却选了检测模型）时，自动切到对应任务的模型
+  useEffect(() => {
+    if (!MODELS.some((m) => m.value === cfg.model && m.seg === isSeg)) {
+      update({ model: isSeg ? "maskrcnn_r50" : "frcnn_mobilenet" });
+    }
+  }, [isSeg]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const start = async () => {
     setStarting(true);
     try {
@@ -148,6 +159,13 @@ export default function Train() {
   const metrics = detail?.metrics ?? [];
   const epochs = run?.config?.epochs ?? cfg.epochs;
   const gpuMem = env?.gpu?.vramMb ?? 0;
+  const recommended = isSeg
+    ? gpuMem >= 8000
+      ? "maskrcnn_r50_v2"
+      : "maskrcnn_r50"
+    : gpuMem >= 6000
+      ? "frcnn_resnet50"
+      : "frcnn_mobilenet";
 
   const doExport = async () => {
     if (!run) return;
@@ -193,7 +211,7 @@ export default function Train() {
       <div className="train-grid">
         <div>
           <h1>训练</h1>
-          <p className="desc">用已标注和已审核的图片训练检测模型。</p>
+          <p className="desc">用已标注和已审核的图片训练{isSeg ? "实例分割" : "检测"}模型。</p>
           {env && !env.ready && (
             <Alert
               type="warning"
@@ -220,10 +238,10 @@ export default function Train() {
               <Form.Item label="模型">
                 <Radio.Group value={cfg.model} onChange={(e) => update({ model: e.target.value })}>
                   <Space direction="vertical">
-                    {MODELS.map((m) => (
+                    {models.map((m) => (
                       <Radio key={m.value} value={m.value}>
                         <b>{m.name}</b>
-                        {m.value === (gpuMem >= 6000 ? "frcnn_resnet50" : "frcnn_mobilenet") && <Tag color="blue" style={{ marginLeft: 6 }}>推荐</Tag>}
+                        {m.value === recommended && <Tag color="blue" style={{ marginLeft: 6 }}>推荐</Tag>}
                         <div className="dim" style={{ fontSize: 12 }}>{m.desc}</div>
                       </Radio>
                     ))}

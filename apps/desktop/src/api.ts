@@ -91,7 +91,7 @@ export interface Label {
 
 export interface Annotation {
   labelId: number | null;
-  type: "bbox";
+  type: "bbox" | "polygon";
   data: number[];
   score?: number | null;
   source: string;
@@ -119,6 +119,7 @@ export interface ExportResult {
   outDir: string;
   images: number;
   boxes: number;
+  polys: number;
   train: number;
   val: number;
   test: number;
@@ -239,6 +240,17 @@ export interface PredBox {
   score: number;
 }
 
+export interface PredPoly {
+  labelId: number;
+  points: number[];
+  score: number;
+}
+
+export interface PredResult {
+  boxes: PredBox[];
+  polys: PredPoly[];
+}
+
 export type IssueKind = "missing" | "wrong_class" | "loose_box" | "extra_box" | "tiny_box" | "dup_box" | "no_label";
 
 export interface Issue {
@@ -304,7 +316,7 @@ export const api = {
   stopTraining: (id: number) => invoke<void>("stop_training", { id }),
   deleteRun: (id: number) => invoke<void>("delete_run", { id }),
   exportOnnx: (id: number) => invoke<string>("export_onnx", { id }),
-  predictImage: (runId: number, imageId: number, conf: number) => invoke<PredBox[]>("predict_image", { runId, imageId, conf }),
+  predictImage: (runId: number, imageId: number, conf: number) => invoke<PredResult>("predict_image", { runId, imageId, conf }),
   prelabelAll: (runId: number, conf: number) => invoke<{ images: number; boxes: number }>("prelabel_all", { runId, conf }),
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   splitSummary: () => invoke<SplitSummary>("split_summary"),

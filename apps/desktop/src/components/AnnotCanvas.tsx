@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type Konva from "konva";
-import { Image as KImage, Label as KLabel, Layer, Line, Rect, Stage, Tag, Text, Transformer } from "react-konva";
+import { Circle, Image as KImage, Label as KLabel, Layer, Line, Rect, Stage, Tag, Text, Transformer } from "react-konva";
 
 export interface Box {
   key: string;
@@ -13,7 +13,16 @@ export interface Box {
   score?: number | null;
 }
 
-export type Tool = "select" | "rect";
+export interface Poly {
+  key: string;
+  labelId: number | null;
+  /** 扁平点坐标 [x1, y1, x2, y2, ...]，原图像素坐标 */
+  points: number[];
+  source: string;
+  score?: number | null;
+}
+
+export type Tool = "select" | "rect" | "polygon";
 export type RectXYWH = { x: number; y: number; w: number; h: number };
 
 interface Props {
@@ -21,6 +30,7 @@ interface Props {
   imgW: number;
   imgH: number;
   boxes: Box[];
+  polys: Poly[];
   colorOf: (labelId: number | null) => string;
   nameOf: (labelId: number | null) => string;
   selected: string | null;
@@ -32,6 +42,10 @@ interface Props {
   onSelect: (key: string | null) => void;
   onCreate: (r: RectXYWH) => void;
   onUpdate: (key: string, r: RectXYWH) => void;
+  onCreatePoly: (points: number[]) => void;
+  onUpdatePoly: (key: string, points: number[]) => void;
+  /** 多边形是否正在绘制中（供外层让出键盘快捷键） */
+  onDrawing?: (drawing: boolean) => void;
   onScale?: (scale: number) => void;
   /** 体检跳过来时高亮的问题框 */
   highlight?: { bbox: [number, number, number, number]; text: string } | null;
@@ -66,6 +80,11 @@ export default function AnnotCanvas(p: Props) {
   const [panning, setPanning] = useState(false);
   const drawStart = useRef<{ x: number; y: number } | null>(null);
   const pan = useRef<{ cx: number; cy: number; vx: number; vy: number } | null>(null);
+  // 多边形绘制：draft 是已落的顶点（像素坐标），cursor 是当前鼠标位置（橡皮筋线）
+  const [draft, setDraft] = useState<number[]>([]);
+  const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
+  const draftR = useRef<number[]>([]);
+  draftR.current = draft;
 
   // 容器尺寸
   useEffect(() => {
@@ -133,6 +152,45 @@ export default function AnnotCanvas(p: Props) {
     if (r.w >= MIN_SIZE && r.h >= MIN_SIZE) p.onCreate({ x: round(r.x), y: round(r.y), w: round(r.w), h: round(r.h) });
   }, [p]);
 
+  const finishPoly = useCallback(() => {
+    const pts = draftR.current;
+    if (pts.length >= 6) p.onCreatePoly(pts.map(round));
+    setDraft([]);
+    setCursor(null);
+  }, [p]);
+
+  const cancelPoly = useCallback(() => {
+    setDraft([]);
+    setCursor(null);
+  }, []);
+
+  // 告诉外层「正在画多边形」，好让它让出 Enter/Esc/退格等快捷键
+  useEffect(() => {
+    p.onDrawing?.(draft.length > 0);
+  }, [draft.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 画多边形时的键盘：Enter 完成、Esc 取消、退格删最后一个点
+  useEffect(() => {
+    if (draft.length === 0) return;
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t?.tagName === "INPUT" || t?.tagName === "TEXTAREA" || t?.closest?.(".ant-modal")) return;
+      const k = e.key.toLowerCase();
+      if (k === "enter") finishPoly();
+      else if (k === "escape") cancelPoly();
+      else if (k === "backspace") setDraft((d) => d.slice(0, -2));
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [draft.length, finishPoly, cancelPoly]);
+
+  // 切走多边形工具时丢弃没画完的草稿
+  useEffect(() => {
+    if (p.tool !== "polygon") cancelPoly();
+  }, [p.tool, cancelPoly]);
+
   // 鼠标在画布外松开也要结束画框和拖动
   useEffect(() => {
     const up = () => {
@@ -164,6 +222,19 @@ export default function AnnotCanvas(p: Props) {
       d.setAttrs({ x: c.x, y: c.y, width: 0, height: 0, visible: true });
       return;
     }
+    if (p.tool === "polygon") {
+      const pt = pointer();
+      if (!pt) return;
+      const c = clampPt(pt);
+      const d = draftR.current;
+      // 点回起点附近就闭合（至少 3 个点）
+      if (d.length >= 6 && Math.hypot(d[0] - c.x, d[1] - c.y) < 8 / view.s) {
+        finishPoly();
+        return;
+      }
+      setDraft([...d, c.x, c.y]);
+      return;
+    }
     // 选择工具：点空白处取消选中
     if (e.target === e.target.getStage() || e.target.name() === "bg") p.onSelect(null);
   };
@@ -191,6 +262,9 @@ export default function AnnotCanvas(p: Props) {
         height: Math.abs(c.y - s.y),
       });
     }
+    if (p.tool === "polygon" && draftR.current.length) {
+      setCursor(clampPt(pt));
+    }
     hLine.current?.getLayer()?.batchDraw();
   };
 
@@ -211,11 +285,12 @@ export default function AnnotCanvas(p: Props) {
     setView({ s, x: pos.x - mx * s, y: pos.y - my * s });
   };
 
-  // 选中的框挂上调整手柄
+  // 选中的「框」挂上调整手柄（多边形用顶点圆点编辑，不挂 Transformer）
   useEffect(() => {
     const tr = trRef.current;
     if (!tr) return;
-    const node = p.selected && p.tool === "select" ? stageRef.current?.findOne(`#${p.selected}`) : null;
+    const isBox = p.selected != null && p.boxes.some((b) => b.key === p.selected);
+    const node = isBox && p.tool === "select" ? stageRef.current?.findOne(`#${p.selected}`) : null;
     tr.nodes(node ? [node] : []);
     tr.getLayer()?.batchDraw();
   }, [p.selected, p.tool, p.boxes]);
@@ -228,11 +303,12 @@ export default function AnnotCanvas(p: Props) {
   const fontSize = 12 / s;
   // 大框先画，小框在上面，方便点中
   const ordered = [...p.boxes].sort((a, b) => b.w * b.h - a.w * a.h);
-  const cursor = panning ? "grabbing" : spaceHeld ? "grab" : p.tool === "rect" ? "crosshair" : "default";
+  const cssCursor = panning ? "grabbing" : spaceHeld ? "grab" : p.tool === "rect" || p.tool === "polygon" ? "crosshair" : "default";
+  const vertexIdx = (pts: number[]) => pts.map((_, i) => i).filter((i) => i % 2 === 0);
   const imgReady = img && img.src === p.src;
 
   return (
-    <div ref={wrap} style={{ position: "absolute", inset: 0, cursor }} onContextMenu={(e) => e.preventDefault()}>
+    <div ref={wrap} style={{ position: "absolute", inset: 0, cursor: cssCursor }} onContextMenu={(e) => e.preventDefault()}>
       {size.w > 0 && (
         <Stage
           ref={stageRef}
@@ -245,6 +321,7 @@ export default function AnnotCanvas(p: Props) {
           onMouseDown={onMouseDown}
           onMouseMove={onMouseMove}
           onMouseLeave={onMouseLeave}
+          onDblClick={() => p.tool === "polygon" && finishPoly()}
           onWheel={onWheel}
         >
           <Layer>
@@ -300,6 +377,88 @@ export default function AnnotCanvas(p: Props) {
                 />
               );
             })}
+            {p.polys.map((pl) => {
+              const c = p.colorOf(pl.labelId);
+              const sel = pl.key === p.selected;
+              const editable = p.tool === "select" && !spaceHeld;
+              return (
+                <Line
+                  key={pl.key}
+                  id={pl.key}
+                  points={pl.points}
+                  closed
+                  stroke={c}
+                  strokeWidth={sel ? 2.5 : 1.5}
+                  strokeScaleEnabled={false}
+                  fill={rgba(c, sel ? 0.22 : 0.08)}
+                  dash={pl.source === "manual" ? undefined : [6, 3]}
+                  listening={editable}
+                  draggable={editable && sel}
+                  onMouseDown={(e) => {
+                    if (e.evt.button !== 0) return;
+                    e.cancelBubble = true;
+                    p.onSelect(pl.key);
+                  }}
+                  onDragEnd={(e) => {
+                    const n = e.target;
+                    const dx = n.x();
+                    const dy = n.y();
+                    n.position({ x: 0, y: 0 });
+                    const moved = pl.points.map((v, i) =>
+                      i % 2 === 0 ? Math.min(Math.max(v + dx, 0), p.imgW) : Math.min(Math.max(v + dy, 0), p.imgH),
+                    );
+                    p.onUpdatePoly(pl.key, moved.map(round));
+                  }}
+                />
+              );
+            })}
+            {p.tool === "select" &&
+              !spaceHeld &&
+              (() => {
+                const pl = p.polys.find((x) => x.key === p.selected);
+                if (!pl) return null;
+                const c = p.colorOf(pl.labelId);
+                return vertexIdx(pl.points).map((i) => (
+                  <Circle
+                    key={`v${pl.key}_${i}`}
+                    x={pl.points[i]}
+                    y={pl.points[i + 1]}
+                    radius={5 / s}
+                    fill="#fff"
+                    stroke={c}
+                    strokeWidth={2 / s}
+                    draggable
+                    onDragMove={(e) => {
+                      const n = e.target;
+                      n.x(Math.min(Math.max(n.x(), 0), p.imgW));
+                      n.y(Math.min(Math.max(n.y(), 0), p.imgH));
+                    }}
+                    onDragEnd={(e) => {
+                      const n = e.target;
+                      const pts = pl.points.slice();
+                      pts[i] = round(n.x());
+                      pts[i + 1] = round(n.y());
+                      p.onUpdatePoly(pl.key, pts);
+                    }}
+                  />
+                ));
+              })()}
+            {p.showNames &&
+              p.polys.map((pl) => {
+                const c = p.colorOf(pl.labelId);
+                const xs = pl.points.filter((_, i) => i % 2 === 0);
+                const ys = pl.points.filter((_, i) => i % 2 === 1);
+                const x = Math.min(...xs);
+                const y = Math.min(...ys);
+                const inside = y < fontSize * 1.6;
+                const text = p.nameOf(pl.labelId) + (pl.score != null ? ` ${pl.score.toFixed(2)}` : "");
+                return (
+                  <KLabel key={`t${pl.key}`} x={x} y={inside ? y : y - fontSize * 1.5} listening={false}>
+                    <Tag fill={c} opacity={0.9} />
+                    <Text text={text} fontSize={fontSize} padding={fontSize * 0.2} fill="#fff" />
+                  </KLabel>
+                );
+              })}
             {p.showNames &&
               p.boxes.map((b) => {
                 const c = p.colorOf(b.labelId);
@@ -364,6 +523,33 @@ export default function AnnotCanvas(p: Props) {
             />
             <Line ref={hLine} visible={false} stroke="rgba(255,255,255,.55)" strokeWidth={1} strokeScaleEnabled={false} dash={[4, 4]} />
             <Line ref={vLine} visible={false} stroke="rgba(255,255,255,.55)" strokeWidth={1} strokeScaleEnabled={false} dash={[4, 4]} />
+            {draft.length > 0 && (
+              <>
+                {draft.length >= 6 && (
+                  <Line points={draft} closed listening={false} stroke={p.drawColor} strokeWidth={1.5} strokeScaleEnabled={false} fill={rgba(p.drawColor, 0.12)} />
+                )}
+                <Line
+                  points={cursor ? [...draft, cursor.x, cursor.y] : draft}
+                  stroke={p.drawColor}
+                  strokeWidth={2}
+                  strokeScaleEnabled={false}
+                  dash={[4, 4]}
+                  listening={false}
+                />
+                {vertexIdx(draft).map((i) => (
+                  <Circle
+                    key={`d${i}`}
+                    x={draft[i]}
+                    y={draft[i + 1]}
+                    radius={(i === 0 ? 6 : 4) / s}
+                    fill={i === 0 ? p.drawColor : "#fff"}
+                    stroke={p.drawColor}
+                    strokeWidth={1.5 / s}
+                    listening={false}
+                  />
+                ))}
+              </>
+            )}
           </Layer>
         </Stage>
       )}

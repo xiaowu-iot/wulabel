@@ -54,6 +54,18 @@ fn validate(a: &Annotation, w: u32, h: u32) -> AppResult<()> {
             return Err(msg("矩形框超出了图片范围"));
         }
     }
+    if a.kind == "polygon" {
+        // 分割多边形：[x1, y1, x2, y2, ...]，至少 3 个点，原图像素坐标
+        let v: Vec<f64> = serde_json::from_value(a.data.clone()).map_err(|_| msg("多边形数据格式不对"))?;
+        if v.len() < 6 || v.len() % 2 != 0 || v.iter().any(|x| !x.is_finite()) {
+            return Err(msg("多边形至少要有 3 个点"));
+        }
+        for pt in v.chunks(2) {
+            if pt[0] < -1.0 || pt[1] < -1.0 || pt[0] > w as f64 + 1.0 || pt[1] > h as f64 + 1.0 {
+                return Err(msg("多边形超出了图片范围"));
+            }
+        }
+    }
     Ok(())
 }
 
