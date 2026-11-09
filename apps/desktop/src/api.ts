@@ -61,6 +61,22 @@ export interface ImportProgress {
   total: number;
 }
 
+export interface ExtractResult {
+  videos: number;
+  frames: number;
+  added: number;
+  duplicated: number;
+  failed: string[];
+}
+
+export interface VideoProgress {
+  stage: "download" | "extract" | "import";
+  done: number;
+  total: number;
+  speed: number;
+  detail: string;
+}
+
 export interface LastImport {
   count: number;
   createdAt: number;
@@ -125,6 +141,7 @@ export interface Settings {
   uv: string | null;
   mirror: "china" | "official";
   envRoot: string | null;
+  ffmpeg: string | null;
 }
 
 export interface EnvStatus {
@@ -315,6 +332,8 @@ export const api = {
   recentProjects: () => invoke<RecentProject[]>("recent_projects"),
   removeRecent: (path: string) => invoke<void>("remove_recent", { path }),
   importImages: (paths: string[], copy: boolean) => invoke<ImportResult>("import_images", { paths, copy }),
+  extractVideo: (paths: string[], every: number, maxFrames: number) =>
+    invoke<ExtractResult>("extract_video", { paths, every, maxFrames }),
   listImages: (status: string | null, offset: number, limit: number) =>
     invoke<ImagePage>("list_images", { status, offset, limit }),
   projectStats: () => invoke<Stats>("project_stats"),

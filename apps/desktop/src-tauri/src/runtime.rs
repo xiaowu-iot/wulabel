@@ -24,6 +24,9 @@ pub struct Settings {
     /// 训练环境安装位置（Python、PyTorch、预训练权重），为空用系统默认的本机数据目录
     #[serde(default)]
     pub env_root: Option<String>,
+    /// 用户指定的 ffmpeg（视频抽帧用），可以是 ffmpeg.exe 或其所在目录；为空则自动查找/下载
+    #[serde(default)]
+    pub ffmpeg: Option<String>,
 }
 
 fn default_mirror() -> String {
@@ -32,7 +35,7 @@ fn default_mirror() -> String {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { python: None, uv: None, mirror: default_mirror(), env_root: None }
+        Settings { python: None, uv: None, mirror: default_mirror(), env_root: None, ffmpeg: None }
     }
 }
 
@@ -154,6 +157,33 @@ impl Runtime {
             cands.push(home.join(".cargo").join("bin").join(exe));
         }
         cands.into_iter().find(|p| p.is_file())
+    }
+
+    /// 找 ffmpeg：用户指定 → 训练环境 bin → 系统 PATH；都没有返回 None
+    pub fn find_ffmpeg(&self) -> Option<PathBuf> {
+        let exe = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+        let mut cands: Vec<PathBuf> = Vec::new();
+        if let Some(f) = self.settings().ffmpeg.filter(|s| !s.trim().is_empty()) {
+            let p = PathBuf::from(f);
+            cands.push(if p.is_dir() { p.join(exe) } else { p });
+        }
+        cands.push(self.root().join("bin").join(exe));
+        if let Some(path) = std::env::var_os("PATH") {
+            cands.extend(std::env::split_paths(&path).map(|d| d.join(exe)));
+        }
+        cands.into_iter().find(|p| p.is_file())
+    }
+
+    /// 拿到 ffmpeg 路径：找不到就下载到训练环境 bin（带下载进度）
+    pub fn ffmpeg(
+        &self,
+        log: &(dyn Fn(String) + Sync),
+        progress: &(dyn Fn(&str, u64, u64, u64) + Sync),
+    ) -> AppResult<PathBuf> {
+        if let Some(found) = self.find_ffmpeg() {
+            return Ok(found);
+        }
+        download_ffmpeg(&self.root().join("bin"), log, progress)
     }
 
     /// 运行 `python -m xlabel_worker check`，结果缓存
@@ -636,6 +666,43 @@ fn download_uv(bin: &Path, log: &(dyn Fn(String) + Sync)) -> AppResult<PathBuf> 
         extract_exe(&http_get(&url)?, exe, &bin.join(exe))
     })();
     r.map_err(|e| msg(format!("下载 uv 失败：{}；{e}。可以手动安装 uv 后在设置里指定路径", errors.join("；"))))
+}
+
+/// 下载 ffmpeg（Windows 静态版，解压出 ffmpeg.exe）。先 gyan.dev，再退 BtbN 的 GitHub 构建
+fn download_ffmpeg(
+    bin: &Path,
+    log: &(dyn Fn(String) + Sync),
+    progress: &(dyn Fn(&str, u64, u64, u64) + Sync),
+) -> AppResult<PathBuf> {
+    if !cfg!(windows) {
+        return Err(msg("没有找到 ffmpeg，请先安装 ffmpeg（把它放进 PATH，或在设置里指定路径）"));
+    }
+    fs::create_dir_all(bin)?;
+    let exe = "ffmpeg.exe";
+    let out = bin.join(exe);
+    let zip = bin.join("ffmpeg-download.zip");
+    let sources = [
+        "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+        "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip",
+    ];
+    let mut errors = Vec::new();
+    for url in sources {
+        log(format!("下载 ffmpeg：{url}"));
+        let r = download_file(url, &zip, &|d, t, s| progress("ffmpeg", d, t, s))
+            .and_then(|_| {
+                let bytes = fs::read(&zip)?;
+                extract_exe(&bytes, exe, &out)
+            });
+        let _ = fs::remove_file(&zip);
+        match r {
+            Ok(p) => return Ok(p),
+            Err(e) => {
+                log(format!("下载失败：{e}"));
+                errors.push(e.to_string());
+            }
+        }
+    }
+    Err(msg(format!("下载 ffmpeg 失败：{}。可以手动安装 ffmpeg 后在设置里指定路径", errors.join("；"))))
 }
 
 fn http_get(url: &str) -> AppResult<Vec<u8>> {

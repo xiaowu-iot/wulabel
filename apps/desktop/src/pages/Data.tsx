@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { App, Button, Checkbox, Dropdown, Empty, Modal, Pagination, Progress, Segmented, Tag, Tooltip } from "antd";
+import { App, Button, Checkbox, Dropdown, Empty, InputNumber, Modal, Pagination, Progress, Segmented, Tag, Tooltip } from "antd";
 import {
   CheckSquareOutlined,
   ClearOutlined,
@@ -9,6 +9,7 @@ import {
   FileImageOutlined,
   FolderAddOutlined,
   RollbackOutlined,
+  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
@@ -23,6 +24,7 @@ import {
   LastImport,
   ProjectInfo,
   thumbUrl,
+  VideoProgress,
 } from "../api";
 import { prefs, useApp } from "../store";
 import ImageViewer from "../components/ImageViewer";
@@ -30,6 +32,7 @@ import ExportModal from "../components/ExportModal";
 
 const PAGE_SIZE = 120;
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
+const VIDEO_EXTS = ["mp4", "mov", "mkv", "avi", "webm", "flv", "wmv", "m4v", "ts"];
 
 const STATUS: Record<ImageStatus, { text: string; color?: string }> = {
   todo: { text: "未标注" },
@@ -62,6 +65,10 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [last, setLast] = useState<LastImport | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [videoPaths, setVideoPaths] = useState<string[]>([]);
+  const [videoEvery, setVideoEvery] = useState(Number(prefs.get("videoEvery", "1")));
+  const [videoMax, setVideoMax] = useState(Number(prefs.get("videoMax", "0")));
+  const [videoProgress, setVideoProgress] = useState<VideoProgress | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -222,6 +229,56 @@ export default function Data({ project }: { project: ProjectInfo }) {
     if (r) runImport(Array.isArray(r) ? r : [r]);
   };
 
+  const pickVideos = async () => {
+    const r = await open({
+      multiple: true,
+      title: "选择视频（会抽成图片导入）",
+      filters: [{ name: "视频", extensions: VIDEO_EXTS }],
+    });
+    if (!r) return;
+    setVideoPaths(Array.isArray(r) ? r : [r]);
+  };
+
+  const startExtract = async () => {
+    if (videoPaths.length === 0 || importing.current) return;
+    const paths = videoPaths;
+    const every = videoEvery;
+    const max = videoMax;
+    setVideoPaths([]);
+    prefs.set("videoEvery", String(every));
+    prefs.set("videoMax", String(max));
+    importing.current = true;
+    setVideoProgress({ stage: "extract", done: 0, total: 0, speed: 0, detail: "准备中…" });
+    const unlisten = await listen<VideoProgress>("video-progress", (e) => setVideoProgress(e.payload));
+    try {
+      const r = await api.extractVideo(paths, every, max);
+      await load();
+      await refreshStats();
+      const text = `从 ${r.videos} 个视频抽出 ${r.frames} 帧：新增 ${r.added} 张` + (r.duplicated ? `，跳过重复 ${r.duplicated} 张` : "");
+      if (r.failed.length === 0) {
+        message.success(text);
+      } else {
+        modal.warning({
+          title: `${text}，${r.failed.length} 个处理失败`,
+          width: 640,
+          content: (
+            <div style={{ maxHeight: 300, overflow: "auto", fontSize: 12 }}>
+              {r.failed.map((f) => (
+                <div key={f}>{f}</div>
+              ))}
+            </div>
+          ),
+        });
+      }
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      unlisten();
+      setVideoProgress(null);
+      importing.current = false;
+    }
+  };
+
   const s = project.stats;
   const pct = s.total ? Math.round(((s.labeled + s.reviewed) / s.total) * 100) : 0;
 
@@ -256,9 +313,10 @@ export default function Data({ project }: { project: ProjectInfo }) {
             menu={{
               items: [
                 { key: "files", icon: <FileImageOutlined />, label: "导入图片文件" },
+                { key: "video", icon: <VideoCameraOutlined />, label: "导入视频（抽帧）" },
                 { key: "dataset", icon: <DatabaseOutlined />, label: "导入带标注的数据集（YOLO / COCO / VOC）" },
               ],
-              onClick: ({ key }) => (key === "files" ? pickFiles() : pickDataset()),
+              onClick: ({ key }) => (key === "files" ? pickFiles() : key === "video" ? pickVideos() : pickDataset()),
             }}
           >
             <Button>
@@ -413,6 +471,52 @@ export default function Data({ project }: { project: ProjectInfo }) {
             ? `已处理 ${progress.done} / ${progress.total} 张（计算指纹、生成缩略图）`
             : "正在查找图片…"}
         </div>
+      </Modal>
+
+      <Modal
+        open={videoPaths.length > 0}
+        title="视频抽帧"
+        okText="开始抽帧"
+        cancelText="取消"
+        onOk={startExtract}
+        onCancel={() => setVideoPaths([])}
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          选了 {videoPaths.length} 个视频，按下面的设置抽成图片导入项目。
+        </p>
+        <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+          <span>每隔</span>
+          <InputNumber min={0.1} max={600} step={0.5} value={videoEvery} onChange={(v) => setVideoEvery(v ?? 1)} />
+          <span>秒抽 1 帧</span>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <span>每个视频最多</span>
+          <InputNumber min={0} max={100000} step={50} value={videoMax} onChange={(v) => setVideoMax(v ?? 0)} />
+          <span>帧（0 = 不限）</span>
+        </div>
+        <p className="dim" style={{ fontSize: 12, marginTop: 12, marginBottom: 0 }}>
+          首次使用会自动下载 ffmpeg（约 90MB），之后不再下载。抽出的帧会复制进项目，按内容自动去重。
+        </p>
+      </Modal>
+
+      <Modal open={!!videoProgress} closable={false} footer={null} maskClosable={false} title="正在处理视频">
+        {videoProgress &&
+          (() => {
+            const vp = videoProgress;
+            const pct = vp.total ? Math.floor((vp.done / vp.total) * 100) : 0;
+            const text =
+              vp.stage === "download"
+                ? `${vp.detail} · ${(vp.done / 2 ** 20).toFixed(0)} / ${(vp.total / 2 ** 20).toFixed(0)} MB · ${(vp.speed / 2 ** 20).toFixed(1)} MB/s`
+                : vp.stage === "extract"
+                  ? `正在抽帧：${vp.detail} · 已抽 ${vp.done} 帧${vp.total ? ` / 约 ${vp.total}` : ""}`
+                  : `正在导入 ${vp.done} / ${vp.total} 帧（生成缩略图）`;
+            return (
+              <>
+                <Progress percent={pct} status="active" showInfo={vp.total > 0} />
+                <div className="muted">{text}</div>
+              </>
+            );
+          })()}
       </Modal>
 
       {dragging && (

@@ -14,6 +14,7 @@ use crate::images::{self, DeleteScope, ImagePage, ImportResult, LastImport};
 use crate::project::{self, Project, ProjectInfo, RecentProject, Stats};
 use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
 use crate::state::AppState;
+use crate::video;
 use crate::training::{self, Jobs, Predictor, PredBox, PrelabelResult, RunDetail, RunInfo, TrainConfig};
 
 fn config_dir(app: &AppHandle) -> AppResult<PathBuf> {
@@ -101,6 +102,42 @@ pub async fn import_images(
     })
     .await
     .map_err(|e| msg(format!("导入任务异常：{e}")))?
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoProgress {
+    stage: String,
+    done: u64,
+    total: u64,
+    speed: u64,
+    detail: String,
+}
+
+/// 视频抽帧：按 every 秒抽 1 帧（每个视频最多 max_frames 帧，0 不限），抽出的帧导入项目
+#[tauri::command]
+pub async fn extract_video(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+    every: f64,
+    max_frames: u64,
+) -> AppResult<video::ExtractResult> {
+    let project = state.current()?;
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    tauri::async_runtime::spawn_blocking(move || {
+        let rt = app.state::<Runtime>();
+        let a = app.clone();
+        let progress = move |stage: &str, done: u64, total: u64, speed: u64, detail: &str| {
+            let _ = a.emit(
+                "video-progress",
+                VideoProgress { stage: stage.to_string(), done, total, speed, detail: detail.to_string() },
+            );
+        };
+        video::extract(&project, &rt, &paths, every, max_frames, &progress, &|_line| {})
+    })
+    .await
+    .map_err(|e| msg(format!("抽帧任务异常：{e}")))?
 }
 
 #[tauri::command]

@@ -13,6 +13,7 @@ mod protocol;
 mod runtime;
 mod state;
 mod training;
+mod video;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -57,6 +58,7 @@ pub fn run() {
             commands::recent_projects,
             commands::remove_recent,
             commands::import_images,
+            commands::extract_video,
             commands::list_images,
             commands::project_stats,
             commands::last_import,
