@@ -201,6 +201,39 @@ def build(key: str, num_classes: int, img_size: int, pretrained: bool = True, nu
     return model
 
 
+def class_heads(key: str, model: torch.nn.Module) -> list[str]:
+    """和类别个数、顺序有关的参数名前缀（接着训练但类别变了时，这些要重新学）"""
+    kind = kind_of(key)
+    if kind == "rcnn":
+        return ["roi_heads.box_predictor.", "roi_heads.mask_predictor.mask_fcn_logits."]
+    if kind in ("retinanet", "fcos"):
+        return ["head.classification_head.cls_logits."]
+    if kind == "ssd":
+        return ["head.classification_head."]
+    linears = [n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)]
+    return [linears[-1] + "."] if linears else []
+
+
+def load_init(model: torch.nn.Module, key: str, path: str, classes: list[str]) -> None:
+    """接着上次的模型训练：同结构的参数都沿用；类别变了的话，分类相关的头重新学"""
+    ck = torch.load(path, map_location="cpu", weights_only=False)
+    if ck.get("model") != key:
+        raise RuntimeError("接着训练要选和上次相同的模型")
+    same = list(ck.get("classes", [])) == list(classes)
+    heads = [] if same else class_heads(key, model)
+    own = model.state_dict()
+    keep = {
+        k: v
+        for k, v in ck["state_dict"].items()
+        if k in own and own[k].shape == v.shape and not any(k.startswith(h) for h in heads)
+    }
+    model.load_state_dict(keep, strict=False)
+    msg = f"接着上次的模型训练：沿用 {len(keep)}/{len(own)} 组参数"
+    if not same:
+        msg += "；类别和上次不一样，分类部分重新学"
+    log(msg)
+
+
 def save(path: Path, model: torch.nn.Module, key: str, classes: list[str], img_size: int, extra: dict | None = None):
     tmp = path.with_suffix(".tmp")
     torch.save(

@@ -62,6 +62,11 @@ def main() -> int:
 
             with open(args[1], encoding="utf-8") as f:
                 evaluate.run(json.load(f))
+        elif cmd == "augpreview":
+            from . import augment
+
+            with open(args[1], encoding="utf-8") as f:
+                augment.preview(json.load(f))
         elif cmd == "fptest":
             from . import fptest
 

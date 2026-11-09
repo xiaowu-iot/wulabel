@@ -258,6 +258,14 @@ pub async fn stop_fp_test(job: State<'_, evaltools::FpTest>) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub async fn aug_preview(app: AppHandle, state: State<'_, AppState>, aug: serde_json::Value, img_size: u32) -> AppResult<Vec<String>> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || evaltools::aug_preview(&project, &app.state::<Runtime>(), &aug, img_size, 4))
+        .await
+        .map_err(|e| msg(format!("预览异常：{e}")))?
+}
+
+#[tauri::command]
 pub async fn import_negatives(state: State<'_, AppState>, paths: Vec<String>) -> AppResult<usize> {
     evaltools::import_negatives(&state.current()?, &paths)
 }

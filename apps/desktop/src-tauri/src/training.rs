@@ -36,6 +36,12 @@ pub struct TrainConfig {
     /// 用哪个数据集版本训练；为空用当前数据
     #[serde(default)]
     pub version: Option<i64>,
+    /// 接着哪次训练的模型继续训；为空从预训练权重开始
+    #[serde(default)]
+    pub base_run: Option<i64>,
+    /// 数据增强参数（原样交给 worker，见 worker 的 augment.py）；为空用默认
+    #[serde(default)]
+    pub aug: Option<serde_json::Value>,
 }
 
 fn default_lr() -> f64 {
@@ -201,6 +207,24 @@ pub fn start(p: Arc<Project>, rt: &Runtime, jobs: Arc<Jobs>, cfg: TrainConfig, s
     if model_task(&cfg.model) != p.meta.task {
         return Err(msg("这个模型和项目的任务类型不匹配，请重新选择模型"));
     }
+    // 接着上次训练：上次要有模型文件，模型结构要一样
+    let base = match cfg.base_run {
+        Some(b) => {
+            let r = get_run(&p, b)?;
+            if r.engine == EXTERNAL {
+                return Err(msg("导入的外部模型不能接着训练"));
+            }
+            let w = PathBuf::from(&r.dir).join("best.pt");
+            if !w.exists() {
+                return Err(msg("那次训练没有产出模型，不能接着训"));
+            }
+            if r.config["model"].as_str() != Some(cfg.model.as_str()) {
+                return Err(msg("接着训练要用和那次相同的模型"));
+            }
+            Some((r.name, w))
+        }
+        None => None,
+    };
     let dir = run_dir(&p, &name);
     let ds = dir.join("dataset");
     // 分类项目导出分类文件夹，其他任务导出 COCO（框、多边形、关键点都在里面）
@@ -230,6 +254,12 @@ pub fn start(p: Arc<Project>, rt: &Runtime, jobs: Arc<Jobs>, cfg: TrainConfig, s
         "dataset": ds, "out": dir, "model": cfg.model, "classes": res.classes, "task": p.meta.task,
         "epochs": cfg.epochs, "img_size": cfg.img_size, "batch": cfg.batch, "lr": cfg.lr, "device": cfg.device,
     });
+    if let Some(a) = &cfg.aug {
+        worker_cfg["aug"] = a.clone();
+    }
+    if let Some((_, w)) = &base {
+        worker_cfg["init_weights"] = serde_json::json!(w);
+    }
     if p.meta.task == "pose" {
         let t = crate::keypoints::get(&p)?;
         worker_cfg["num_keypoints"] = serde_json::json!(t.points.len());
@@ -245,6 +275,9 @@ pub fn start(p: Arc<Project>, rt: &Runtime, jobs: Arc<Jobs>, cfg: TrainConfig, s
     });
     if let Some(v) = cfg.version {
         saved["versionName"] = serde_json::json!(crate::versions::name_of(&p, v).unwrap_or_default());
+    }
+    if let Some((name, _)) = &base {
+        saved["baseRunName"] = serde_json::json!(name);
     }
     let id = {
         let conn = p.conn.lock();
@@ -801,6 +834,8 @@ mod tests {
             only_reviewed: false,
             ratios: [0.75, 0.25, 0.0],
             version: None,
+            base_run: None,
+            aug: None,
         };
         let id = start(p.clone(), &rt, jobs.clone(), cfg, Arc::new(move |_, e| ev2.lock().push(e))).unwrap();
         assert!(start(p.clone(), &rt, jobs.clone(), TrainConfig { epochs: 1, ..serde_json::from_value(get_run(&p, id).unwrap().config).unwrap() }, Arc::new(|_, _| {})).is_err(), "同时只能一个训练");

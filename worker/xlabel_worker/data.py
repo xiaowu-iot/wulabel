@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import random
 from pathlib import Path
 
 import numpy as np
@@ -52,7 +51,11 @@ class CocoDetection(torch.utils.data.Dataset):
         seg: bool = False,
         num_keypoints: int = 0,
         flip_index: list[int] | None = None,
+        aug: dict | None = None,
     ):
+        from . import augment
+
+        self.aug = augment.config(aug, "detect")
         root = Path(root)
         doc = json.loads((root / "annotations" / f"instances_{split}.json").read_text(encoding="utf-8"))
         self.dir = root / "images" / split
@@ -107,33 +110,26 @@ class CocoDetection(torch.utils.data.Dataset):
         tgt = self.target(i)
         tgt["image_id"] = im["id"]
         t = F.to_tensor(img)
-        # 关键点没有左右对应关系时不能翻转（翻转后「左眼」会跑到右边）
-        can_flip = not self.nk or self.flip_index is not None
-        if self.train and can_flip and random.random() < 0.5:
-            t = t.flip(-1)
-            w = t.shape[-1]
-            b = tgt["boxes"]
-            tgt["boxes"] = b[:, [2, 1, 0, 3]] * torch.tensor([-1, 1, -1, 1]) + torch.tensor([w, 0, w, 0])
-            if "masks" in tgt and tgt["masks"].numel():
-                tgt["masks"] = tgt["masks"].flip(-1)
-            if "keypoints" in tgt and tgt["keypoints"].numel():
-                k = tgt["keypoints"].clone()
-                vis = k[..., 2] > 0
-                k[..., 0] = torch.where(vis, w - k[..., 0], k[..., 0])
-                tgt["keypoints"] = k[:, self.flip_index]
+        if self.train:
+            from . import augment
+
+            t, tgt = augment.detection(t, tgt, self.aug, self.flip_index, pose=bool(self.nk))
         return t, tgt
 
 
 class ClsFolder(torch.utils.data.Dataset):
     """图像分类：读清单 annotations/{split}.json，图片在数据集目录下的 file 路径"""
 
-    def __init__(self, root: Path, split: str, train: bool, size: int):
+    def __init__(self, root: Path, split: str, train: bool, size: int, aug: dict | None = None):
+        from . import augment
+
         root = Path(root)
         doc = json.loads((root / "annotations" / f"{split}.json").read_text(encoding="utf-8"))
         self.root = root
         self.items = doc["images"]
         self.train = train
         self.size = size
+        self.aug = augment.config(aug, "classify")
 
     def __len__(self):
         return len(self.items)
@@ -145,30 +141,13 @@ class ClsFolder(torch.utils.data.Dataset):
         img = load_image(self.root / it["file"])
         s = self.size
         if self.train:
-            # 随机裁剪缩放 + 水平翻转 + 轻微颜色扰动
-            i0, j0, hh, ww = _random_resized_crop_params(img, scale=(0.5, 1.0))
-            img = F.resized_crop(img, i0, j0, hh, ww, [s, s], antialias=True)
-            if random.random() < 0.5:
-                img = F.hflip(img)
-            img = F.adjust_brightness(img, random.uniform(0.8, 1.2))
-            img = F.adjust_contrast(img, random.uniform(0.8, 1.2))
+            from . import augment
+
+            img = augment.classify(img, s, self.aug)
         else:
             img = F.resize(img, [s, s], antialias=True)
         t = F.normalize(F.to_tensor(img), models.IMAGENET_MEAN, models.IMAGENET_STD)
         return t, int(it["label"]), int(it["id"])
-
-
-def _random_resized_crop_params(img: Image.Image, scale=(0.5, 1.0), ratio=(3 / 4, 4 / 3)):
-    w, h = img.size
-    area = w * h
-    for _ in range(10):
-        a = area * random.uniform(*scale)
-        r = np.exp(random.uniform(np.log(ratio[0]), np.log(ratio[1])))
-        cw = int(round((a * r) ** 0.5))
-        ch = int(round((a / r) ** 0.5))
-        if 0 < cw <= w and 0 < ch <= h:
-            return random.randint(0, h - ch), random.randint(0, w - cw), ch, cw
-    return 0, 0, h, w
 
 
 def cls_preprocess(img: Image.Image, size: int) -> torch.Tensor:

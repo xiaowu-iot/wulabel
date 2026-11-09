@@ -78,6 +78,7 @@ pub fn run() {
             commands::fp_test,
             commands::stop_fp_test,
             commands::import_negatives,
+            commands::aug_preview,
             commands::list_versions,
             commands::create_version,
             commands::rename_version,

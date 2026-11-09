@@ -79,10 +79,13 @@ class DetTask:
         self.seg = models.is_seg(key)
         self.nk = int(cfg.get("num_keypoints", 17)) if models.is_pose(key) else 0
         self.flip = cfg.get("flip_index")
+        self.aug = cfg.get("aug")
         self.keys = ("boxes", "labels") + (("masks",) if self.seg else ()) + (("keypoints",) if self.nk else ())
 
     def dataset(self, split: str, train: bool):
-        return CocoDetection(self.root, split, train=train, seg=self.seg, num_keypoints=self.nk, flip_index=self.flip)
+        return CocoDetection(
+            self.root, split, train=train, seg=self.seg, num_keypoints=self.nk, flip_index=self.flip, aug=self.aug
+        )
 
     def has_split(self, split: str) -> bool:
         return has_split(self.root, split)
@@ -114,10 +117,11 @@ class ClsTask:
     def __init__(self, cfg: dict, root: Path, key: str):
         self.root = root
         self.size = int(cfg.get("img_size", 224))
+        self.aug = cfg.get("aug")
         self.criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
 
     def dataset(self, split: str, train: bool):
-        return ClsFolder(self.root, split, train=train, size=self.size)
+        return ClsFolder(self.root, split, train=train, size=self.size, aug=self.aug)
 
     def has_split(self, split: str) -> bool:
         return has_cls_split(self.root, split)
@@ -211,6 +215,16 @@ def run(cfg: dict) -> None:
         drop_last=len(train_ds) > batch,
     )
     model = models.build(key, len(classes), img_size, num_keypoints=int(cfg.get("num_keypoints", 17))).to(device)
+    if cfg.get("init_weights"):
+        models.load_init(model, key, cfg["init_weights"], classes)
+    # 多尺度训练：输入尺寸在几档之间随机（评估时 torchvision 用最后一档，也就是原尺寸）
+    scale = float((cfg.get("aug") or {}).get("scale") or 0)
+    if scale and models.kind_of(key) in ("rcnn", "retinanet", "fcos"):
+        from . import augment
+
+        sizes = augment.multiscale_sizes(img_size, scale)
+        model.transform.min_size = sizes
+        log(f"多尺度训练：{'、'.join(str(s) for s in sizes)}")
     params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.SGD(params, lr=lr, momentum=0.9, weight_decay=1e-4)
     iters_per_epoch = max(len(loader), 1)

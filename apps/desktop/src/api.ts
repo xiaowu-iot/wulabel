@@ -232,6 +232,28 @@ export interface TrainConfig {
   ratios: [number, number, number];
   /** 用哪个数据集版本训练；空 = 当前数据 */
   version?: number | null;
+  /** 接着哪次训练的模型继续训；空 = 从预训练权重开始 */
+  baseRun?: number | null;
+  /** 数据增强；空 = 默认 */
+  aug?: AugConfig | null;
+}
+
+/** 数据增强参数（和 worker 的 augment.py 一致） */
+export interface AugConfig {
+  hflip: boolean;
+  vflip: boolean;
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  hue: number;
+  blur: number;
+  noise: number;
+  /** 多尺度训练幅度（检测类） */
+  scale: number;
+  /** 随机旋转角度（分类） */
+  rotate: number;
+  /** 随机裁剪最少保留的面积比例（分类） */
+  crop: number;
 }
 
 export interface VersionInfo {
@@ -269,6 +291,8 @@ export interface RunInfo {
     images?: { train: number; val: number; test: number; boxes: number; anns?: number };
     /** 训练用的数据集版本名（用当前数据训练时没有） */
     versionName?: string;
+    /** 接着哪次训练继续训的（那次的名字） */
+    baseRunName?: string;
   };
   bestMap50: number | null;
   createdAt: number;
@@ -529,6 +553,7 @@ export const api = {
   fpTest: (config: FpConfig) => invoke<FpSummary>("fp_test", { config }),
   stopFpTest: () => invoke<void>("stop_fp_test"),
   importNegatives: (paths: string[]) => invoke<number>("import_negatives", { paths }),
+  augPreview: (aug: AugConfig, imgSize: number) => invoke<string[]>("aug_preview", { aug, imgSize }),
   listVersions: () => invoke<VersionInfo[]>("list_versions"),
   createVersion: (name: string, note: string, ratios: [number, number, number]) =>
     invoke<VersionInfo>("create_version", { name, note, ratios }),

@@ -156,6 +156,71 @@ pub fn update_external(p: &Project, run_id: i64, m: &ExternalModel) -> AppResult
     Ok(())
 }
 
+// ---------- 数据增强预览 ----------
+
+/// 一条标注的外接框 [x, y, w, h]（预览里画框用）
+fn ann_box(kind: &str, data: &str) -> Option<[f64; 4]> {
+    let v: serde_json::Value = serde_json::from_str(data).ok()?;
+    match kind {
+        "bbox" => {
+            let a: Vec<f64> = serde_json::from_value(v).ok()?;
+            (a.len() == 4).then(|| [a[0], a[1], a[2], a[3]])
+        }
+        "polygon" => {
+            let a: Vec<f64> = serde_json::from_value(v).ok()?;
+            if a.len() < 6 {
+                return None;
+            }
+            let (x0, x1) = a.iter().step_by(2).fold((f64::MAX, f64::MIN), |(lo, hi), x| (lo.min(*x), hi.max(*x)));
+            let (y0, y1) = a.iter().skip(1).step_by(2).fold((f64::MAX, f64::MIN), |(lo, hi), y| (lo.min(*y), hi.max(*y)));
+            Some([x0, y0, x1 - x0, y1 - y0])
+        }
+        "keypoints" => crate::keypoints::parse(&v).map(|(b, _)| b),
+        _ => None,
+    }
+}
+
+/// 数据增强效果预览：随机挑几张已标注的图，每张按当前增强参数随机变两次，返回 JPEG（base64）
+pub fn aug_preview(p: &Project, rt: &Runtime, aug: &serde_json::Value, img_size: u32, count: usize) -> AppResult<Vec<String>> {
+    let items: Vec<serde_json::Value> = {
+        let conn = p.conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, path FROM images WHERE status IN ('labeled', 'reviewed') ORDER BY RANDOM() LIMIT ?1",
+        )?;
+        let rows: Vec<(i64, String)> =
+            stmt.query_map([count as i64], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;
+        let mut anns = conn.prepare("SELECT type, data_json FROM annotations WHERE image_id = ?1")?;
+        let mut out = Vec::new();
+        for (id, path) in rows {
+            let boxes: Vec<[f64; 4]> = anns
+                .query_map([id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .flatten()
+                .filter_map(|(k, d)| ann_box(&k, &d))
+                .collect();
+            out.push(serde_json::json!({ "path": p.resolve(&path), "boxes": boxes }));
+        }
+        out
+    };
+    if items.is_empty() {
+        return Err(msg("还没有已标注的图片，没法预览"));
+    }
+    let dir = p.root.join(".cache");
+    fs::create_dir_all(&dir)?;
+    let cfg_path = dir.join("augpreview.json");
+    let cfg = serde_json::json!({ "task": p.meta.task, "img_size": img_size, "aug": aug, "n": 2, "images": items });
+    fs::write(&cfg_path, serde_json::to_string(&cfg)?)?;
+    let cfg_arg = cfg_path.to_string_lossy().to_string();
+    let mut imgs = Vec::new();
+    worker_events(rt, &["augpreview", cfg_arg.as_str()], &mut |v| {
+        if v["type"] == "preview" {
+            if let Some(s) = v["img"].as_str() {
+                imgs.push(format!("data:image/jpeg;base64,{s}"));
+            }
+        }
+    }, None)?;
+    Ok(imgs)
+}
+
 // ---------- 重新评估 ----------
 
 /// 用现在的数据（已标注、已审核的验证集 / 测试集）重新评估一个模型，结果覆盖这次训练的 eval.json

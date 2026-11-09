@@ -36,6 +36,27 @@ export default function RunCompare({ runs, task, open, onClose }: { runs: RunInf
     ? [
         { key: "model", name: "模型", values: details.map((d) => modelName(d.run)) },
         { key: "data", name: "训练数据", values: details.map((d) => d.run.config?.versionName ?? "当前数据") },
+        { key: "base", name: "起点", values: details.map((d) => (d.run.config?.baseRunName ? `接着 ${d.run.config.baseRunName}` : "预训练权重")) },
+        {
+          key: "aug",
+          name: "数据增强",
+          values: details.map((d) => {
+            const a = d.run.config?.aug;
+            if (!a) return "默认";
+            const on = [
+              a.hflip && "左右翻转",
+              a.vflip && "上下翻转",
+              a.brightness && "亮度",
+              a.contrast && "对比度",
+              a.saturation && "饱和度",
+              a.hue && "色调",
+              a.blur && "模糊",
+              a.noise && "噪点",
+              a.scale && "多尺度",
+            ].filter(Boolean);
+            return on.length ? on.join("、") : "关闭";
+          }),
+        },
         {
           key: "images",
           name: "图片（训练 / 验证）",

@@ -13,6 +13,7 @@ import { prefs, useApp } from "../store";
 import LineChart from "../components/LineChart";
 import RunCompare from "../components/RunCompare";
 import ImportModelModal from "../components/ImportModelModal";
+import AugPanel from "../components/AugPanel";
 
 /** 内置模型，和 worker/xlabel_worker/models.py 的 MODELS 对应。oneStage：单阶段检测，部署到 TensorRT / NPU 更顺 */
 export const MODELS: { value: string; name: string; desc: string; task: Task; oneStage?: boolean; fixedSize?: number }[] = [
@@ -200,7 +201,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
     setStarting(true);
     try {
       // 记住的版本可能已经被删掉了，那就用当前数据
-      const id = await api.startTraining({ ...cfg, version: useVersion ? cfg.version : null });
+      const id = await api.startTraining({ ...cfg, version: useVersion ? cfg.version : null, baseRun: baseRun ? baseRun.id : null });
       await loadRuns();
       setSel(id);
       setSplit(await api.splitSummary());
@@ -219,6 +220,11 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const epochs = run?.config?.epochs ?? cfg.epochs;
   const gpuMem = env?.gpu?.vramMb ?? 0;
   const useVersion = cfg.version != null && versions.some((v) => v.id === cfg.version);
+  // 可以接着训的：自己训练出来、有模型文件、模型属于这个任务的
+  const baseRuns = runs.filter(
+    (r) => r.engine !== "external" && r.hasWeights && r.status !== "running" && MODELS.some((m) => m.value === r.config?.model && m.task === task),
+  );
+  const baseRun = baseRuns.find((r) => r.id === cfg.baseRun) ?? null;
   const recommended = recommendModel(task, gpuMem);
   const taskWord = { detect: "检测", segment: "实例分割", pose: "关键点", classify: "图像分类" }[task];
   const unitWord = task === "classify" ? "张图" : task === "pose" ? "个目标" : "个框";
@@ -293,8 +299,28 @@ export default function Train({ project }: { project: ProjectInfo }) {
           </div>
           <div className="card">
             <Form layout="vertical" size="small">
-              <Form.Item label="模型">
-                <Radio.Group value={cfg.model} onChange={(e) => update({ model: e.target.value })}>
+              <Form.Item
+                label="起点"
+                tooltip="补了新数据后，接着上次训好的模型继续训，比从头训快、也更稳。类别有变化时，分类部分会重新学"
+              >
+                <Select
+                  style={{ width: "100%" }}
+                  value={baseRun ? baseRun.id : 0}
+                  onChange={(v) => {
+                    const r = baseRuns.find((x) => x.id === v);
+                    update(r ? { baseRun: r.id, model: String(r.config.model), imgSize: r.config.imgSize ?? cfg.imgSize } : { baseRun: null });
+                  }}
+                  options={[
+                    { value: 0, label: "从预训练权重开始（从头训）" },
+                    ...baseRuns.map((r) => ({
+                      value: r.id,
+                      label: `接着「${r.name}」继续训 · ${modelName(r)} · ${mn.m50} ${r.bestMap50?.toFixed(3) ?? "—"}`,
+                    })),
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item label="模型" extra={baseRun ? "接着训练时沿用那次的模型" : undefined}>
+                <Radio.Group value={cfg.model} disabled={!!baseRun} onChange={(e) => update({ model: e.target.value })}>
                   <Space direction="vertical">
                     {models.map((m) => (
                       <Radio key={m.value} value={m.value}>
@@ -333,6 +359,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                   <InputNumber min={1} max={64} value={cfg.batch} onChange={(v) => update({ batch: Number(v ?? 4) })} />
                 </Form.Item>
               </Space>
+              <AugPanel value={cfg.aug} task={task} imgSize={picked?.fixedSize ?? cfg.imgSize} fixedSize={!!picked?.fixedSize} onChange={(aug) => update({ aug })} />
               <Form.Item label="训练数据" tooltip="选一个数据集版本训练，方便对比不同数据的效果；版本在「数据 → 管理 → 数据集版本」里保存">
                 <Select
                   style={{ width: "100%" }}
