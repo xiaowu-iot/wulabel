@@ -102,6 +102,9 @@ pub struct ExportOptions {
     /// 还没划分的图按这个比例分配
     #[serde(default = "default_ratios")]
     pub ratios: [f64; 3],
+    /// 图片一律复制（默认能硬链接就硬链接）。导出后还要改图（比如打码）时必须复制，不然会改到原图
+    #[serde(default)]
+    pub copy_files: bool,
 }
 
 fn default_ratios() -> [f64; 3] {
@@ -124,6 +127,9 @@ pub struct ExportResult {
     pub val: usize,
     pub test: usize,
     pub classes: Vec<String>,
+    /// 导出的每个图片文件对应的图片 id（打码等后续处理用）
+    #[serde(skip)]
+    pub files: Vec<(PathBuf, i64)>,
 }
 
 pub struct ExportImage {
@@ -297,6 +303,17 @@ fn link_or_copy(src: &Path, dst: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/// 放一张图到导出目录，并记下文件对应的图片 id。copy=true 时一定复制（之后要改图）
+fn put(files: &mut Vec<(PathBuf, i64)>, src: &Path, dst: PathBuf, id: i64, copy: bool) -> AppResult<()> {
+    if copy {
+        fs::copy(src, &dst).map_err(|e| msg(format!("复制图片失败 {}：{e}", src.display())))?;
+    } else {
+        link_or_copy(src, &dst)?;
+    }
+    files.push((dst, id));
+    Ok(())
+}
+
 fn prepare_out(out: &Path) -> AppResult<()> {
     if out.exists() && fs::read_dir(out)?.next().is_some() {
         return Err(msg(format!("导出目录不为空：{}", out.display())));
@@ -369,6 +386,7 @@ fn write(
         val: 0,
         test: 0,
         classes: classes.clone(),
+        files: Vec::new(),
     };
     for im in &images {
         match im.split.as_str() {
@@ -393,7 +411,7 @@ fn write(
             }
             for (n, im) in images.iter().enumerate() {
                 let s = split_of(im);
-                link_or_copy(&im.src, &out.join("images").join(&s).join(&im.file_name))?;
+                put(&mut result.files, &im.src, out.join("images").join(&s).join(&im.file_name), im.id, opts.copy_files)?;
                 let (w, h) = (im.width as f64, im.height as f64);
                 let norm_poly = |pts: &[f64]| -> String {
                     pts.chunks(2).map(|p| format!("{:.6} {:.6}", p[0] / w, p[1] / h)).collect::<Vec<_>>().join(" ")
@@ -487,7 +505,7 @@ fn write(
                 let mut imgs = Vec::new();
                 let mut anns = Vec::new();
                 for im in images.iter().filter(|im| split_of(im) == *s) {
-                    link_or_copy(&im.src, &out.join("images").join(s).join(&im.file_name))?;
+                    put(&mut result.files, &im.src, out.join("images").join(s).join(&im.file_name), im.id, opts.copy_files)?;
                     imgs.push(serde_json::json!({
                         "id": im.id, "file_name": im.file_name, "width": im.width, "height": im.height
                     }));
@@ -535,7 +553,7 @@ fn write(
             }
             let mut sets: HashMap<String, Vec<String>> = HashMap::new();
             for (n, im) in images.iter().enumerate() {
-                link_or_copy(&im.src, &out.join("JPEGImages").join(&im.file_name))?;
+                put(&mut result.files, &im.src, out.join("JPEGImages").join(&im.file_name), im.id, opts.copy_files)?;
                 let stem = Path::new(&im.file_name).file_stem().unwrap().to_string_lossy().into_owned();
                 let mut xml = format!(
                     "<annotation>\n  <folder>JPEGImages</folder>\n  <filename>{}</filename>\n  <size>\n    <width>{}</width>\n    <height>{}</height>\n    <depth>3</depth>\n  </size>\n  <segmented>0</segmented>\n",
@@ -595,7 +613,7 @@ fn write(
                     let Some(c) = im.tag else { continue };
                     let d = out.join(s).join(&dirs[c]);
                     fs::create_dir_all(&d)?;
-                    link_or_copy(&im.src, &d.join(&im.file_name))?;
+                    put(&mut result.files, &im.src, d.join(&im.file_name), im.id, opts.copy_files)?;
                     list.push(serde_json::json!({
                         "id": im.id, "file": format!("{s}/{}/{}", dirs[c], im.file_name), "label": c
                     }));
@@ -674,7 +692,7 @@ pub mod tests {
         let p = sample(&base);
         for fmt in [Format::Yolo, Format::Coco, Format::Voc] {
             let out = base.join(format!("{fmt:?}"));
-            let r = export(&p, &ExportOptions { format: fmt, out_dir: out.clone(), only_reviewed: false, ratios: [0.75, 0.25, 0.0] }, &|_, _| {}).unwrap();
+            let r = export(&p, &ExportOptions { format: fmt, out_dir: out.clone(), only_reviewed: false, ratios: [0.75, 0.25, 0.0], copy_files: false }, &|_, _| {}).unwrap();
             assert_eq!((r.images, r.boxes, r.train, r.val), (8, 16, 6, 2));
             match fmt {
                 Format::Yolo => {
@@ -703,7 +721,7 @@ pub mod tests {
                 Format::Cls => unreachable!(),
             }
             // 目录不为空时拒绝导出
-            assert!(export(&p, &ExportOptions { format: fmt, out_dir: out, only_reviewed: false, ratios: [1.0, 0.0, 0.0] }, &|_, _| {}).is_err());
+            assert!(export(&p, &ExportOptions { format: fmt, out_dir: out, only_reviewed: false, ratios: [1.0, 0.0, 0.0], copy_files: false }, &|_, _| {}).is_err());
         }
         assert!(collect(&p, true).is_err(), "没有已审核的图");
         drop(p);

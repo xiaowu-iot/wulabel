@@ -229,7 +229,7 @@ pub fn start(p: Arc<Project>, rt: &Runtime, jobs: Arc<Jobs>, cfg: TrainConfig, s
     let ds = dir.join("dataset");
     // 分类项目导出分类文件夹，其他任务导出 COCO（框、多边形、关键点都在里面）
     let format = if p.meta.task == "classify" { Format::Cls } else { Format::Coco };
-    let opts = ExportOptions { format, out_dir: ds.clone(), only_reviewed: cfg.only_reviewed, ratios: cfg.ratios };
+    let opts = ExportOptions { format, out_dir: ds.clone(), only_reviewed: cfg.only_reviewed, ratios: cfg.ratios, copy_files: false };
     let res = match cfg.version {
         Some(v) => dataset::export_version(&p, v, &opts, &|_, _| {}),
         None => dataset::export(&p, &opts, &|_, _| {}),

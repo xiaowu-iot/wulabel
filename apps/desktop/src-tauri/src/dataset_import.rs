@@ -683,7 +683,7 @@ mod tests {
         let src = sample(&base);
         for fmt in [Format::Yolo, Format::Coco, Format::Voc] {
             let out = base.join(format!("out-{fmt:?}"));
-            dataset::export(&src, &ExportOptions { format: fmt, out_dir: out.clone(), only_reviewed: false, ratios: [0.75, 0.25, 0.0] }, &|_, _| {}).unwrap();
+            dataset::export(&src, &ExportOptions { format: fmt, out_dir: out.clone(), only_reviewed: false, ratios: [0.75, 0.25, 0.0], copy_files: false }, &|_, _| {}).unwrap();
             let dst_dir = base.join(format!("dst-{fmt:?}"));
             fs::create_dir_all(&dst_dir).unwrap();
             let dst = Project::create(&dst_dir, "d", "detect").unwrap();

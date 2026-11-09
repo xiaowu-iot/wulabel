@@ -3,8 +3,9 @@ import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Progress, Radio
 import { FolderOpenOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, DatasetFormat, errText, ExportResult, ImportProgress, ProjectInfo, SplitSummary, Task, VersionInfo } from "../api";
+import { AnonymizeConfig, api, DatasetFormat, errText, ExportResult, ImportProgress, ProjectInfo, SplitSummary, Task, VersionInfo } from "../api";
 import { prefs } from "../store";
+import AnonymizeOptions from "./AnonymizeOptions";
 
 /** 各任务能导出的格式 */
 const FORMATS: Record<Task, { value: DatasetFormat; name: string; desc: string }[]> = {
@@ -65,6 +66,8 @@ export default function ExportModal({
   const [name, setName] = useState("");
   const [summary, setSummary] = useState<SplitSummary | null>(null);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
+  const [anonymize, setAnonymize] = useState<AnonymizeConfig | null>(null);
+  const [stage, setStage] = useState("");
 
   useEffect(() => {
     if (!visible) return;
@@ -104,11 +107,17 @@ export default function ExportModal({
       message.warning("请填写文件夹名");
       return;
     }
+    if (anonymize && !anonymize.labels.length && !anonymize.faces && !anonymize.plates) {
+      message.warning("打码：请选择要打码的类别，或勾选自动找人脸 / 车牌");
+      return;
+    }
     setProgress({ done: 0, total: 0 });
+    setStage("");
     const un = await listen<ImportProgress>("export-progress", (e) => setProgress(e.payload));
+    const unLog = await listen<string>("export-log", (e) => setStage(e.payload));
     try {
       const options = { format, outDir, onlyReviewed, ratios: r() };
-      const res = version ? await api.exportVersion(version.id, options) : await api.exportDataset(options);
+      const res = version ? await api.exportVersion(version.id, options, anonymize) : await api.exportDataset(options, anonymize);
       prefs.set("exportFormat", format);
       prefs.set("exportParent", parent);
       onClose();
@@ -130,7 +139,9 @@ export default function ExportModal({
       message.error(errText(e));
     } finally {
       un();
+      unLog();
       setProgress(null);
+      setStage("");
     }
   };
 
@@ -227,9 +238,15 @@ export default function ExportModal({
           </Space.Compact>
           <Input style={{ marginTop: 8 }} value={name} onChange={(e) => setName(e.target.value)} addonBefore="文件夹名" />
         </Form.Item>
+        <Form.Item label="打码">
+          <AnonymizeOptions task={project.task} value={anonymize} onChange={setAnonymize} />
+        </Form.Item>
       </Form>
       {progress && (
-        <Progress percent={progress.total ? Math.floor((progress.done / progress.total) * 100) : 0} size="small" />
+        <>
+          <Progress percent={progress.total ? Math.floor((progress.done / progress.total) * 100) : 0} size="small" />
+          {stage && <div className="dim" style={{ fontSize: 12 }}>{stage}</div>}
+        </>
       )}
     </Modal>
   );

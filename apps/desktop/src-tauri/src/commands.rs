@@ -265,7 +265,12 @@ pub async fn split_packages(app: AppHandle, state: State<'_, AppState>, options:
     let project = state.current()?;
     tauri::async_runtime::spawn_blocking(move || {
         let progress = progress_emitter(app.clone(), "export-progress");
-        collab::split(&project, &options, &progress)
+        let rt = app.state::<Runtime>();
+        let log_app = app.clone();
+        let log = move |m: String| {
+            let _ = log_app.emit("export-log", m);
+        };
+        collab::split(&project, &options, &rt, &log, &progress)
     })
     .await
     .map_err(|e| msg(format!("分包异常：{e}")))?
@@ -365,11 +370,24 @@ pub async fn restore_version(state: State<'_, AppState>, id: i64) -> AppResult<v
 }
 
 #[tauri::command]
-pub async fn export_version(app: AppHandle, state: State<'_, AppState>, id: i64, options: ExportOptions) -> AppResult<ExportResult> {
+pub async fn export_version(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: i64,
+    mut options: ExportOptions,
+    anonymize: Option<evaltools::Anonymize>,
+) -> AppResult<ExportResult> {
     let project = state.current()?;
+    if anonymize.is_some() {
+        options.copy_files = true;
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let progress = progress_emitter(app.clone(), "export-progress");
-        dataset::export_version(&project, id, &options, &progress)
+        let res = dataset::export_version(&project, id, &options, &progress)?;
+        if let Some(a) = anonymize {
+            anonymize_export(&app, &project, &res, &a)?;
+        }
+        Ok(res)
     })
     .await
     .map_err(|e| msg(format!("导出异常：{e}")))?
@@ -792,12 +810,38 @@ fn progress_emitter(app: AppHandle, event: &'static str) -> impl Fn(usize, usize
     }
 }
 
+/// 导出完再给导出的图片打码（导出时已经强制复制，不会动原图）
+fn anonymize_export(app: &AppHandle, project: &Project, res: &ExportResult, a: &evaltools::Anonymize) -> AppResult<()> {
+    let rt = app.state::<Runtime>();
+    let log_app = app.clone();
+    let log = move |m: String| {
+        let _ = log_app.emit("export-log", m);
+    };
+    // 进度条从 0 重新走一遍
+    let progress = progress_emitter(app.clone(), "export-progress");
+    evaltools::anonymize(project, &rt, &res.files, a, &log, &progress)?;
+    Ok(())
+}
+
 #[tauri::command]
-pub async fn export_dataset(app: AppHandle, state: State<'_, AppState>, options: ExportOptions) -> AppResult<ExportResult> {
+pub async fn export_dataset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mut options: ExportOptions,
+    anonymize: Option<evaltools::Anonymize>,
+) -> AppResult<ExportResult> {
     let project = state.current()?;
+    // 要打码就复制图片（不能用硬链接，不然会改到原图）
+    if anonymize.is_some() {
+        options.copy_files = true;
+    }
     tauri::async_runtime::spawn_blocking(move || {
-        let progress = progress_emitter(app, "export-progress");
-        dataset::export(&project, &options, &progress)
+        let progress = progress_emitter(app.clone(), "export-progress");
+        let res = dataset::export(&project, &options, &progress)?;
+        if let Some(a) = anonymize {
+            anonymize_export(&app, &project, &res, &a)?;
+        }
+        Ok(res)
     })
     .await
     .map_err(|e| msg(format!("导出任务异常：{e}")))?

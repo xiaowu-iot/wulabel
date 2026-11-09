@@ -221,6 +221,90 @@ pub fn aug_preview(p: &Project, rt: &Runtime, aug: &serde_json::Value, img_size:
     Ok(imgs)
 }
 
+// ---------- 打码 ----------
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Anonymize {
+    /// 这些类别的标注区域打码（比如项目里标的「人脸」「车牌」）
+    #[serde(default)]
+    pub labels: Vec<i64>,
+    /// 自动找人脸
+    #[serde(default)]
+    pub faces: bool,
+    /// 自动找车牌
+    #[serde(default)]
+    pub plates: bool,
+    /// mosaic 马赛克 / blur 模糊 / black 涂黑
+    #[serde(default = "mosaic")]
+    pub mode: String,
+}
+
+fn mosaic() -> String {
+    "mosaic".into()
+}
+
+/// 给一批图片文件打码（直接改写文件，只能用在副本上）。files：(文件, 原项目里的图片 id)，标注区域从 src 项目读。返回打码的区域数
+pub fn anonymize(
+    src: &Project,
+    rt: &Runtime,
+    files: &[(PathBuf, i64)],
+    a: &Anonymize,
+    log: &(dyn Fn(String) + Sync),
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> AppResult<usize> {
+    let mut auto = Vec::new();
+    if a.faces {
+        auto.push("face");
+    }
+    if a.plates {
+        auto.push("license plate");
+    }
+    if a.labels.is_empty() && auto.is_empty() {
+        return Ok(0);
+    }
+    let items: Vec<serde_json::Value> = {
+        let conn = src.conn.lock();
+        let mut stmt = conn.prepare("SELECT label_id, type, data_json FROM annotations WHERE image_id = ?1")?;
+        let mut out = Vec::new();
+        for (path, id) in files {
+            let regions: Vec<[f64; 4]> = stmt
+                .query_map([id], |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))?
+                .flatten()
+                .filter(|(l, _, _)| l.is_some_and(|l| a.labels.contains(&l)))
+                .filter_map(|(_, k, d)| ann_box(&k, &d))
+                .collect();
+            // 没开自动查找时，没有要打码区域的图不用动
+            if regions.is_empty() && auto.is_empty() {
+                continue;
+            }
+            out.push(serde_json::json!({ "path": path, "regions": regions }));
+        }
+        out
+    };
+    if items.is_empty() {
+        return Ok(0);
+    }
+    if !auto.is_empty() {
+        crate::assist::ensure_deps(rt, log)?;
+    }
+    let cfg_path = std::env::temp_dir().join(format!("wulabel-anonymize-{}-{}.json", std::process::id(), db::now()));
+    fs::write(&cfg_path, serde_json::to_string(&serde_json::json!({ "files": items, "auto": auto, "mode": a.mode }))?)?;
+    let cfg_arg = cfg_path.to_string_lossy().to_string();
+    let total = items.len();
+    let mut regions = 0;
+    log(format!("正在给 {total} 张图打码…"));
+    let r = worker_events(rt, &["anonymize", cfg_arg.as_str()], &mut |v| match v["type"].as_str() {
+        Some("progress") => progress(v["done"].as_u64().unwrap_or(0) as usize, total),
+        Some("log") => log(v["msg"].as_str().unwrap_or("").to_string()),
+        Some("done") => regions = v["regions"].as_u64().unwrap_or(0) as usize,
+        _ => {}
+    }, None);
+    let _ = fs::remove_file(&cfg_path);
+    r?;
+    Ok(regions)
+}
+
 // ---------- 重新评估 ----------
 
 /// 用现在的数据（已标注、已审核的验证集 / 测试集）重新评估一个模型，结果覆盖这次训练的 eval.json
@@ -232,7 +316,7 @@ pub fn evaluate_run(p: &Project, rt: &Runtime, run_id: i64, log: &(dyn Fn(String
     let _ = fs::remove_dir_all(&ds);
     let format = if p.meta.task == "classify" { Format::Cls } else { Format::Coco };
     log("导出当前数据…".into());
-    let res = dataset::export(p, &ExportOptions { format, out_dir: ds.clone(), only_reviewed: false, ratios: [0.8, 0.2, 0.0] }, &|_, _| {})?;
+    let res = dataset::export(p, &ExportOptions { format, out_dir: ds.clone(), only_reviewed: false, ratios: [0.8, 0.2, 0.0], copy_files: false }, &|_, _| {})?;
     let cfg = serde_json::json!({ "dataset": ds, "out": dir, "weights": weights, "classes": res.classes });
     let cfg_path = dir.join("eval_config.json");
     fs::write(&cfg_path, serde_json::to_string_pretty(&cfg)?)?;

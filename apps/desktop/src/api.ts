@@ -99,6 +99,14 @@ export interface LastImport {
   createdAt: number;
 }
 
+/** 打码：这些类别的标注区域 + 自动找的人脸、车牌 */
+export interface AnonymizeConfig {
+  labels: number[];
+  faces: boolean;
+  plates: boolean;
+  mode: "mosaic" | "blur" | "black";
+}
+
 export interface Label {
   id: number;
   name: string;
@@ -538,8 +546,10 @@ export const api = {
   revealPath: (path: string) => invoke<void>("reveal_path", { path }),
   splitSummary: () => invoke<SplitSummary>("split_summary"),
   assignSplits: (ratios: [number, number, number], all: boolean) => invoke<SplitSummary>("assign_splits", { ratios, all }),
-  exportDataset: (options: { format: DatasetFormat; outDir: string; onlyReviewed: boolean; ratios: [number, number, number] }) =>
-    invoke<ExportResult>("export_dataset", { options }),
+  exportDataset: (
+    options: { format: DatasetFormat; outDir: string; onlyReviewed: boolean; ratios: [number, number, number] },
+    anonymize: AnonymizeConfig | null = null,
+  ) => invoke<ExportResult>("export_dataset", { options, anonymize }),
   importDataset: (dir: string) => invoke<DatasetImportResult>("import_dataset", { dir }),
   lastImport: () => invoke<LastImport | null>("last_import"),
   deleteImages: (scope: "ids" | "last" | "all", ids?: number[]) => invoke<number>("delete_images", { scope, ids }),
@@ -584,7 +594,13 @@ export const api = {
   importNegatives: (paths: string[]) => invoke<number>("import_negatives", { paths }),
   augPreview: (aug: AugConfig, imgSize: number) => invoke<string[]>("aug_preview", { aug, imgSize }),
   exportReport: (runId: number, path: string) => invoke<void>("export_report", { runId, path }),
-  splitPackages: (options: { outDir: string; assignees: string[]; scope: "todo" | "unreviewed" | "all"; withAnnotations: boolean }) =>
+  splitPackages: (options: {
+    outDir: string;
+    assignees: string[];
+    scope: "todo" | "unreviewed" | "all";
+    withAnnotations: boolean;
+    anonymize?: AnonymizeConfig | null;
+  }) =>
     invoke<PackageInfo[]>("split_packages", { options }),
   listPackages: () => invoke<PackageInfo[]>("list_packages"),
   mergePackage: (options: { dir: string; overwrite: boolean; importNew: boolean }) => invoke<MergeResult>("merge_package", { options }),
@@ -598,8 +614,11 @@ export const api = {
   deleteVersion: (id: number) => invoke<void>("delete_version", { id }),
   diffVersion: (id: number) => invoke<VersionDiff>("diff_version", { id }),
   restoreVersion: (id: number) => invoke<{ images: number; missing: number; backup: number | null }>("restore_version", { id }),
-  exportVersion: (id: number, options: { format: DatasetFormat; outDir: string; onlyReviewed: boolean; ratios: [number, number, number] }) =>
-    invoke<ExportResult>("export_version", { id, options }),
+  exportVersion: (
+    id: number,
+    options: { format: DatasetFormat; outDir: string; onlyReviewed: boolean; ratios: [number, number, number] },
+    anonymize: AnonymizeConfig | null = null,
+  ) => invoke<ExportResult>("export_version", { id, options, anonymize }),
   keypointTemplate: () => invoke<KeypointTemplate>("keypoint_template"),
   saveKeypointTemplate: (template: KeypointTemplate) => invoke<void>("save_keypoint_template", { template }),
   listImages: (status: string | null, offset: number, limit: number) =>

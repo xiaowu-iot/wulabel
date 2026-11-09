@@ -3,8 +3,9 @@ import { Alert, App, Button, Checkbox, Empty, Input, Modal, Progress, Radio, Spa
 import { FolderOpenOutlined } from "@ant-design/icons";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, errText, ImportProgress, MergeResult, PackageInfo, ProjectInfo } from "../api";
+import { AnonymizeConfig, api, errText, ImportProgress, MergeResult, PackageInfo, ProjectInfo } from "../api";
 import { prefs, useApp } from "../store";
+import AnonymizeOptions from "./AnonymizeOptions";
 
 const fmtTime = (ts: number) => new Date(ts * 1000).toLocaleString();
 
@@ -21,6 +22,8 @@ export default function CollabModal({ project, open, onClose }: { project: Proje
   const [scope, setScope] = useState<"todo" | "unreviewed" | "all">("todo");
   const [withAnns, setWithAnns] = useState(true);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
+  const [anonymize, setAnonymize] = useState<AnonymizeConfig | null>(null);
+  const [stage, setStage] = useState("");
   // 合并
   const [mergeDir, setMergeDir] = useState("");
   const [overwrite, setOverwrite] = useState(false);
@@ -40,11 +43,17 @@ export default function CollabModal({ project, open, onClose }: { project: Proje
 
   const split = async () => {
     if (!outDir || names.length === 0) return;
+    if (anonymize && !anonymize.labels.length && !anonymize.faces && !anonymize.plates) {
+      message.warning("打码：请选择要打码的类别，或勾选自动找人脸 / 车牌");
+      return;
+    }
     prefs.set("packageDir", outDir);
     setProgress({ done: 0, total: 0 });
+    setStage("");
     const un = await listen<ImportProgress>("export-progress", (e) => setProgress(e.payload));
+    const unLog = await listen<string>("export-log", (e) => setStage(e.payload));
     try {
-      const ps = await api.splitPackages({ outDir, assignees: names, scope, withAnnotations: withAnns });
+      const ps = await api.splitPackages({ outDir, assignees: names, scope, withAnnotations: withAnns, anonymize });
       message.success(`已分成 ${ps.length} 个包：${ps.map((p) => `${p.assignee} ${p.images} 张`).join("、")}`);
       await load();
       api.revealPath(outDir).catch(() => {});
@@ -52,7 +61,9 @@ export default function CollabModal({ project, open, onClose }: { project: Proje
       message.error(errText(e));
     } finally {
       un();
+      unLog();
       setProgress(null);
+      setStage("");
     }
   };
 
@@ -110,10 +121,12 @@ export default function CollabModal({ project, open, onClose }: { project: Proje
                   <Checkbox checked={withAnns} onChange={(e) => setWithAnns(e.target.checked)}>
                     带上已有的标注（模型预标注的也带上，让标注人在上面改，更快）
                   </Checkbox>
+                  <AnonymizeOptions task={project.task} value={anonymize} onChange={setAnonymize} />
                   <Button type="primary" disabled={!outDir || names.length === 0} loading={!!progress} onClick={split}>
                     {names.length ? `分成 ${names.length} 个包` : "分包"}
                   </Button>
                   {progress && <Progress size="small" percent={progress.total ? Math.floor((progress.done / progress.total) * 100) : 0} />}
+                  {progress && stage && <div className="dim" style={{ fontSize: 12 }}>{stage}</div>}
                   <div className="dim" style={{ fontSize: 12 }}>
                     按图片顺序平均分，视频的连续帧会尽量分给同一个人。分包后原项目里这些图如果又改了，合并时会提示冲突。
                   </div>

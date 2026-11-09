@@ -11,9 +11,11 @@ use serde::{Deserialize, Serialize};
 use crate::annotations::{self, Annotation};
 use crate::db;
 use crate::error::{msg, AppResult};
+use crate::evaltools::{self, Anonymize};
 use crate::images;
 use crate::keypoints;
 use crate::project::Project;
+use crate::runtime::Runtime;
 
 const PACKAGE_FILE: &str = "package.json";
 const PALETTE: [&str; 10] = ["#3d8bfd", "#e5534b", "#2fb67c", "#e7a33e", "#9b7bf2", "#14b8a6", "#f472b6", "#a3e635", "#f97316", "#60a5fa"];
@@ -30,6 +32,9 @@ pub struct SplitOptions {
     /// 带上已有的标注（比如模型预标注、需要复核的）
     #[serde(default = "yes")]
     pub with_annotations: bool,
+    /// 包里的图片先打码再发出去（人脸、车牌等）
+    #[serde(default)]
+    pub anonymize: Option<Anonymize>,
 }
 
 fn yes() -> bool {
@@ -95,7 +100,13 @@ fn ensure_labels(to: &Project, from: &Project, added: &mut Vec<String>) -> AppRe
 }
 
 /// 分包：按图片顺序（视频连续帧会分在一起）平均分给每个人
-pub fn split(p: &Project, opts: &SplitOptions, progress: &(dyn Fn(usize, usize) + Sync)) -> AppResult<Vec<PackageInfo>> {
+pub fn split(
+    p: &Project,
+    opts: &SplitOptions,
+    rt: &Runtime,
+    log: &(dyn Fn(String) + Sync),
+    progress: &(dyn Fn(usize, usize) + Sync),
+) -> AppResult<Vec<PackageInfo>> {
     let people: Vec<String> = opts.assignees.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
     if people.is_empty() {
         return Err(msg("至少填一个标注人"));
@@ -153,6 +164,30 @@ pub fn split(p: &Project, opts: &SplitOptions, progress: &(dyn Fn(usize, usize) 
             done += 1;
             if done % 10 == 0 {
                 progress(done, total);
+            }
+        }
+        if let Some(a) = &opts.anonymize {
+            // 包里的图是复制进去的独立文件，直接改写；标注区域从原项目读
+            let mut seen = std::collections::HashSet::new();
+            let mut files = Vec::new();
+            let mut hashes = Vec::new();
+            {
+                let conn = np.conn.lock();
+                let mut stmt = conn.prepare("SELECT path, hash FROM images WHERE id = ?1")?;
+                for [nid, sid] in &map {
+                    if !seen.insert(*nid) {
+                        continue;
+                    }
+                    let (path, hash): (String, String) = stmt.query_row([nid], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                    files.push((np.resolve(&path), *sid));
+                    hashes.push(hash);
+                }
+            }
+            log(format!("给「{who}」的包打码…"));
+            evaltools::anonymize(p, rt, &files, a, log, &|_, _| {})?;
+            // 缩略图是打码前生成的，删掉让它重新生成
+            for h in hashes {
+                let _ = fs::remove_file(np.thumb_path(&h));
             }
         }
         let meta = PackageMeta {
