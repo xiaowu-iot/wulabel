@@ -7,10 +7,41 @@ import os
 import shutil
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from . import models
 from .protocol import emit, log
+
+
+class _ClsNet(torch.nn.Module):
+    """分类模型导出用：输入 RGB 0~1，模型里做 ImageNet 归一化，输出各类别概率"""
+
+    def __init__(self, m):
+        super().__init__()
+        self.m = m
+        self.register_buffer("mean", torch.tensor(models.IMAGENET_MEAN).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor(models.IMAGENET_STD).view(1, 3, 1, 1))
+
+    def forward(self, x):
+        return torch.softmax(self.m((x - self.mean) / self.std), dim=1)
+
+
+CLS_OUTPUTS = "probs [N, 类别数]，各类别概率（已 softmax），类别顺序见 classes"
+DET_OUTPUTS = "boxes [N,4] xyxy 像素坐标；labels [N] 类别序号从 1 开始（0 是背景）；scores [N]"
+
+
+def _export_cls(model, size: int, path: Path) -> None:
+    torch.onnx.export(
+        _ClsNet(model).eval(),
+        (torch.rand(1, 3, size, size),),
+        str(path),
+        opset_version=17,
+        input_names=["image"],
+        output_names=["probs"],
+        dynamic_axes={"image": {0: "batch"}, "probs": {0: "batch"}},
+        dynamo=False,
+    )
 
 
 def run(weights: str, out: str) -> None:
@@ -18,33 +49,43 @@ def run(weights: str, out: str) -> None:
     out_p.parent.mkdir(parents=True, exist_ok=True)
     model, ck = models.load(Path(weights), torch.device("cpu"))
     size = int(ck["img_size"])
-    dummy = [torch.rand(3, size, size)]
+    cls = models.is_cls(ck["model"])
     log("正在导出 ONNX…")
-    torch.onnx.export(
-        model,
-        (dummy,),
-        str(out_p),
-        opset_version=17,
-        input_names=["image"],
-        output_names=["boxes", "labels", "scores"],
-        dynamic_axes={"image": {1: "height", 2: "width"}, "boxes": {0: "n"}, "labels": {0: "n"}, "scores": {0: "n"}},
-        dynamo=False,
-    )
-    meta = {
-        "classes": ck["classes"],
-        "input": "image: float32 [3, H, W]，RGB，0~1，不需要归一化和缩放",
-        "outputs": "boxes [N,4] xyxy 像素坐标；labels [N] 类别序号从 1 开始（0 是背景）；scores [N]",
-        "model": ck["model"],
-    }
+    if cls:
+        _export_cls(model, size, out_p)
+        feed = np.random.rand(1, 3, size, size).astype(np.float32)
+        meta = {
+            "classes": ck["classes"],
+            "input": f"image: float32 [N, 3, {size}, {size}]，RGB，0~1；原图直接缩放到 {size}×{size}（模型内部已做归一化）",
+            "outputs": CLS_OUTPUTS,
+            "model": ck["model"],
+        }
+    else:
+        torch.onnx.export(
+            model,
+            ([torch.rand(3, size, size)],),
+            str(out_p),
+            opset_version=17,
+            input_names=["image"],
+            output_names=["boxes", "labels", "scores"],
+            dynamic_axes={"image": {1: "height", 2: "width"}, "boxes": {0: "n"}, "labels": {0: "n"}, "scores": {0: "n"}},
+            dynamo=False,
+        )
+        feed = np.random.rand(3, size, size).astype(np.float32)
+        meta = {
+            "classes": ck["classes"],
+            "input": "image: float32 [3, H, W]，RGB，0~1，不需要归一化和缩放",
+            "outputs": DET_OUTPUTS,
+            "model": ck["model"],
+        }
     out_p.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 有 onnxruntime 就顺手验证一下能不能跑
     try:
-        import numpy as np
         import onnxruntime as ort
 
         sess = ort.InferenceSession(str(out_p), providers=["CPUExecutionProvider"])
-        sess.run(None, {"image": np.random.rand(3, size, size).astype(np.float32)})
+        sess.run(None, {"image": feed})
         log("已用 onnxruntime 验证导出的模型可以运行")
     except ImportError:
         pass
@@ -69,9 +110,16 @@ TensorRT 引擎（.engine）和显卡型号、TensorRT 版本绑定，必须在*
 - 输出 `boxes` [N,4]（xyxy，基于输入尺寸）、`labels` [N]（从 1 开始）、`scores` [N]。
 - 类别见 `model.json`。
 
-## 注意
+{note}"""
 
-内置的 Faster R-CNN 是两阶段模型，含 RoIAlign 等算子。较新的 TensorRT（8.6 及以上）通常能转换，但老版本可能报不支持的算子，速度也不如 YOLO 这类单阶段模型。转换失败时，可以直接用 onnxruntime-gpu 加载 `model_static.onnx` 推理。
+TRT_NOTE_RCNN = """## 注意
+
+这个模型是两阶段检测模型（R-CNN 系列），含 RoIAlign 等算子。较新的 TensorRT（8.6 及以上）通常能转换，但老版本可能报不支持的算子，速度也不如单阶段模型。转换失败时，可以直接用 onnxruntime-gpu 加载 `model_static.onnx` 推理；或者回到软件里改训 RetinaNet / FCOS / SSDLite 这类单阶段模型。
+"""
+
+TRT_NOTE_ONE = """## 说明
+
+这个模型是单阶段模型，没有 RoIAlign 这类两阶段算子，TensorRT 一般能直接转换。
 """
 
 RKNN_README = """# RKNN 转换包（瑞芯微 RK3588 / RK3568 / RK3566 等）
@@ -89,9 +137,16 @@ RKNN_README = """# RKNN 转换包（瑞芯微 RK3588 / RK3568 / RK3566 等）
 - 输入：uint8 RGB `[1, 3, {size}, {size}]`（转换时已把 /255 归一化写进模型）。原图需要先缩放（保持比例，空白处补 0）到 {size}×{size}。
 - 输出 `boxes`、`labels`、`scores`，含义同 ONNX，类别见 `model.json`。
 
-## 重要说明
+{note}"""
 
-内置的 Faster R-CNN 是两阶段检测模型，包含 RoIAlign、NMS 等 NPU 支持有限的算子。转换可能失败，或者部分算子退回 CPU 执行，速度不理想。**RK 系列 NPU 上更推荐 YOLO 等单阶段模型。** 本转换包按标准流程生成，能否在你的芯片和 SDK 版本上跑通，需要实测。
+RKNN_NOTE_RCNN = """## 重要说明
+
+这个模型是两阶段检测模型（R-CNN 系列），包含 RoIAlign、NMS 等 NPU 支持有限的算子。转换可能失败，或者部分算子退回 CPU 执行，速度不理想。**RK 系列 NPU 上更推荐单阶段模型**，可以回到软件里改训 SSDLite / RetinaNet / FCOS。本转换包按标准流程生成，能否在你的芯片和 SDK 版本上跑通，需要实测。
+"""
+
+RKNN_NOTE_ONE = """## 说明
+
+这个模型是单阶段模型，比两阶段的 R-CNN 更适合 NPU。不同芯片和 SDK 版本对个别算子（如 NMS）支持不同，能否全部跑在 NPU 上需要实测；不支持的部分会退回 CPU。
 """
 
 RKNN_SCRIPT = """# 在 Linux x86_64 上运行：python convert_rknn.py rk3588
@@ -103,7 +158,7 @@ rknn = RKNN(verbose=True)
 # 输入 uint8 RGB，模型内部要的是 0~1，这里用 std=255 完成归一化
 rknn.config(mean_values=[[0, 0, 0]], std_values=[[255, 255, 255]], target_platform=target)
 assert rknn.load_onnx(model="model_static.onnx") == 0, "加载 ONNX 失败"
-assert rknn.build(do_quantization=False) == 0, "转换失败（Faster R-CNN 的部分算子可能不被支持，见 README）"
+assert rknn.build(do_quantization=False) == 0, "转换失败（部分算子可能不被支持，见 README）"
 assert rknn.export_rknn("model.rknn") == 0, "导出失败"
 print("已生成 model.rknn")
 rknn.release()
@@ -150,10 +205,12 @@ def run_formats(cfg: dict) -> None:
     model, ck = models.load(Path(cfg["weights"]), torch.device("cpu"))
     size = int(cfg.get("size") or ck["img_size"])
     formats = cfg["formats"]
+    cls = models.is_cls(ck["model"])
+    two_stage = models.kind_of(ck["model"]) == "rcnn"
     meta = {
         "classes": ck["classes"],
         "model": ck["model"],
-        "outputs": "boxes [N,4] xyxy 像素坐标；labels [N] 类别序号从 1 开始（0 是背景）；scores [N]",
+        "outputs": CLS_OUTPUTS if cls else DET_OUTPUTS,
     }
     results = []
 
@@ -165,21 +222,31 @@ def run_formats(cfg: dict) -> None:
     static = out / "onnx_static" / "model_static.onnx"
     need_dyn = any(f in formats for f in ("onnx", "openvino"))
     need_static = any(f in formats for f in ("onnx_static", "tensorrt", "rknn"))
+    # 分类模型只有固定尺寸一种（批大小可变），「动态」和「固定」导出的是同一个模型
+    cls_input = f"image: float32 [N, 3, {size}, {size}]，RGB，0~1；原图直接缩放到 {size}×{size}（模型内部已做归一化）"
     if need_dyn:
         log("导出 ONNX（动态尺寸）…")
         dyn.parent.mkdir(parents=True, exist_ok=True)
-        _export_onnx(model, size, dyn, True)
+        if cls:
+            _export_cls(model, size, dyn)
+        else:
+            _export_onnx(model, size, dyn, True)
         (dyn.parent / "model.json").write_text(
-            json.dumps({**meta, "input": "image: float32 [3, H, W]，RGB，0~1，任意尺寸"}, ensure_ascii=False, indent=2), encoding="utf-8"
+            json.dumps({**meta, "input": cls_input if cls else "image: float32 [3, H, W]，RGB，0~1，任意尺寸"}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
         )
         if "onnx" in formats:
             done("onnx", dyn)
     if need_static:
         log(f"导出 ONNX（固定尺寸 {size}×{size}）…")
         static.parent.mkdir(parents=True, exist_ok=True)
-        _export_onnx(model, size, static, False)
+        if cls:
+            _export_cls(model, size, static)
+        else:
+            _export_onnx(model, size, static, False)
+        static_input = cls_input if cls else f"image: float32 [1, 3, {size}, {size}]，RGB，0~1；原图按比例缩放后补边到该尺寸"
         (static.parent / "model.json").write_text(
-            json.dumps({**meta, "input": f"image: float32 [1, 3, {size}, {size}]，RGB，0~1；原图按比例缩放后补边到该尺寸"}, ensure_ascii=False, indent=2),
+            json.dumps({**meta, "input": static_input}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         if "onnx_static" in formats:
@@ -201,19 +268,20 @@ def run_formats(cfg: dict) -> None:
 
             core = ov.Core()
             compiled = core.compile_model(str(d / "model.xml"), "CPU")
-            compiled([np.random.rand(3, size, size).astype(np.float32)])
+            shape = (1, 3, size, size) if cls else (3, size, size)
+            compiled([np.random.rand(*shape).astype(np.float32)])
             done("openvino", d / "model.xml", note="已用 OpenVINO CPU 推理验证")
         except ImportError:
             done("openvino", "", ok=False, note="没有安装 OpenVINO")
         except Exception as e:
             done("openvino", "", ok=False, note=f"转换失败：{e}")
 
-    for fmt, readme, files in (
-        ("tensorrt", TRT_README, {
+    for fmt, readme, note, files in (
+        ("tensorrt", TRT_README, TRT_NOTE_RCNN if two_stage else TRT_NOTE_ONE, {
             "build_engine.bat": "trtexec --onnx=model_static.onnx --saveEngine=model.engine --fp16\r\npause\r\n",
             "build_engine.sh": "#!/bin/sh\nset -e\ncd \"$(dirname \"$0\")\"\ntrtexec --onnx=model_static.onnx --saveEngine=model.engine --fp16\n",
         }),
-        ("rknn", RKNN_README, {"convert_rknn.py": RKNN_SCRIPT}),
+        ("rknn", RKNN_README, RKNN_NOTE_RCNN if two_stage else RKNN_NOTE_ONE, {"convert_rknn.py": RKNN_SCRIPT}),
     ):
         if fmt not in formats:
             continue
@@ -221,7 +289,11 @@ def run_formats(cfg: dict) -> None:
         d.mkdir(parents=True, exist_ok=True)
         shutil.copy(static, d / "model_static.onnx")
         shutil.copy(static.parent / "model.json", d / "model.json")
-        (d / "README.md").write_text(readme.replace("{size}", str(size)), encoding="utf-8")
+        text = readme.replace("{size}", str(size)).replace("{note}", note)
+        if cls:
+            text = text.replace("输出 `boxes` [N,4]（xyxy，基于输入尺寸）、`labels` [N]（从 1 开始）、`scores` [N]", "输出 `probs` [N, 类别数]，各类别概率")
+            text = text.replace("输出 `boxes`、`labels`、`scores`，含义同 ONNX", "输出 `probs`，各类别概率")
+        (d / "README.md").write_text(text, encoding="utf-8")
         for name, text in files.items():
             (d / name).write_text(text, encoding="utf-8", newline="")
         done(fmt, d, note="转换包：需要在目标设备上完成转换，见 README.md")

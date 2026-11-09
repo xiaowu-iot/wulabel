@@ -201,7 +201,11 @@ export interface RunInfo {
   dir: string;
   engine: string;
   status: RunStatus;
-  config: TrainConfig & { classes?: string[]; images?: { train: number; val: number; test: number; boxes: number } };
+  config: TrainConfig & {
+    classes?: string[];
+    /** anns：全部标注数（框、多边形、关键点目标、分类标签合计）；老记录只有 boxes */
+    images?: { train: number; val: number; test: number; boxes: number; anns?: number };
+  };
   bestMap50: number | null;
   createdAt: number;
   hasWeights: boolean;

@@ -8,16 +8,45 @@ import {
   StopOutlined,
 } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { api, EnvStatus, errText, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, TrainConfig } from "../api";
+import { api, EnvStatus, errText, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, Task, TrainConfig } from "../api";
 import { prefs, useApp } from "../store";
 import LineChart from "../components/LineChart";
 
-export const MODELS = [
-  { value: "frcnn_mobilenet", name: "Faster R-CNN MobileNetV3", desc: "速度快、显存占用小，适合入门和没有独立显卡的电脑", seg: false },
-  { value: "frcnn_resnet50", name: "Faster R-CNN ResNet50 v2", desc: "精度更高，训练和推理更慢，建议 6GB 以上显存", seg: false },
-  { value: "maskrcnn_r50", name: "Mask R-CNN ResNet50", desc: "实例分割，速度一般，建议有 6GB 以上显存", seg: true },
-  { value: "maskrcnn_r50_v2", name: "Mask R-CNN ResNet50 v2", desc: "实例分割，精度更高、更慢，建议 8GB 以上显存", seg: true },
+/** 内置模型，和 worker/xlabel_worker/models.py 的 MODELS 对应。oneStage：单阶段检测，部署到 TensorRT / NPU 更顺 */
+export const MODELS: { value: string; name: string; desc: string; task: Task; oneStage?: boolean; fixedSize?: number }[] = [
+  { value: "frcnn_mobilenet", name: "Faster R-CNN MobileNetV3", desc: "速度快、显存占用小，适合入门和没有独立显卡的电脑", task: "detect" },
+  { value: "frcnn_resnet50", name: "Faster R-CNN ResNet50 v2", desc: "精度更高，训练和推理更慢，建议 6GB 以上显存", task: "detect" },
+  { value: "retinanet_r50", name: "RetinaNet ResNet50 v2", desc: "单阶段，精度接近 Faster R-CNN；没有 RoIAlign，转 TensorRT 更顺", task: "detect", oneStage: true },
+  { value: "fcos_r50", name: "FCOS ResNet50", desc: "单阶段、无锚框，结构简单，适合部署", task: "detect", oneStage: true },
+  { value: "ssdlite", name: "SSDLite MobileNetV3", desc: "单阶段、很轻，适合 CPU 和 NPU 边缘设备实时推理；固定 320 输入，小目标一般", task: "detect", oneStage: true, fixedSize: 320 },
+  { value: "maskrcnn_r50", name: "Mask R-CNN ResNet50", desc: "实例分割，速度一般，建议有 6GB 以上显存", task: "segment" },
+  { value: "maskrcnn_r50_v2", name: "Mask R-CNN ResNet50 v2", desc: "实例分割，精度更高、更慢，建议 8GB 以上显存", task: "segment" },
+  { value: "keypointrcnn_r50", name: "Keypoint R-CNN ResNet50", desc: "关键点检测；人体 17 点能用上 COCO 预训练，其他点数从头学关键点头", task: "pose" },
+  { value: "cls_mobilenet", name: "MobileNetV3 Large", desc: "速度快、很轻，适合入门和边缘设备", task: "classify" },
+  { value: "cls_efficientnet", name: "EfficientNet-B0", desc: "精度和速度比较均衡", task: "classify" },
+  { value: "cls_resnet50", name: "ResNet50", desc: "精度更高，训练更慢，建议有独立显卡", task: "classify" },
 ];
+
+/** 各任务的默认训练参数 */
+const TASK_DEFAULTS: Record<Task, Partial<TrainConfig>> = {
+  detect: { model: "frcnn_mobilenet", imgSize: 640, batch: 4, epochs: 30, lr: 0.01 },
+  segment: { model: "maskrcnn_r50", imgSize: 640, batch: 2, epochs: 30, lr: 0.01 },
+  pose: { model: "keypointrcnn_r50", imgSize: 640, batch: 2, epochs: 40, lr: 0.01 },
+  classify: { model: "cls_mobilenet", imgSize: 224, batch: 32, epochs: 30, lr: 0.01 },
+};
+
+/** 按显存推荐模型 */
+const recommendModel = (task: Task, gpuMem: number) =>
+  ({
+    detect: gpuMem >= 6000 ? "frcnn_resnet50" : "frcnn_mobilenet",
+    segment: gpuMem >= 8000 ? "maskrcnn_r50_v2" : "maskrcnn_r50",
+    pose: "keypointrcnn_r50",
+    classify: gpuMem >= 6000 ? "cls_efficientnet" : "cls_mobilenet",
+  })[task];
+
+/** 各任务主指标的叫法（分类没有 mAP，worker 把准确率放在 map50、宏 F1 放在 map） */
+export const metricNames = (task: Task) =>
+  task === "classify" ? { m50: "准确率", m: "宏平均 F1" } : { m50: "mAP50", m: "mAP50-95" };
 
 export const RUN_STATUS: Record<RunStatus, { text: string; color: string }> = {
   running: { text: "训练中", color: "processing" },
@@ -47,8 +76,10 @@ interface ProgressEv {
 export default function Train({ project }: { project: ProjectInfo }) {
   const { message, modal } = App.useApp();
   const setPage = useApp((s) => s.setPage);
-  const isSeg = project.task === "segment";
-  const models = MODELS.filter((m) => m.seg === isSeg);
+  const task = project.task;
+  const models = MODELS.filter((m) => m.task === task);
+  const mn = metricNames(task);
+  const cfgKey = `trainConfig.${task}`;
   const [env, setEnv] = useState<EnvStatus | null>(null);
   const [split, setSplit] = useState<SplitSummary | null>(null);
   const [runs, setRuns] = useState<RunInfo[]>([]);
@@ -62,8 +93,19 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const logBox = useRef<HTMLDivElement>(null);
 
   const [cfg, setCfg] = useState<TrainConfig>(() => {
-    const saved = prefs.get("trainConfig", "");
-    const base: TrainConfig = { model: "frcnn_mobilenet", epochs: 30, imgSize: 640, batch: 4, lr: 0.01, device: "auto", onlyReviewed: false, ratios: [0.8, 0.2, 0] };
+    // 每种任务单独记一份参数（分类 224px、检测 640px 等差别很大）；老版本只有一份 trainConfig，检测项目沿用它
+    const saved = prefs.get(cfgKey, task === "detect" ? prefs.get("trainConfig", "") : "");
+    const base: TrainConfig = {
+      model: "frcnn_mobilenet",
+      epochs: 30,
+      imgSize: 640,
+      batch: 4,
+      lr: 0.01,
+      device: "auto",
+      onlyReviewed: false,
+      ratios: [0.8, 0.2, 0],
+      ...TASK_DEFAULTS[task],
+    };
     try {
       return saved ? { ...base, ...JSON.parse(saved) } : base;
     } catch {
@@ -128,15 +170,18 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const update = (patch: Partial<TrainConfig>) => {
     const next = { ...cfg, ...patch };
     setCfg(next);
-    prefs.set("trainConfig", JSON.stringify(next));
+    prefs.set(cfgKey, JSON.stringify(next));
   };
 
   // 项目任务和当前选的模型对不上（比如分割项目却选了检测模型）时，自动切到对应任务的模型
   useEffect(() => {
-    if (!MODELS.some((m) => m.value === cfg.model && m.seg === isSeg)) {
-      update({ model: isSeg ? "maskrcnn_r50" : "frcnn_mobilenet" });
+    if (!MODELS.some((m) => m.value === cfg.model && m.task === task)) {
+      update({ ...TASK_DEFAULTS[task] });
     }
-  }, [isSeg]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [task]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const picked = MODELS.find((m) => m.value === cfg.model);
+  const sizeOptions = task === "classify" ? [128, 160, 224, 256, 320, 384] : [320, 480, 640, 800, 960, 1280];
 
   const start = async () => {
     setStarting(true);
@@ -159,13 +204,9 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const metrics = detail?.metrics ?? [];
   const epochs = run?.config?.epochs ?? cfg.epochs;
   const gpuMem = env?.gpu?.vramMb ?? 0;
-  const recommended = isSeg
-    ? gpuMem >= 8000
-      ? "maskrcnn_r50_v2"
-      : "maskrcnn_r50"
-    : gpuMem >= 6000
-      ? "frcnn_resnet50"
-      : "frcnn_mobilenet";
+  const recommended = recommendModel(task, gpuMem);
+  const taskWord = { detect: "检测", segment: "实例分割", pose: "关键点", classify: "图像分类" }[task];
+  const unitWord = task === "classify" ? "张图" : task === "pose" ? "个目标" : "个框";
 
   const doExport = async () => {
     if (!run) return;
@@ -211,7 +252,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
       <div className="train-grid">
         <div>
           <h1>训练</h1>
-          <p className="desc">用已标注和已审核的图片训练{isSeg ? "实例分割" : "检测"}模型。</p>
+          <p className="desc">用已标注和已审核的图片训练{taskWord}模型。</p>
           {env && !env.ready && (
             <Alert
               type="warning"
@@ -231,7 +272,9 @@ export default function Train({ project }: { project: ProjectInfo }) {
                 {split.unset > 0 && ` · 未划分 ${split.unset}（开始训练时按比例分配）`}
               </div>
             )}
-            {trainable > 0 && trainable < 50 && <div style={{ color: "var(--warn)", fontSize: 12, marginTop: 6 }}>图片较少，建议每个类别至少标 100 个框再训练。</div>}
+            {trainable > 0 && trainable < 50 && (
+              <div style={{ color: "var(--warn)", fontSize: 12, marginTop: 6 }}>图片较少，建议每个类别至少标 100 {unitWord}再训练。</div>
+            )}
           </div>
           <div className="card">
             <Form layout="vertical" size="small">
@@ -242,6 +285,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                       <Radio key={m.value} value={m.value}>
                         <b>{m.name}</b>
                         {m.value === recommended && <Tag color="blue" style={{ marginLeft: 6 }}>推荐</Tag>}
+                        {m.oneStage && <Tag style={{ marginLeft: 6 }}>单阶段</Tag>}
                         <div className="dim" style={{ fontSize: 12 }}>{m.desc}</div>
                       </Radio>
                     ))}
@@ -252,12 +296,22 @@ export default function Train({ project }: { project: ProjectInfo }) {
                 <Form.Item label="训练轮数" tooltip="数据越少需要的轮数越多；一般 20~50">
                   <InputNumber min={1} max={500} value={cfg.epochs} onChange={(v) => update({ epochs: Number(v ?? 30) })} />
                 </Form.Item>
-                <Form.Item label="输入尺寸" tooltip="目标小（远处的人、安全帽）用大尺寸，速度会变慢">
+                <Form.Item
+                  label="输入尺寸"
+                  tooltip={
+                    picked?.fixedSize
+                      ? `这个模型固定用 ${picked.fixedSize}×${picked.fixedSize} 输入`
+                      : task === "classify"
+                        ? "分类一般用 224；细节多的图可以加大"
+                        : "目标小（远处的人、安全帽）用大尺寸，速度会变慢"
+                  }
+                >
                   <Select
                     style={{ width: 100 }}
-                    value={cfg.imgSize}
+                    value={picked?.fixedSize ?? cfg.imgSize}
+                    disabled={!!picked?.fixedSize}
                     onChange={(v) => update({ imgSize: v })}
-                    options={[320, 480, 640, 800, 960, 1280].map((v) => ({ value: v, label: v }))}
+                    options={sizeOptions.map((v) => ({ value: v, label: v }))}
                   />
                 </Form.Item>
                 <Form.Item label="批大小" tooltip="显存不够报错时调小">
@@ -296,7 +350,9 @@ export default function Train({ project }: { project: ProjectInfo }) {
                     <Tag color={RUN_STATUS[run.status].color}>{RUN_STATUS[run.status].text}</Tag>
                     <span className="muted">
                       {MODELS.find((m) => m.value === run.config?.model)?.name ?? run.config?.model} · {run.config?.imgSize}px ·{" "}
-                      {run.config?.images ? `训练 ${run.config.images.train} 张 / 验证 ${run.config.images.val} 张 / ${run.config.images.boxes} 个框` : ""}
+                      {run.config?.images
+                        ? `训练 ${run.config.images.train} 张 / 验证 ${run.config.images.val} 张 / ${run.config.images.anns ?? run.config.images.boxes} 个标注`
+                        : ""}
                     </span>
                   </div>
                   <Space>
@@ -342,7 +398,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                   </div>
                   <div>
                     <div className="muted">
-                      验证集 <span style={{ color: "#2fb67c" }}>mAP50</span> / <span style={{ color: "#9b7bf2" }}>mAP50-95</span>
+                      验证集 <span style={{ color: "#2fb67c" }}>{mn.m50}</span> / <span style={{ color: "#9b7bf2" }}>{mn.m}</span>
                       {run.bestMap50 != null && <span style={{ marginLeft: 8 }}>最好 {run.bestMap50.toFixed(3)}</span>}
                     </div>
                     <LineChart
@@ -350,8 +406,8 @@ export default function Train({ project }: { project: ProjectInfo }) {
                       yMin={0}
                       yMax={1}
                       series={[
-                        { name: "mAP50", color: "#2fb67c", values: metrics.map((m) => m.map50) },
-                        { name: "mAP", color: "#9b7bf2", values: metrics.map((m) => m.map) },
+                        { name: mn.m50, color: "#2fb67c", values: metrics.map((m) => m.map50) },
+                        { name: mn.m, color: "#9b7bf2", values: metrics.map((m) => m.map) },
                       ]}
                     />
                   </div>
@@ -377,7 +433,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                 { title: "时间", dataIndex: "createdAt", render: fmtTime },
                 { title: "模型", render: (_, r) => MODELS.find((m) => m.value === r.config?.model)?.name ?? r.config?.model },
                 { title: "轮数", render: (_, r) => r.config?.epochs },
-                { title: "mAP50", dataIndex: "bestMap50", render: (v: number | null) => (v == null ? "—" : v.toFixed(3)) },
+                { title: mn.m50, dataIndex: "bestMap50", render: (v: number | null) => (v == null ? "—" : v.toFixed(3)) },
                 { title: "状态", dataIndex: "status", render: (s: RunStatus) => <Tag color={RUN_STATUS[s].color}>{RUN_STATUS[s].text}</Tag> },
               ]}
             />
