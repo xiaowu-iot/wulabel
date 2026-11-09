@@ -220,12 +220,14 @@ pub async fn inspect_onnx(app: AppHandle, path: String) -> AppResult<serde_json:
 
 #[tauri::command]
 pub async fn import_onnx(state: State<'_, AppState>, path: String, model: evaltools::ExternalModel) -> AppResult<i64> {
-    evaltools::import_onnx(&state.current()?, &path, &model)
+    let project = state.current()?;
+    evaltools::import_onnx(&project, &path, &model)
 }
 
 #[tauri::command]
 pub async fn update_external(state: State<'_, AppState>, run_id: i64, model: evaltools::ExternalModel) -> AppResult<()> {
-    evaltools::update_external(&state.current()?, run_id, &model)
+    let project = state.current()?;
+    evaltools::update_external(&project, run_id, &model)
 }
 
 #[tauri::command]
@@ -279,7 +281,8 @@ pub async fn split_packages(app: AppHandle, state: State<'_, AppState>, options:
 
 #[tauri::command]
 pub async fn list_packages(state: State<'_, AppState>) -> AppResult<Vec<collab::PackageInfo>> {
-    collab::list(&state.current()?)
+    let project = state.current()?;
+    collab::list(&project)
 }
 
 #[tauri::command]
@@ -330,14 +333,16 @@ pub async fn aug_preview(app: AppHandle, state: State<'_, AppState>, aug: serde_
 
 #[tauri::command]
 pub async fn import_negatives(state: State<'_, AppState>, paths: Vec<String>) -> AppResult<usize> {
-    evaltools::import_negatives(&state.current()?, &paths)
+    let project = state.current()?;
+    evaltools::import_negatives(&project, &paths)
 }
 
 // ---------- 数据集版本 ----------
 
 #[tauri::command]
 pub async fn list_versions(state: State<'_, AppState>) -> AppResult<Vec<versions::VersionInfo>> {
-    versions::list(&state.current()?)
+    let project = state.current()?;
+    versions::list(&project)
 }
 
 #[tauri::command]
@@ -347,27 +352,32 @@ pub async fn create_version(
     note: String,
     ratios: [f64; 3],
 ) -> AppResult<versions::VersionInfo> {
-    versions::create(&state.current()?, &name, &note, ratios)
+    let project = state.current()?;
+    versions::create(&project, &name, &note, ratios)
 }
 
 #[tauri::command]
 pub async fn rename_version(state: State<'_, AppState>, id: i64, name: String, note: String) -> AppResult<()> {
-    versions::rename(&state.current()?, id, &name, &note)
+    let project = state.current()?;
+    versions::rename(&project, id, &name, &note)
 }
 
 #[tauri::command]
 pub async fn delete_version(state: State<'_, AppState>, id: i64) -> AppResult<()> {
-    versions::delete(&state.current()?, id)
+    let project = state.current()?;
+    versions::delete(&project, id)
 }
 
 #[tauri::command]
 pub async fn diff_version(state: State<'_, AppState>, id: i64) -> AppResult<versions::VersionDiff> {
-    versions::diff(&state.current()?, id)
+    let project = state.current()?;
+    versions::diff(&project, id)
 }
 
 #[tauri::command]
 pub async fn restore_version(state: State<'_, AppState>, id: i64) -> AppResult<versions::RestoreResult> {
-    versions::restore(&state.current()?, id)
+    let project = state.current()?;
+    versions::restore(&project, id)
 }
 
 #[tauri::command]
@@ -397,12 +407,14 @@ pub async fn export_version(
 /// 关键点项目的模板（点名 + 骨架），没有时返回默认的 COCO 人体 17 点
 #[tauri::command]
 pub async fn keypoint_template(state: State<'_, AppState>) -> AppResult<Template> {
-    keypoints::get(&state.current()?)
+    let project = state.current()?;
+    keypoints::get(&project)
 }
 
 #[tauri::command]
 pub async fn save_keypoint_template(state: State<'_, AppState>, template: Template) -> AppResult<()> {
-    keypoints::save(&state.current()?, &template)
+    let project = state.current()?;
+    keypoints::save(&project, &template)
 }
 
 /// 停止正在进行的视频流采集，已抽的帧会照常导入

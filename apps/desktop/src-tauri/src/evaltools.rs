@@ -7,7 +7,7 @@ use std::process::{ChildStdin, Stdio};
 use std::sync::Mutex;
 
 use rusqlite::params;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::dataset::{self, ExportOptions, Format};
 use crate::db;
