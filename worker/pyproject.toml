@@ -1,0 +1,20 @@
+[project]
+name = "xlabel-worker"
+version = "0.1.0"
+description = "xlabel 的训练与推理进程"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+dependencies = [
+  "torch>=2.4",
+  "torchvision>=0.19",
+  "numpy",
+  "pillow",
+  "onnx",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["xlabel_worker"]

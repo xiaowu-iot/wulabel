@@ -1,0 +1,12 @@
+node_modules/
+dist/
+target/
+apps/desktop/src-tauri/gen/
+*.log
+__pycache__/
+*.pyc
+*.egg-info/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

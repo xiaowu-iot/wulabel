@@ -1,0 +1,329 @@
+import { invoke } from "@tauri-apps/api/core";
+
+export type Task = "detect" | "segment" | "classify" | "pose";
+
+export const TASKS: { value: Task; name: string; desc: string }[] = [
+  { value: "detect", name: "目标检测", desc: "用矩形框标出目标的位置和类别" },
+  { value: "segment", name: "实例分割", desc: "用多边形或画笔描出目标轮廓" },
+  { value: "classify", name: "图像分类", desc: "给整张图片打类别标签" },
+  { value: "pose", name: "关键点", desc: "标出人体或物体的关键点和骨架" },
+];
+
+export const taskName = (t: string) => TASKS.find((x) => x.value === t)?.name ?? t;
+
+export interface Stats {
+  total: number;
+  todo: number;
+  labeled: number;
+  reviewed: number;
+  skipped: number;
+}
+
+export interface ProjectInfo {
+  path: string;
+  name: string;
+  task: Task;
+  stats: Stats;
+}
+
+export interface RecentProject {
+  path: string;
+  name: string;
+  task: Task;
+  openedAt: number;
+  exists: boolean;
+}
+
+export type ImageStatus = "todo" | "labeled" | "reviewed" | "skipped";
+
+export interface ImageItem {
+  id: number;
+  name: string;
+  width: number;
+  height: number;
+  status: ImageStatus;
+  split: string;
+}
+
+export interface ImagePage {
+  total: number;
+  items: ImageItem[];
+}
+
+export interface ImportResult {
+  added: number;
+  duplicated: number;
+  failed: string[];
+}
+
+export interface ImportProgress {
+  done: number;
+  total: number;
+}
+
+export interface LastImport {
+  count: number;
+  createdAt: number;
+}
+
+export interface Label {
+  id: number;
+  name: string;
+  color: string;
+  count: number;
+}
+
+export interface Annotation {
+  labelId: number | null;
+  type: "bbox";
+  data: number[];
+  score?: number | null;
+  source: string;
+}
+
+export interface ImageAnnotations {
+  id: number;
+  name: string;
+  width: number;
+  height: number;
+  status: ImageStatus;
+  annotations: Annotation[];
+}
+
+export interface SplitSummary {
+  train: number;
+  val: number;
+  test: number;
+  unset: number;
+}
+
+export type DatasetFormat = "yolo" | "coco" | "voc";
+
+export interface ExportResult {
+  outDir: string;
+  images: number;
+  boxes: number;
+  train: number;
+  val: number;
+  test: number;
+  classes: string[];
+}
+
+export interface DatasetImportResult {
+  format: string;
+  images: number;
+  added: number;
+  duplicated: number;
+  boxes: number;
+  labelsAdded: string[];
+  keptExisting: number;
+  failed: string[];
+}
+
+export interface Settings {
+  python: string | null;
+  uv: string | null;
+  mirror: "china" | "official";
+  envRoot: string | null;
+}
+
+export interface EnvStatus {
+  python: string | null;
+  managed: boolean;
+  ready: boolean;
+  info: Record<string, unknown> | null;
+  gpu: { name: string; vramMb: number; driver: string; cuda: string } | null;
+  variant: string;
+  uv: string | null;
+  installing: boolean;
+  error: string | null;
+  settings: Settings;
+  envDir: string;
+}
+
+export interface TrainConfig {
+  model: string;
+  epochs: number;
+  imgSize: number;
+  batch: number;
+  lr: number;
+  device: "auto" | "cpu" | "cuda";
+  onlyReviewed: boolean;
+  ratios: [number, number, number];
+}
+
+export type RunStatus = "running" | "done" | "stopped" | "failed" | "interrupted";
+
+export interface RunInfo {
+  id: number;
+  name: string;
+  dir: string;
+  engine: string;
+  status: RunStatus;
+  config: TrainConfig & { classes?: string[]; images?: { train: number; val: number; test: number; boxes: number } };
+  bestMap50: number | null;
+  createdAt: number;
+  hasWeights: boolean;
+  hasOnnx: boolean;
+}
+
+export interface Metric {
+  epoch: number;
+  loss: number | null;
+  map50: number;
+  map: number;
+  precision: number;
+  recall: number;
+  lr: number;
+  time: number;
+}
+
+export interface ClassEval {
+  index: number;
+  name: string;
+  gt: number;
+  precision: number;
+  recall: number;
+  ap50: number | null;
+  ap: number | null;
+}
+
+export interface SplitEval {
+  images: number;
+  map50: number;
+  map: number;
+  precision: number;
+  recall: number;
+  perClass: ClassEval[];
+  confusion: number[][];
+  errors: { imageId: number; missed: number; extra: number; wrong: number }[];
+}
+
+export interface RunDetail {
+  run: RunInfo;
+  metrics: Metric[];
+  eval: { classes: string[]; bestEpoch: number; splits: Record<string, SplitEval> } | null;
+  log: string[];
+  error: string | null;
+}
+
+export interface PredBox {
+  labelId: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  score: number;
+}
+
+export type IssueKind = "missing" | "wrong_class" | "loose_box" | "extra_box" | "tiny_box" | "dup_box" | "no_label";
+
+export interface Issue {
+  kind: IssueKind;
+  imageId: number;
+  labelId: number | null;
+  predLabelId: number | null;
+  bbox: [number, number, number, number] | null;
+  score: number | null;
+  iou: number | null;
+  detail: string;
+  key: string;
+}
+
+export interface HealthReport {
+  createdAt: number;
+  imagesChecked: number;
+  boxesChecked: number;
+  runId: number | null;
+  runName: string | null;
+  issues: Issue[];
+  classes: { labelId: number; name: string; color: string; boxes: number; images: number }[];
+  sizes: [string, number][];
+  dupGroups: number[][];
+  suggestions: string[];
+  dims: Record<string, [number, number]>;
+}
+
+export interface FormatResult {
+  format: string;
+  path: string;
+  ok: boolean;
+  note: string;
+}
+
+export interface FeedbackInput {
+  message: string;
+  contact?: string;
+  screenshot?: string | null;
+}
+
+export const api = {
+  submitFeedback: (input: FeedbackInput) => invoke<void>("submit_feedback", { input }),
+  liveStart: (runId: number, source: string, conf: number) => invoke<void>("live_start", { runId, source, conf }),
+  liveStop: () => invoke<void>("live_stop"),
+  liveConf: (conf: number) => invoke<void>("live_conf", { conf }),
+  liveSnapshot: () => invoke<void>("live_snapshot"),
+  exportFormats: (runId: number, formats: string[], size: number, outDir: string) =>
+    invoke<FormatResult[]>("export_formats", { runId, formats, size, outDir }),
+  buildService: (runId: number, config: unknown, outDir: string) => invoke<string>("build_service", { runId, config, outDir }),
+  healthLoad: () => invoke<HealthReport | null>("health_load"),
+  healthRun: (runId: number | null) => invoke<HealthReport>("health_run", { runId }),
+  healthIgnore: (keys: string[]) => invoke<void>("health_ignore", { keys }),
+  appendAnnotation: (imageId: number, annotation: Annotation) => invoke<ImageStatus>("append_annotation", { imageId, annotation }),
+  envStatus: (refresh: boolean) => invoke<EnvStatus>("env_status", { refresh }),
+  saveSettings: (settings: Settings) => invoke<void>("save_settings", { settings }),
+  envInstall: (variant: string) => invoke<void>("env_install", { variant }),
+  listRuns: () => invoke<RunInfo[]>("list_runs"),
+  runDetail: (id: number) => invoke<RunDetail>("run_detail", { id }),
+  runningRun: () => invoke<number | null>("running_run"),
+  startTraining: (config: TrainConfig) => invoke<number>("start_training", { config }),
+  stopTraining: (id: number) => invoke<void>("stop_training", { id }),
+  deleteRun: (id: number) => invoke<void>("delete_run", { id }),
+  exportOnnx: (id: number) => invoke<string>("export_onnx", { id }),
+  predictImage: (runId: number, imageId: number, conf: number) => invoke<PredBox[]>("predict_image", { runId, imageId, conf }),
+  prelabelAll: (runId: number, conf: number) => invoke<{ images: number; boxes: number }>("prelabel_all", { runId, conf }),
+  revealPath: (path: string) => invoke<void>("reveal_path", { path }),
+  splitSummary: () => invoke<SplitSummary>("split_summary"),
+  assignSplits: (ratios: [number, number, number], all: boolean) => invoke<SplitSummary>("assign_splits", { ratios, all }),
+  exportDataset: (options: { format: DatasetFormat; outDir: string; onlyReviewed: boolean; ratios: [number, number, number] }) =>
+    invoke<ExportResult>("export_dataset", { options }),
+  importDataset: (dir: string) => invoke<DatasetImportResult>("import_dataset", { dir }),
+  lastImport: () => invoke<LastImport | null>("last_import"),
+  deleteImages: (scope: "ids" | "last" | "all", ids?: number[]) => invoke<number>("delete_images", { scope, ids }),
+  listImageIds: (status: string | null) => invoke<number[]>("list_image_ids", { status }),
+  loadAnnotations: (imageId: number) => invoke<ImageAnnotations>("load_annotations", { imageId }),
+  saveAnnotations: (imageId: number, annotations: Annotation[]) =>
+    invoke<ImageStatus>("save_annotations", { imageId, annotations }),
+  setImageStatus: (imageId: number, status: ImageStatus) => invoke<void>("set_image_status", { imageId, status }),
+  listLabels: () => invoke<Label[]>("list_labels"),
+  addLabel: (name: string, color: string) => invoke<Label>("add_label", { name, color }),
+  updateLabel: (id: number, name: string, color: string) => invoke<void>("update_label", { id, name, color }),
+  deleteLabel: (id: number) => invoke<number>("delete_label", { id }),
+
+  createProject: (parent: string, name: string, task: Task) =>
+    invoke<ProjectInfo>("create_project", { parent, name, task }),
+  openProject: (path: string) => invoke<ProjectInfo>("open_project", { path }),
+  closeProject: () => invoke<void>("close_project"),
+  currentProject: () => invoke<ProjectInfo | null>("current_project"),
+  recentProjects: () => invoke<RecentProject[]>("recent_projects"),
+  removeRecent: (path: string) => invoke<void>("remove_recent", { path }),
+  importImages: (paths: string[], copy: boolean) => invoke<ImportResult>("import_images", { paths, copy }),
+  listImages: (status: string | null, offset: number, limit: number) =>
+    invoke<ImagePage>("list_images", { status, offset, limit }),
+  projectStats: () => invoke<Stats>("project_stats"),
+};
+
+// 图片走自定义协议 xl://，Windows 上的实际地址是 http://xl.localhost
+const BASE = navigator.userAgent.includes("Windows") ? "http://xl.localhost" : "xl://localhost";
+
+// 不同项目的图片 id 会重复，带上项目标识，避免浏览器缓存串图
+function projectKey(path: string) {
+  let h = 0;
+  for (let i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+export const thumbUrl = (projectPath: string, id: number) => `${BASE}/thumb/${id}?p=${projectKey(projectPath)}`;
+export const imageUrl = (projectPath: string, id: number) => `${BASE}/image/${id}?p=${projectKey(projectPath)}`;
+
+export const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : String(e));

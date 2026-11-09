@@ -1,0 +1,19 @@
+# Caddy 反向代理示例：同一台服务器同时托管 Wulabel 官网和反馈后端。
+# Caddy 会自动申请并续期 Let's Encrypt 证书，全站 HTTPS。
+# 准备：
+#   - wulabel.<域名>、feedback.<域名> 两条 A 记录都指向本机
+#   - 本机放行 80 / 443
+#   - 把仓库 website/ 的内容放到 /var/www/wulabel/
+#   - 反馈后端已在本机 127.0.0.1:8787 跑起来（端口按你的 .env）
+
+# —— 官网（静态单页）——
+wulabel.example.com {
+    root * /var/www/wulabel
+    file_server
+    encode gzip
+}
+
+# —— 反馈服务（反向代理到本机后端）——
+feedback.example.com {
+    reverse_proxy http://127.0.0.1:8787
+}

@@ -1,0 +1,36 @@
+# nginx 反向代理示例：feedback.<域名> → 本机反馈后端 127.0.0.1:8787（端口按你的 .env）。
+# 证书自备（Let's Encrypt 等）。放到 nginx 的 sites/ 或 conf.d/ 下，改好域名和证书路径后 reload。
+
+server {
+    listen 80;
+    server_name feedback.example.com;
+
+    # Let's Encrypt HTTP 验证（按你的 ACME 客户端调整）
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name feedback.example.com;
+
+    ssl_certificate     /path/to/feedback.example.com-chain.pem;
+    ssl_certificate_key /path/to/feedback.example.com-key.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # 截图是 base64，放宽一点请求体上限
+    client_max_body_size 8m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
