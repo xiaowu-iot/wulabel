@@ -26,6 +26,7 @@ const VARIANTS = [
   { value: "cu126", label: "CUDA 12.6" },
   { value: "cu118", label: "CUDA 11.8（较老的显卡和驱动）" },
   { value: "cpu", label: "CPU 版（没有 NVIDIA 显卡）" },
+  { value: "mps", label: "macOS 版（Apple 芯片用 MPS 加速）" },
 ];
 
 export default function Settings() {
@@ -169,12 +170,20 @@ export default function Settings() {
           <>
             <Descriptions column={1} size="small" bordered labelStyle={{ width: 140 }}>
               <Descriptions.Item label="显卡">
-                {st.gpu ? `${st.gpu.name} · ${(st.gpu.vramMb / 1024).toFixed(0)} GB · 驱动 ${st.gpu.driver} · 支持 CUDA ${st.gpu.cuda}` : "没有检测到 NVIDIA 显卡，只能用 CPU 训练（会慢很多）"}
+                {st.gpu
+                  ? `${st.gpu.name} · ${(st.gpu.vramMb / 1024).toFixed(0)} GB · 驱动 ${st.gpu.driver} · 支持 CUDA ${st.gpu.cuda}`
+                  : st.variant === "mps"
+                    ? "Mac：Apple 芯片用 MPS 加速训练（Intel 芯片的 Mac 只能用 CPU）"
+                    : "没有检测到 NVIDIA 显卡，只能用 CPU 训练（会慢很多）"}
               </Descriptions.Item>
               <Descriptions.Item label="Python">{st.python ?? <span className="dim">未安装</span>}</Descriptions.Item>
               {info && (
                 <Descriptions.Item label="PyTorch">
-                  {info.torch ? `${info.torch} · ${info.cuda ? `显卡可用（${info.device}）` : "CPU"}` : <span style={{ color: "var(--bad)" }}>{String(info.error ?? "未安装")}</span>}
+                  {info.torch ? (
+                    `${info.torch} · ${info.cuda ? `显卡可用（${info.device}）` : info.mps ? "Apple 芯片 MPS 加速可用" : "CPU"}`
+                  ) : (
+                    <span style={{ color: "var(--bad)" }}>{String(info.error ?? "未安装")}</span>
+                  )}
                 </Descriptions.Item>
               )}
               {st.error && (
@@ -192,7 +201,10 @@ export default function Settings() {
                     style={{ width: 300 }}
                     value={variant ?? st.variant}
                     onChange={setVariant}
-                    options={VARIANTS.map((v) => ({ ...v, label: v.value === st.variant ? `${v.label}（推荐）` : v.label }))}
+                    options={VARIANTS.filter((v) => (st.variant === "mps" ? v.value === "mps" : v.value !== "mps")).map((v) => ({
+                      ...v,
+                      label: v.value === st.variant ? `${v.label}（推荐）` : v.label,
+                    }))}
                   />
                   <Button type="primary" icon={<ToolOutlined />} loading={installing} onClick={install}>
                     {st.ready ? "重新安装" : "一键安装"}

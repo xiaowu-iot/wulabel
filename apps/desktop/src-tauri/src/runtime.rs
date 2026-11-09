@@ -79,6 +79,14 @@ pub struct Runtime {
     check_cache: Mutex<Option<(String, serde_json::Value)>>,
 }
 
+/// macOS / Linux 上常见的程序目录。从访达、Dock 启动的应用拿不到终端里的 PATH，Homebrew 装的 ffmpeg、uv 要单独找
+fn unix_extra_bins() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        return Vec::new();
+    }
+    ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/opt/local/bin"].iter().map(PathBuf::from).collect()
+}
+
 /// Windows 上启动子进程不弹黑窗口
 pub fn command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     #[allow(unused_mut)]
@@ -168,6 +176,7 @@ impl Runtime {
             cands.push(home.join(".local").join("bin").join(exe));
             cands.push(home.join(".cargo").join("bin").join(exe));
         }
+        cands.extend(unix_extra_bins().into_iter().map(|d| d.join(exe)));
         cands.into_iter().find(|p| p.is_file())
     }
 
@@ -183,6 +192,7 @@ impl Runtime {
         if let Some(path) = std::env::var_os("PATH") {
             cands.extend(std::env::split_paths(&path).map(|d| d.join(exe)));
         }
+        cands.extend(unix_extra_bins().into_iter().map(|d| d.join(exe)));
         cands.into_iter().find(|p| p.is_file())
     }
 
@@ -314,10 +324,21 @@ impl Runtime {
         run_logged(c, log)?;
         let py = self.managed_python();
 
-        log(format!("【3/5】安装 PyTorch（{variant}，约 {}，耗时最长）", if variant == "cpu" { "200MB" } else { "3GB" }));
+        let size = match variant {
+            "cpu" => "200MB",
+            "mps" => "300MB",
+            _ => "3GB",
+        };
+        log(format!("【3/5】安装 PyTorch（{variant}，约 {size}，耗时最长）"));
         let pypi = if china { "https://mirrors.aliyun.com/pypi/simple" } else { "https://pypi.org/simple" };
         let official = format!("https://download.pytorch.org/whl/{variant}");
-        if variant == "cpu" {
+        if variant == "mps" {
+            // macOS：PyPI 上的 torch 自带 Apple 芯片 MPS 加速，直接装
+            let mut c = command(&uv);
+            c.args(["pip", "install", "--python"]).arg(&py);
+            c.args(["torch", "torchvision", "--index-url", pypi]);
+            run_logged(c, log)?;
+        } else if variant == "cpu" {
             let mut c = command(&uv);
             c.args(["pip", "install", "--python"]).arg(&py);
             c.args(["torch", "torchvision", "--index-url"]).arg(&official).args(["--extra-index-url", pypi]);
@@ -384,7 +405,7 @@ impl Runtime {
         *self.check_cache.lock() = None;
         let v = self.check(true)?;
         log(format!("完成：{}", v));
-        if variant != "cpu" && v["cuda"] != true {
+        if variant.starts_with("cu") && v["cuda"] != true {
             return Err(msg("PyTorch 已安装，但显卡不可用。请更新 NVIDIA 驱动后重新安装，或改用 CPU 版本"));
         }
         Ok(())
@@ -468,6 +489,9 @@ pub struct SpeedResult {
 
 /// 实测当前网络下「国内镜像」vs「官方源」下载 torch 的速度，推荐更快的那个
 pub fn speed_test(variant: &str) -> AppResult<SpeedResult> {
+    if variant == "mps" || cfg!(target_os = "macos") {
+        return Err(msg("macOS 上 PyTorch 从 PyPI 安装，不需要测速；在国内选「国内镜像」即可"));
+    }
     let official = format!("https://download.pytorch.org/whl/{variant}");
     let page = http_get_text(&format!("{official}/torch/")).map_err(|e| msg(format!("无法访问 PyTorch 下载站：{e}")))?;
     let torch_v = best_version(&page, "torch", variant).ok_or_else(|| msg(format!("没有找到适合的 {variant} 版本")))?;
@@ -509,7 +533,7 @@ fn measure_speed(url: &str) -> Option<f64> {
 
 /// 装好的 torch 是不是想要的 CUDA 版本（镜像有时会装成 CPU 版）
 fn cuda_matches(py: &Path, variant: &str, worker_dir: &Path) -> bool {
-    if variant == "cpu" {
+    if !variant.starts_with("cu") {
         return true;
     }
     let out = command(py)
@@ -631,8 +655,11 @@ pub fn detect_gpu() -> Option<Gpu> {
     Some(Gpu { name: parts[0].into(), vram_mb: parts[1].parse().unwrap_or(0), driver: parts[2].into(), cuda })
 }
 
-/// 按驱动支持的 CUDA 版本选 PyTorch 安装包
+/// 按驱动支持的 CUDA 版本选 PyTorch 安装包。macOS 用 PyPI 上自带 MPS（Apple 芯片加速）的版本
 pub fn torch_variant(gpu: Option<&Gpu>) -> &'static str {
+    if cfg!(target_os = "macos") {
+        return "mps";
+    }
     let Some(g) = gpu else { return "cpu" };
     let mut it = g.cuda.split('.').map(|x| x.parse::<u32>().unwrap_or(0));
     let v = (it.next().unwrap_or(0), it.next().unwrap_or(0));
@@ -653,7 +680,16 @@ pub fn torch_variant(gpu: Option<&Gpu>) -> &'static str {
 fn download_uv(bin: &Path, log: &(dyn Fn(String) + Sync)) -> AppResult<PathBuf> {
     fs::create_dir_all(bin)?;
     let exe = if cfg!(windows) { "uv.exe" } else { "uv" };
-    let target = if cfg!(windows) { "x86_64-pc-windows-msvc" } else if cfg!(target_os = "macos") { "aarch64-apple-darwin" } else { "x86_64-unknown-linux-gnu" };
+    let arm = cfg!(target_arch = "aarch64");
+    let target = if cfg!(windows) {
+        "x86_64-pc-windows-msvc"
+    } else if cfg!(target_os = "macos") {
+        if arm { "aarch64-apple-darwin" } else { "x86_64-apple-darwin" }
+    } else if arm {
+        "aarch64-unknown-linux-gnu"
+    } else {
+        "x86_64-unknown-linux-gnu"
+    };
     let mut errors = Vec::new();
     let github = format!("https://github.com/astral-sh/uv/releases/latest/download/uv-{target}.zip");
     log(format!("下载 uv：{github}"));
@@ -667,7 +703,15 @@ fn download_uv(bin: &Path, log: &(dyn Fn(String) + Sync)) -> AppResult<PathBuf> 
     log("改从 PyPI 下载 uv…".into());
     let r = (|| -> AppResult<PathBuf> {
         let meta: serde_json::Value = serde_json::from_slice(&http_get("https://pypi.org/pypi/uv/json")?)?;
-        let tag = if cfg!(windows) { "win_amd64" } else if cfg!(target_os = "macos") { "macosx_11_0_arm64" } else { "manylinux_2_17_x86_64" };
+        let tag = if cfg!(windows) {
+            "win_amd64"
+        } else if cfg!(target_os = "macos") {
+            if arm { "macosx_11_0_arm64" } else { "macosx_10_12_x86_64" }
+        } else if arm {
+            "manylinux_2_17_aarch64"
+        } else {
+            "manylinux_2_17_x86_64"
+        };
         let url = meta["urls"]
             .as_array()
             .and_then(|a| a.iter().find(|u| u["filename"].as_str().is_some_and(|f| f.ends_with(".whl") && f.contains(tag))))
@@ -680,23 +724,34 @@ fn download_uv(bin: &Path, log: &(dyn Fn(String) + Sync)) -> AppResult<PathBuf> 
     r.map_err(|e| msg(format!("下载 uv 失败：{}；{e}。可以手动安装 uv 后在设置里指定路径", errors.join("；"))))
 }
 
-/// 下载 ffmpeg（Windows 静态版，解压出 ffmpeg.exe）。先 gyan.dev，再退 BtbN 的 GitHub 构建
+/// 下载 ffmpeg 静态版并解压出可执行文件。
+/// Windows：先 gyan.dev，再退 BtbN 的 GitHub 构建；macOS：Apple 芯片用 osxexperts，Intel 用 evermeet（Apple 芯片也能经 Rosetta 跑）
 fn download_ffmpeg(
     bin: &Path,
     log: &(dyn Fn(String) + Sync),
     progress: &(dyn Fn(&str, u64, u64, u64) + Sync),
 ) -> AppResult<PathBuf> {
-    if !cfg!(windows) {
-        return Err(msg("没有找到 ffmpeg，请先安装 ffmpeg（把它放进 PATH，或在设置里指定路径）"));
-    }
+    let (exe, sources): (&str, Vec<&str>) = if cfg!(windows) {
+        (
+            "ffmpeg.exe",
+            vec![
+                "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+                "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip",
+            ],
+        )
+    } else if cfg!(target_os = "macos") {
+        let intel = "https://evermeet.cx/ffmpeg/getrelease/zip";
+        if cfg!(target_arch = "aarch64") {
+            ("ffmpeg", vec!["https://www.osxexperts.net/ffmpeg71arm.zip", intel])
+        } else {
+            ("ffmpeg", vec![intel])
+        }
+    } else {
+        return Err(msg("没有找到 ffmpeg，请先用系统的包管理器安装（如 apt install ffmpeg），或在设置里指定路径"));
+    };
     fs::create_dir_all(bin)?;
-    let exe = "ffmpeg.exe";
     let out = bin.join(exe);
     let zip = bin.join("ffmpeg-download.zip");
-    let sources = [
-        "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
-        "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip",
-    ];
     let mut errors = Vec::new();
     for url in sources {
         log(format!("下载 ffmpeg：{url}"));

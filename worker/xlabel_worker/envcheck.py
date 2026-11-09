@@ -21,7 +21,9 @@ def run() -> None:
             x = torch.ones(64, 64, device="cuda")
             info["cudaOk"] = float((x @ x).sum()) == 64 * 64 * 64
         else:
-            info["device"] = "CPU"
+            mps = getattr(torch.backends, "mps", None)
+            info["mps"] = bool(mps is not None and mps.is_available())
+            info["device"] = "Apple 芯片（MPS）" if info["mps"] else "CPU"
     except Exception as e:
         info["error"] = str(e)
     for m in ("numpy", "PIL", "onnx", "onnxruntime"):

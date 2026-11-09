@@ -107,7 +107,10 @@ def run(cfg: dict) -> None:
     conf = float(cfg.get("conf", 0.4))
     max_fps = float(cfg.get("max_fps", 12))
     preview_w = int(cfg.get("preview_width", 960))
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    mps = getattr(torch.backends, "mps", None)
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "mps" if (mps is not None and mps.is_available()) else "cpu"
+    )
     model, ck = models.load(Path(cfg["weights"]), device)
 
     g = Grabber(src)
