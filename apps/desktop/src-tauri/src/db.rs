@@ -125,6 +125,23 @@ fn migrate(conn: &Connection) -> AppResult<()> {
              COMMIT;",
         )?;
     }
+    if version < 5 {
+        // 多人协作：分出去的标注包
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE packages (
+                 id         INTEGER PRIMARY KEY,
+                 name       TEXT    NOT NULL,
+                 assignee   TEXT    NOT NULL DEFAULT '',
+                 dir        TEXT    NOT NULL,
+                 images     INTEGER NOT NULL,
+                 created_at INTEGER NOT NULL,
+                 merged_at  INTEGER
+             );
+             PRAGMA user_version = 5;
+             COMMIT;",
+        )?;
+    }
     Ok(())
 }
 

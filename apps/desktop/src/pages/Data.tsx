@@ -13,6 +13,7 @@ import {
   FolderAddOutlined,
   LinkOutlined,
   RollbackOutlined,
+  TeamOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -37,6 +38,7 @@ import ImageViewer from "../components/ImageViewer";
 import ExportModal from "../components/ExportModal";
 import VersionsModal from "../components/VersionsModal";
 import { PickModal, QualityModal } from "../components/DataTools";
+import CollabModal from "../components/CollabModal";
 
 const PAGE_SIZE = 120;
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
@@ -76,6 +78,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const [showVersions, setShowVersions] = useState(false);
   const [showQuality, setShowQuality] = useState(false);
   const [showPick, setShowPick] = useState(false);
+  const [showCollab, setShowCollab] = useState(false);
   const [videoPaths, setVideoPaths] = useState<string[]>([]);
   const [videoEvery, setVideoEvery] = useState(Number(prefs.get("videoEvery", "1")));
   const [videoMax, setVideoMax] = useState(Number(prefs.get("videoMax", "0")));
@@ -490,6 +493,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
                 { key: "versions", icon: <HistoryOutlined />, label: "数据集版本（保存快照、对比、恢复）" },
                 { key: "quality", icon: <EyeInvisibleOutlined />, label: "图片质量筛查（模糊、过暗、过曝）" },
                 { key: "pick", icon: <AimOutlined />, label: "挑选最值得标的图（用模型）" },
+                { key: "collab", icon: <TeamOutlined />, label: "多人协作（分包、合并回来）" },
                 { key: "select", icon: <CheckSquareOutlined />, label: "选择图片删除" },
                 { type: "divider" },
                 { key: "all", icon: <ClearOutlined />, label: `清空全部图片（${s.total} 张）`, danger: true },
@@ -499,6 +503,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
                 if (key === "versions") setShowVersions(true);
                 if (key === "quality") setShowQuality(true);
                 if (key === "pick") setShowPick(true);
+                if (key === "collab") setShowCollab(true);
                 if (key === "select") {
                   setSelecting(true);
                   setSelected(new Set());
@@ -621,6 +626,14 @@ export default function Data({ project }: { project: ProjectInfo }) {
       <ExportModal project={project} open={showExport} onClose={() => setShowExport(false)} />
       <QualityModal project={project} open={showQuality} onClose={() => setShowQuality(false)} onChanged={load} />
       <PickModal project={project} open={showPick} onClose={() => setShowPick(false)} />
+      <CollabModal
+        project={project}
+        open={showCollab}
+        onClose={() => {
+          setShowCollab(false);
+          load();
+        }}
+      />
       <VersionsModal
         project={project}
         open={showVersions}

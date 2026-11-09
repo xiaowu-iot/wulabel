@@ -1,6 +1,7 @@
 mod ai;
 mod annotations;
 mod assist;
+mod collab;
 mod commands;
 mod dataset;
 mod dataset_import;
@@ -83,6 +84,9 @@ pub fn run() {
             commands::aug_preview,
             commands::quality_scan,
             commands::export_report,
+            commands::split_packages,
+            commands::list_packages,
+            commands::merge_package,
             commands::uncertain_images,
             commands::list_versions,
             commands::create_version,

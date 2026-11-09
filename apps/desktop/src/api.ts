@@ -382,6 +382,28 @@ export interface FpSummary {
   dir: string;
 }
 
+/** 多人协作分出去的标注包 */
+export interface PackageInfo {
+  id: number;
+  name: string;
+  assignee: string;
+  dir: string;
+  images: number;
+  createdAt: number;
+  mergedAt: number | null;
+}
+
+export interface MergeResult {
+  assignee: string;
+  updated: number;
+  unchanged: number;
+  /** 原项目在分包后也改过、没有覆盖的图 */
+  conflicts: number[];
+  added: number;
+  missing: number;
+  labelsAdded: string[];
+}
+
 /** 图片质量筛查结果。issues：blur 模糊 / dark 过暗 / bright 过曝 / flat 对比度低 */
 export interface QualityReport {
   checked: number;
@@ -562,6 +584,10 @@ export const api = {
   importNegatives: (paths: string[]) => invoke<number>("import_negatives", { paths }),
   augPreview: (aug: AugConfig, imgSize: number) => invoke<string[]>("aug_preview", { aug, imgSize }),
   exportReport: (runId: number, path: string) => invoke<void>("export_report", { runId, path }),
+  splitPackages: (options: { outDir: string; assignees: string[]; scope: "todo" | "unreviewed" | "all"; withAnnotations: boolean }) =>
+    invoke<PackageInfo[]>("split_packages", { options }),
+  listPackages: () => invoke<PackageInfo[]>("list_packages"),
+  mergePackage: (options: { dir: string; overwrite: boolean; importNew: boolean }) => invoke<MergeResult>("merge_package", { options }),
   qualityScan: (onlyTodo: boolean) => invoke<QualityReport>("quality_scan", { onlyTodo }),
   uncertainImages: (runId: number, limit: number) =>
     invoke<{ imageId: number; score: number; detail: string }[]>("uncertain_images", { runId, limit }),

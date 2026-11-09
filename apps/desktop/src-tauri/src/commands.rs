@@ -5,6 +5,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::ai;
+use crate::collab;
 use crate::annotations::{self, Annotation, ImageAnnotations, Label};
 use crate::assist;
 use crate::dataset::{self, ExportOptions, ExportResult, SplitSummary};
@@ -257,6 +258,30 @@ pub async fn fp_test(app: AppHandle, state: State<'_, AppState>, config: evaltoo
 pub async fn stop_fp_test(job: State<'_, evaltools::FpTest>) -> AppResult<()> {
     job.stop();
     Ok(())
+}
+
+#[tauri::command]
+pub async fn split_packages(app: AppHandle, state: State<'_, AppState>, options: collab::SplitOptions) -> AppResult<Vec<collab::PackageInfo>> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app.clone(), "export-progress");
+        collab::split(&project, &options, &progress)
+    })
+    .await
+    .map_err(|e| msg(format!("分包异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn list_packages(state: State<'_, AppState>) -> AppResult<Vec<collab::PackageInfo>> {
+    collab::list(&state.current()?)
+}
+
+#[tauri::command]
+pub async fn merge_package(state: State<'_, AppState>, options: collab::MergeOptions) -> AppResult<collab::MergeResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || collab::merge(&project, &options))
+        .await
+        .map_err(|e| msg(format!("合并异常：{e}")))?
 }
 
 #[tauri::command]
