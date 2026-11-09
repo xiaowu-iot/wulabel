@@ -7,6 +7,8 @@
     onnx-info <模型>      识别外部 ONNX 模型的格式、类别
     evaluate <配置.json>  用现在的数据重新评估模型
     fptest <配置.json>    误报测试
+    anonymize <配置.json> 批量打码
+    track <配置.json>     视频帧目标跟踪
 """
 
 import json
@@ -72,6 +74,11 @@ def main() -> int:
 
             with open(args[1], encoding="utf-8") as f:
                 augment.preview(json.load(f))
+        elif cmd == "track":
+            from . import track
+
+            with open(args[1], encoding="utf-8") as f:
+                track.run(json.load(f))
         elif cmd == "fptest":
             from . import fptest
 

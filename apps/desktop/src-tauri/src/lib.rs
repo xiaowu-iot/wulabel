@@ -19,6 +19,7 @@ mod quality;
 mod report;
 mod runtime;
 mod state;
+mod track;
 mod training;
 mod versions;
 mod video;
@@ -116,6 +117,8 @@ pub fn run() {
             commands::split_summary,
             commands::assign_splits,
             commands::export_dataset,
+            commands::interpolate_frames,
+            commands::track_frames,
             commands::import_dataset,
             commands::env_status,
             commands::save_settings,

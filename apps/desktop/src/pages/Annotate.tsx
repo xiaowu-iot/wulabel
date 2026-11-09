@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, ColorPicker, Empty, Input, Modal, Progress, Segmented, Select, Slider, Space, Switch, Tag, Tooltip } from "antd";
+import { App, Button, ColorPicker, Empty, Input, InputNumber, Modal, Popover, Progress, Segmented, Select, Slider, Space, Switch, Tag, Tooltip } from "antd";
 import { listen } from "@tauri-apps/api/event";
 import {
   AimOutlined,
@@ -9,8 +9,11 @@ import {
   DeleteOutlined,
   EditOutlined,
   ExpandOutlined,
+  FastForwardOutlined,
   HighlightOutlined,
   LeftOutlined,
+  LoadingOutlined,
+  NodeIndexOutlined,
   PlusOutlined,
   RedoOutlined,
   RightOutlined,
@@ -26,6 +29,7 @@ import {
   errText,
   ImageAnnotations,
   ImageStatus,
+  ImportProgress,
   imageUrl,
   KeypointData,
   KeypointTemplate,
@@ -53,7 +57,7 @@ const STATUS_TEXT: Record<ImageStatus, { text: string; color?: string }> = {
   reviewed: { text: "已审核", color: "success" },
   skipped: { text: "已跳过" },
 };
-const SOURCE_TEXT: Record<string, string> = { manual: "手工", model: "模型", sam: "SAM", ai: "巡瞳", text: "文本" };
+const SOURCE_TEXT: Record<string, string> = { manual: "手工", model: "模型", sam: "SAM", ai: "巡瞳", text: "文本", interp: "插值", track: "跟踪" };
 const HISTORY_MAX = 200;
 
 /** COCO 人体 17 点（和后端 keypoints.rs 的默认模板一致） */
@@ -907,6 +911,56 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     setSelected(null);
   };
 
+  // ---------- 视频标注：关键帧插值、往后跟踪 ----------
+
+  const [videoBusy, setVideoBusy] = useState<"interp" | "track" | null>(null);
+  const [trackN, setTrackN] = useState(() => Number(prefs.get("trackCount", "30")) || 30);
+  const [trackProg, setTrackProg] = useState<ImportProgress | null>(null);
+  const canVideo = !isCls && !isSeg;
+
+  const interpolate = async () => {
+    const m = metaRef.current;
+    if (!m || videoBusy) return;
+    setVideoBusy("interp");
+    try {
+      await flush();
+      const r = await api.interpolateFrames(m.id);
+      message.success(`已在中间 ${r.frames} 帧上插值 ${r.objects} 个目标${r.unmatched ? `，${r.unmatched} 个目标两头对不上，没有插值` : ""}`);
+      refreshStats();
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      setVideoBusy(null);
+    }
+  };
+
+  const trackForward = async () => {
+    const m = metaRef.current;
+    if (!m || videoBusy) return;
+    prefs.set("trackCount", String(trackN));
+    setVideoBusy("track");
+    setTrackProg(null);
+    const un = await listen<ImportProgress>("track-progress", (e) => setTrackProg(e.payload));
+    try {
+      await flush();
+      const r = await api.trackFrames(m.id, trackN);
+      message.success(
+        `跟踪了 ${r.frames} 帧${r.lost ? `，${r.lost} 个目标中途跟丢` : ""}${r.hitKeyframe ? "，碰到后面手动标过的帧停下" : ""}。已跳到最后一帧，框偏了就拖正，再接着跟踪`,
+      );
+      refreshStats();
+      if (r.lastId != null && ids) {
+        const i = ids.indexOf(r.lastId);
+        if (i >= 0) go(i);
+      }
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      un();
+      setVideoBusy(null);
+      setTrackProg(null);
+    }
+  };
+
   const copyPrev = async () => {
     if (!ids || idx === 0 || !metaRef.current) return;
     try {
@@ -1157,6 +1211,45 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             <CopyOutlined />
           </button>
         </Tooltip>
+        {canVideo && (
+          <>
+            <Tooltip
+              title="关键帧插值：先在前面某一帧和这一帧都标好框，点这里把中间的帧自动补上（按类别和位置对应同一个目标）"
+              placement="right"
+            >
+              <button disabled={idx === 0 || !!videoBusy || !objects.length} onClick={interpolate}>
+                {videoBusy === "interp" ? <LoadingOutlined /> : <NodeIndexOutlined />}
+              </button>
+            </Tooltip>
+            <Popover
+              placement="right"
+              trigger="click"
+              title="往后跟踪"
+              content={
+                <div style={{ width: 240 }}>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                    从这一帧的框出发，自动跟到后面的帧（同一文件夹按文件名排序）。目标被挡住或跟丢就停；碰到手动标过的帧也停，不会覆盖人工标注。
+                  </div>
+                  <Space.Compact style={{ width: "100%" }}>
+                    <InputNumber min={1} max={500} value={trackN} addonBefore="帧数" onChange={(v) => setTrackN(Number(v ?? 30))} style={{ width: 150 }} />
+                    <Button type="primary" loading={videoBusy === "track"} disabled={!objects.length || (!!videoBusy && videoBusy !== "track")} onClick={trackForward}>
+                      跟踪
+                    </Button>
+                  </Space.Compact>
+                  {videoBusy === "track" && trackProg && (
+                    <Progress size="small" percent={trackProg.total ? Math.floor((trackProg.done / trackProg.total) * 100) : 0} />
+                  )}
+                </div>
+              }
+            >
+              <Tooltip title="往后跟踪：从这一帧的框自动跟到后面的帧" placement="right">
+                <button disabled={!!videoBusy && videoBusy !== "track"}>
+                  {videoBusy === "track" ? <LoadingOutlined /> : <FastForwardOutlined />}
+                </button>
+              </Tooltip>
+            </Popover>
+          </>
+        )}
         <Tooltip title="适应窗口 (F)" placement="right">
           <button onClick={() => setFitSignal((n) => n + 1)}>
             <ExpandOutlined />

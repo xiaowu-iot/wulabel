@@ -21,6 +21,7 @@ use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
 use crate::state::AppState;
 use crate::quality;
 use crate::report;
+use crate::track;
 use crate::versions;
 use crate::video;
 use crate::training::{self, Jobs, Predictor, PredResult, PrelabelResult, RunDetail, RunInfo, TrainConfig};
@@ -808,6 +809,32 @@ fn progress_emitter(app: AppHandle, event: &'static str) -> impl Fn(usize, usize
             let _ = app.emit(event, ImportProgress { done, total });
         }
     }
+}
+
+/// 视频标注：从上一个关键帧插值到这一帧
+#[tauri::command]
+pub async fn interpolate_frames(state: State<'_, AppState>, image_id: i64) -> AppResult<track::InterpResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || track::interpolate(&project, image_id))
+        .await
+        .map_err(|e| msg(format!("插值异常：{e}")))?
+}
+
+/// 视频标注：从这一帧往后跟踪 count 帧
+#[tauri::command]
+pub async fn track_frames(app: AppHandle, state: State<'_, AppState>, image_id: i64, count: usize) -> AppResult<track::TrackResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let rt = app.state::<Runtime>();
+        let progress = progress_emitter(app.clone(), "track-progress");
+        let log_app = app.clone();
+        let log = move |m: String| {
+            let _ = log_app.emit("track-log", m);
+        };
+        track::track(&project, &rt, image_id, count, &log, &progress)
+    })
+    .await
+    .map_err(|e| msg(format!("跟踪异常：{e}")))?
 }
 
 /// 导出完再给导出的图片打码（导出时已经强制复制，不会动原图）

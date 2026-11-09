@@ -99,6 +99,21 @@ export interface LastImport {
   createdAt: number;
 }
 
+export interface InterpResult {
+  fromId: number;
+  frames: number;
+  objects: number;
+  unmatched: number;
+}
+
+export interface TrackResult {
+  frames: number;
+  objects: number;
+  lost: number;
+  hitKeyframe: boolean;
+  lastId: number | null;
+}
+
 /** 打码：这些类别的标注区域 + 自动找的人脸、车牌 */
 export interface AnonymizeConfig {
   labels: number[];
@@ -559,6 +574,8 @@ export const api = {
     invoke<ImageStatus>("save_annotations", { imageId, annotations }),
   setImageStatus: (imageId: number, status: ImageStatus) => invoke<void>("set_image_status", { imageId, status }),
   listLabels: () => invoke<Label[]>("list_labels"),
+  interpolateFrames: (imageId: number) => invoke<InterpResult>("interpolate_frames", { imageId }),
+  trackFrames: (imageId: number, count: number) => invoke<TrackResult>("track_frames", { imageId, count }),
   addLabel: (name: string, color: string) => invoke<Label>("add_label", { name, color }),
   updateLabel: (id: number, name: string, color: string, prompt?: string) =>
     invoke<void>("update_label", { id, name, color, prompt: prompt ?? null }),
