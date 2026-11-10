@@ -27,6 +27,12 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "languages": ["SimpChinese"],
+        "displayLanguageSelector": false
+      }
+    },
     "resources": {
       "../../../worker/xlabel_worker/*.py": "worker/xlabel_worker/",
       "../../../worker/service/*": "worker/service/"
