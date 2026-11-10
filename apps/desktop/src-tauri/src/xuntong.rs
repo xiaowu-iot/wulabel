@@ -100,7 +100,14 @@ pub fn upload_model(p: &Project, rt: &Runtime, run_id: i64, name: &str, log: &(d
         .set("Content-Type", &format!("multipart/form-data; boundary={boundary}"))
         .timeout(Duration::from_secs(600))
         .send_bytes(&body)
-        .map_err(ai::err_of)?;
+        .map_err(|e| match e {
+            // 平台前面的 nginx 限制了上传大小，返回的是网页不是 JSON，单独说清楚
+            ureq::Error::Status(413, _) => msg(format!(
+                "模型文件 {:.1} MB，超过了巡瞳平台目前允许的上传大小。请联系平台放宽上传限制后再传",
+                file.len() as f64 / 1048576.0
+            )),
+            e => ai::err_of(e),
+        })?;
     let v = ai::parse(resp)?;
     Ok(UploadResult {
         id: v.get("id").cloned(),
