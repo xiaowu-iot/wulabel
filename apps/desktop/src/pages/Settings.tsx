@@ -502,6 +502,9 @@ export default function Settings() {
                 {login.verifyUrl}
               </Typography.Text>
             </div>
+            <div className="dim" style={{ marginTop: 8, fontSize: 12 }}>
+              网页上「允许」点不了？可能是账号的 API Key 数量满了，到巡瞳控制台的「API Key」页删掉一个不用的再试。
+            </div>
           </div>
         )}
       </Modal>
