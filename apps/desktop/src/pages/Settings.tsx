@@ -3,7 +3,7 @@ import { Alert, App, Button, Descriptions, Input, Progress, Radio, Select, Space
 import { CheckCircleOutlined, FolderOpenOutlined, ReloadOutlined, ThunderboltOutlined, ToolOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, EnvStatus, errText, SpeedResult } from "../api";
+import { AiModel, api, EnvStatus, errText, SpeedResult } from "../api";
 
 interface DlProgress {
   file: string;
@@ -44,6 +44,10 @@ export default function Settings() {
   const [aiUrl, setAiUrl] = useState("");
   const [aiKey, setAiKey] = useState("");
   const [aiTesting, setAiTesting] = useState(false);
+  /** 巡瞳 AI 连接状态：一直显示在设置里，不只是一闪而过的提示 */
+  const [aiStatus, setAiStatus] = useState<
+    { state: "unset" } | { state: "testing" } | { state: "ok"; models: AiModel[]; at: Date } | { state: "error"; text: string; at: Date } | null
+  >(null);
   const logBox = useRef<HTMLDivElement>(null);
 
   const load = useCallback(
@@ -127,7 +131,29 @@ export default function Settings() {
     }
   };
 
-  /** 保存巡瞳 AI 设置并调一次 /v1/models 验证 Key */
+  /** 调一次 /v1/models 验证 Key，结果常驻显示 */
+  const testAi = useCallback(async () => {
+    setAiStatus({ state: "testing" });
+    try {
+      const ms = await api.aiModels();
+      setAiStatus({ state: "ok", models: ms, at: new Date() });
+      return true;
+    } catch (e) {
+      setAiStatus({ state: "error", text: errText(e), at: new Date() });
+      return false;
+    }
+  }, []);
+
+  // 打开设置页时，填过 Key 就自动测一次
+  const autoTested = useRef(false);
+  useEffect(() => {
+    if (!st || autoTested.current) return;
+    autoTested.current = true;
+    if (st.settings.aiKey) testAi();
+    else setAiStatus({ state: "unset" });
+  }, [st, testAi]);
+
+  /** 保存巡瞳 AI 设置并测试连接 */
   const saveAi = async () => {
     if (!st) return;
     setAiTesting(true);
@@ -135,13 +161,14 @@ export default function Settings() {
       await api.saveSettings({ ...st.settings, aiUrl: aiUrl.trim() || null, aiKey: aiKey.trim() || null });
       await load(false);
       if (aiKey.trim()) {
-        const ms = await api.aiModels();
-        message.success(`连接成功，可用 ${ms.length} 个识别模型`);
+        if (await testAi()) message.success("巡瞳 AI 连接成功");
+        else message.error("巡瞳 AI 连接失败，原因见下方");
       } else {
-        message.success("已保存");
+        setAiStatus({ state: "unset" });
+        message.success("已保存（没有填 API Key）");
       }
     } catch (e) {
-      modal.error({ title: "巡瞳 AI 连接失败", content: errText(e) });
+      message.error(errText(e));
     } finally {
       setAiTesting(false);
     }
@@ -283,15 +310,56 @@ export default function Settings() {
       <div className="card" style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 15, marginTop: 0 }}>巡瞳 AI（辅助标注）</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          填上巡瞳 AI 的 API Key 后，标注页的「AI 辅助 → 巡瞳 AI」可以用平台上的专用模型或大模型帮你预标注。
-          每识别一张图会消耗你账号的额度。Key 只保存在这台电脑上。
+          填上巡瞳 AI 的 API Key 后可以：标注页用巡瞳 AI 预标注（按项目类别识别、专用模型、大模型）、和 AI 聊识别规则；部署页把模型上传到巡瞳平台；数据页拉取平台的告警图片；协作用「巡瞳官方中转」让外网成员连进来。
+          识别、聊天会消耗你账号的额度。平台地址留空就是 https://xuntongai.com。Key 只保存在这台电脑上。
         </p>
         <Space direction="vertical" style={{ width: "100%" }}>
           <Input addonBefore="平台地址" value={aiUrl} placeholder="https://xuntongai.com（私有化部署时填自己的地址）" onChange={(e) => setAiUrl(e.target.value)} />
           <Input.Password addonBefore="API Key" value={aiKey} placeholder="sk-live-…（在巡瞳 AI 控制台的「API Key」页创建）" onChange={(e) => setAiKey(e.target.value)} />
-          <Button type="primary" loading={aiTesting} onClick={saveAi}>
-            保存并测试连接
-          </Button>
+          <Space>
+            <Button type="primary" loading={aiTesting} onClick={saveAi}>
+              保存并测试连接
+            </Button>
+            {aiStatus && aiStatus.state !== "unset" && aiStatus.state !== "testing" && (
+              <Button onClick={testAi}>重新测试</Button>
+            )}
+          </Space>
+          {aiStatus?.state === "testing" && <Alert type="info" showIcon message="正在连接巡瞳 AI…" />}
+          {aiStatus?.state === "unset" && <Alert type="warning" showIcon message="还没有填 API Key，巡瞳 AI 相关功能用不了" />}
+          {aiStatus?.state === "ok" && (
+            <Alert
+              type="success"
+              showIcon
+              message={`已连接，可以使用（${aiStatus.at.toLocaleTimeString()} 测试）`}
+              description={
+                <div>
+                  <div style={{ marginBottom: 4 }}>
+                    平台上开通的专用模型 {aiStatus.models.filter((m) => m.code !== "classes" && m.code !== "llm").length} 个；另外随时可用「按项目类别识别」和「大模型通用识别」。
+                  </div>
+                  <Space size={[4, 4]} wrap>
+                    {aiStatus.models.map((m) => (
+                      <Tag key={m.code}>{m.name}</Tag>
+                    ))}
+                  </Space>
+                </div>
+              }
+            />
+          )}
+          {aiStatus?.state === "error" && (
+            <Alert
+              type="error"
+              showIcon
+              message={`连接失败（${aiStatus.at.toLocaleTimeString()} 测试）`}
+              description={
+                <div>
+                  <div>{aiStatus.text}</div>
+                  <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                    检查：Key 是否完整复制（以 sk-live- 开头）、在巡瞳控制台里是否已启用；平台地址留空即可；如果巡瞳控制台给 Key 设了 IP 白名单，要把这台电脑的公网 IP 加进去。
+                  </div>
+                </div>
+              }
+            />
+          )}
         </Space>
       </div>
 
