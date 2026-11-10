@@ -45,7 +45,7 @@ jobs:
 
       - name: 安装前端依赖
         working-directory: apps/desktop
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: 打包并上传到草稿 Release
         uses: tauri-apps/tauri-action@v0
