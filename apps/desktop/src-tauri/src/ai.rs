@@ -366,34 +366,63 @@ pub fn rules(p: &Project) -> AppResult<Rules> {
     Ok(Rules { instructions, classes, rule_set })
 }
 
-/// 把项目的规则同步到巡瞳平台：没绑定就新建一套规则并绑定，绑定了就更新。返回平台规则编号。
-/// 同步后巡瞳自己的识别（/v1/analyze、抓拍、告警推送）也按这套规则。
+/// 绑定的平台规则编号（只留安全字符）
+fn bound_code(r: &Rules) -> String {
+    r.rule_set.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect()
+}
+
+/// 把项目的规则同步到巡瞳平台：没绑定就新建一套并绑定，绑定了就更新。返回平台规则编号。
+/// 新建时默认停用：平台上存着，Wulabel 用规则编号调用照样能用；要让巡瞳自己的识别（抓拍、告警）
+/// 也按这套规则，由用户另外打开 set_platform_enabled。
+/// 更新时只发名字、类别、整体规则，不碰启停和适用场景，免得覆盖用户在巡瞳控制台里的设置。
 pub fn sync_rules(p: &Project, rt: &Runtime) -> AppResult<String> {
     let (base, key) = config(rt)?;
     let r = rules(p)?;
-    let body = serde_json::json!({
+    let content = serde_json::json!({
         "name": cut(&format!("Wulabel · {}", p.meta.name), 60),
-        "scenes": ["*"],
         "classes": platform_classes(&r)?,
         "instructions": cut(&r.instructions, MAX_INSTRUCTIONS),
-        "enabled": true,
-        "source": "API",
     });
-    let code: String = r.rule_set.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
+    let code = bound_code(&r);
     if !code.is_empty() {
-        match send_json("PUT", &format!("{base}/v1/rule-sets/{code}"), &key, &body) {
+        match send_json("PUT", &format!("{base}/v1/rule-sets/{code}"), &key, &content) {
             Ok(_) => return Ok(code),
-            // 平台上被删了：重新建一套
+            // 平台上被删了（或不是这个账号的）：重新建一套
             Err(e) if e.to_string().contains("404") => {}
             Err(e) => return Err(e),
         }
     }
+    let mut body = content;
+    body["enabled"] = serde_json::json!(false);
+    body["scenes"] = serde_json::json!(["*"]);
+    // 超过每个账号 20 套的限制时，平台的提示原样带出来
     let v = post(&format!("{base}/v1/rule-sets"), &key, &body)?;
     let code = v["code"].as_str().ok_or_else(|| msg("巡瞳平台没有返回规则编号"))?.to_string();
     crate::team::set_setting(p, RULE_SET_KEY, &code)?;
     Ok(code)
 }
 
+/// 平台上这套规则的当前状态（启用、适用场景）。用户可能在巡瞳控制台里改过，以平台为准
+pub fn rule_set_info(p: &Project, rt: &Runtime) -> AppResult<serde_json::Value> {
+    let code = bound_code(&rules(p)?);
+    if code.is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
+    let (base, key) = config(rt)?;
+    let v = get(&format!("{base}/v1/rule-sets/{code}"), &key)?;
+    Ok(serde_json::json!({ "code": code, "enabled": v["enabled"].as_bool().unwrap_or(false), "scenes": v["scenes"], "name": v["name"] }))
+}
+
+/// 「平台识别也用这套规则」：只改启停（适用场景用户可以在巡瞳控制台里调）
+pub fn set_platform_enabled(p: &Project, rt: &Runtime, enabled: bool) -> AppResult<()> {
+    let code = bound_code(&rules(p)?);
+    if code.is_empty() {
+        return Err(msg("先同步到巡瞳平台"));
+    }
+    let (base, key) = config(rt)?;
+    send_json("PUT", &format!("{base}/v1/rule-sets/{code}"), &key, &serde_json::json!({ "enabled": enabled }))?;
+    Ok(())
+}
 /// 解除和平台规则的绑定（平台上的规则不删）
 pub fn unbind_rules(p: &Project) -> AppResult<()> {
     crate::team::set_setting(p, RULE_SET_KEY, "")

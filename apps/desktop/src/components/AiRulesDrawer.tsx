@@ -1,6 +1,6 @@
 // 识别规则：告诉巡瞳 AI 每个类别具体指什么、整体要注意什么；可以和 AI 聊，让它帮着整理规则、在当前图上试识别
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Checkbox, Drawer, Empty, Input, Space, Tabs, Tag } from "antd";
+import { Alert, App, Button, Checkbox, Drawer, Empty, Input, Space, Switch, Tabs, Tag } from "antd";
 import { SendOutlined } from "@ant-design/icons";
 import { AiRules, api, ChatMsg, ChatReply, ClassRule, errText, PredResult } from "../api";
 import { useApp } from "../store";
@@ -25,7 +25,7 @@ interface Turn extends ChatMsg {
 }
 
 export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApplyPreview, onSaved }: Props) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [rules, setRules] = useState<AiRules | null>(null);
   const [draft, setDraft] = useState<AiRules | null>(null);
   const [saving, setSaving] = useState(false);
@@ -34,6 +34,8 @@ export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApply
   const [withImage, setWithImage] = useState(true);
   const [sending, setSending] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  /** 平台上这套规则是否启用（平台识别也用它）；null 表示还没读到 */
+  const [platformOn, setPlatformOn] = useState<boolean | null>(null);
   const remote = useApp((s) => s.team.remote);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -43,8 +45,39 @@ export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApply
       .then((r) => {
         setRules(r);
         setDraft(r);
+        // 绑定了平台规则：读一下平台上的启用状态（可能在巡瞳控制台里改过）
+        setPlatformOn(null);
+        if (r.ruleSet && !remote)
+          api
+            .aiRuleSetInfo()
+            .then((i) => setPlatformOn(i ? i.enabled : null))
+            .catch(() => {});
       })
       .catch((e) => message.error(errText(e)));
+
+  const setPlatform = (on: boolean) => {
+    const apply = async () => {
+      try {
+        await api.aiRulesPlatformEnabled(on);
+        setPlatformOn(on);
+        message.success(on ? "巡瞳平台的识别也会按这套规则了" : "已停用，巡瞳平台恢复按原来的方式识别");
+      } catch (e) {
+        message.error(errText(e));
+      }
+    };
+    if (!on) {
+      apply();
+      return;
+    }
+    modal.confirm({
+      title: "让巡瞳平台的识别也用这套规则？",
+      content:
+        "打开后，你巡瞳账号里的识别（抓拍助手、告警推送、大模型识别接口）都会只按这个项目的类别识别，不再报其他隐患。适用的场景默认是全部，可以在巡瞳控制台的「识别规则」里调。账号里有多套启用的规则时，最早建的那套会接管所有场景。",
+      okText: "打开",
+      cancelText: "取消",
+      onOk: apply,
+    });
+  };
 
   useEffect(() => {
     if (open) load();
@@ -299,11 +332,16 @@ export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApply
                       <b>同步到巡瞳平台</b>
                     </div>
                     <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
-                      同步后，巡瞳平台自己的识别（抓拍、告警推送）也按这套规则来，只报你要的类别。绑定后，以后每次保存规则会自动同步。
+                      把类别和规则存到巡瞳平台上（默认不启用，不影响平台现在的识别）。绑定后每次保存规则会自动同步内容；想让巡瞳自己的抓拍、告警也只报你要的类别，再打开「平台识别也用这套规则」。
                     </div>
                     {rules?.ruleSet ? (
                       <Space wrap>
                         <Tag color="green">已绑定平台规则 {rules.ruleSet}</Tag>
+                        {platformOn !== null && (
+                          <span>
+                            <Switch size="small" checked={platformOn} onChange={setPlatform} /> 平台识别也用这套规则
+                          </span>
+                        )}
                         <Button size="small" loading={syncing} onClick={sync}>
                           立即同步
                         </Button>

@@ -170,6 +170,8 @@ pub fn run() {
             commands::ai_chat_rules,
             commands::ai_sync_rules,
             commands::ai_unbind_rules,
+            commands::ai_rule_set_info,
+            commands::ai_rules_platform_enabled,
             commands::xt_upload_model,
             commands::xt_models,
             commands::xt_pull_alarms,

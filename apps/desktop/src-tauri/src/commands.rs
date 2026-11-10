@@ -1260,3 +1260,19 @@ pub async fn xt_delete_model(app: AppHandle, id: String) -> AppResult<()> {
         .await
         .map_err(|e| msg(format!("删除异常：{e}")))?
 }
+
+#[tauri::command]
+pub async fn ai_rule_set_info(app: AppHandle, state: State<'_, AppState>) -> AppResult<serde_json::Value> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || ai::rule_set_info(&project, &app.state::<Runtime>()))
+        .await
+        .map_err(|e| msg(format!("读取异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn ai_rules_platform_enabled(app: AppHandle, state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || ai::set_platform_enabled(&project, &app.state::<Runtime>(), enabled))
+        .await
+        .map_err(|e| msg(format!("设置异常：{e}")))?
+}

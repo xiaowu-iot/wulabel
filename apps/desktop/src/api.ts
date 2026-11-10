@@ -677,6 +677,9 @@ export const api = {
   aiSaveRules: (instructions: string | null, classes: ClassRule[]) => invoke<string | null>("ai_save_rules", { instructions, classes }),
   aiSyncRules: () => invoke<string>("ai_sync_rules"),
   aiUnbindRules: () => invoke<void>("ai_unbind_rules"),
+  /** 平台上绑定规则的当前状态（启用、适用场景），没绑定返回 null */
+  aiRuleSetInfo: () => invoke<{ code: string; enabled: boolean; scenes: string[] | null; name: string | null } | null>("ai_rule_set_info"),
+  aiRulesPlatformEnabled: (enabled: boolean) => invoke<void>("ai_rules_platform_enabled", { enabled }),
   aiChatRules: (messages: ChatMsg[]) => invoke<ChatReply>("ai_chat_rules", { messages }),
 
   // ---------- 巡瞳 AI 平台：上传模型、拉告警图片 ----------
