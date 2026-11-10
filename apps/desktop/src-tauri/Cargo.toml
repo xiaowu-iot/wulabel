@@ -28,6 +28,14 @@ roxmltree = "0.20"
 ureq = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# 实时协作：主机服务（HTTP + WebSocket）、连中转服务器、随机令牌
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"
+tower = { version = "0.5", features = ["util"] }
+getrandom = "0.2"
+base64 = "0.22"
 
 [profile.dev.package."*"]
 # 依赖库用优化编译，开发时图片解码不至于太慢

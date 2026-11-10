@@ -211,6 +211,8 @@ pub struct Label {
     pub count: i64,
     /// 英文提示词（文本提示自动标注用），可为空
     pub prompt: String,
+    /// 识别说明（巡瞳 AI 按类别识别时用，告诉 AI 这个类别具体指什么），可为空
+    pub description: String,
 }
 
 fn check_name(name: &str) -> AppResult<String> {
@@ -236,12 +238,12 @@ fn map_unique(e: rusqlite::Error, name: &str) -> crate::error::AppError {
 pub fn list_labels(p: &Project) -> AppResult<Vec<Label>> {
     let conn = p.conn.lock();
     let mut stmt = conn.prepare(
-        "SELECT l.id, l.name, l.color, (SELECT COUNT(*) FROM annotations a WHERE a.label_id = l.id), l.prompt
+        "SELECT l.id, l.name, l.color, (SELECT COUNT(*) FROM annotations a WHERE a.label_id = l.id), l.prompt, l.description
          FROM labels l ORDER BY l.sort, l.id",
     )?;
     let rows = stmt
         .query_map([], |r| {
-            Ok(Label { id: r.get(0)?, name: r.get(1)?, color: r.get(2)?, count: r.get(3)?, prompt: r.get(4)? })
+            Ok(Label { id: r.get(0)?, name: r.get(1)?, color: r.get(2)?, count: r.get(3)?, prompt: r.get(4)?, description: r.get(5)? })
         })?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(rows)
@@ -253,7 +255,7 @@ pub fn add_label(p: &Project, name: &str, color: &str) -> AppResult<Label> {
     let sort: i64 = conn.query_row("SELECT COALESCE(MAX(sort), 0) + 1 FROM labels", [], |r| r.get(0))?;
     conn.execute("INSERT INTO labels (name, color, sort) VALUES (?1, ?2, ?3)", params![name, color, sort])
         .map_err(|e| map_unique(e, &name))?;
-    Ok(Label { id: conn.last_insert_rowid(), name, color: color.to_string(), count: 0, prompt: String::new() })
+    Ok(Label { id: conn.last_insert_rowid(), name, color: color.to_string(), count: 0, prompt: String::new(), description: String::new() })
 }
 
 /// 改类别名、颜色；prompt 为 None 时不改英文提示词
@@ -269,6 +271,16 @@ pub fn update_label(p: &Project, id: i64, name: &str, color: &str, prompt: Optio
     if let Some(pr) = prompt {
         let pr: String = pr.trim().chars().take(120).collect();
         conn.execute("UPDATE labels SET prompt = ?2 WHERE id = ?1", params![id, pr])?;
+    }
+    Ok(())
+}
+
+/// 改识别说明（最多 500 字）
+pub fn set_label_description(p: &Project, id: i64, description: &str) -> AppResult<()> {
+    let d: String = description.trim().chars().take(500).collect();
+    let n = p.conn.lock().execute("UPDATE labels SET description = ?2 WHERE id = ?1", params![id, d])?;
+    if n == 0 {
+        return Err(msg("类别不存在"));
     }
     Ok(())
 }

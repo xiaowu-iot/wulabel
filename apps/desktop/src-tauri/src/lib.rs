@@ -18,9 +18,12 @@ mod protocol;
 mod quality;
 mod report;
 mod runtime;
+mod share;
 mod state;
+mod team;
 mod track;
 mod training;
+mod tunnel;
 mod versions;
 mod video;
 
@@ -53,6 +56,7 @@ pub fn run() {
         .manage(training::Predictor::default())
         .manage(video::Extractor::default())
         .manage(evaltools::FpTest::default())
+        .manage(share::Share::default())
         .manage(Arc::new(deploy::Live::default()))
         .setup(|app| {
             // 训练环境有好几 GB，放本机目录（Local），不放会漫游同步的 Roaming
@@ -144,6 +148,25 @@ pub fn run() {
             commands::live_snapshot,
             commands::export_formats,
             commands::build_service,
+            commands::share_status,
+            commands::share_start,
+            commands::share_stop,
+            commands::share_save_options,
+            commands::share_lock,
+            commands::share_unlock,
+            commands::share_review,
+            commands::team_members,
+            commands::team_add_member,
+            commands::team_update_member,
+            commands::team_delete_member,
+            commands::team_assign,
+            commands::team_unassign,
+            commands::team_stats,
+            commands::team_export_csv,
+            commands::team_activity,
+            commands::ai_rules,
+            commands::ai_save_rules,
+            commands::ai_chat_rules,
             feedback::submit_feedback,
         ])
         .build(tauri::generate_context!())
@@ -151,6 +174,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 // 退出时结束推理进程和正在进行的训练，不留后台进程
+                app.state::<share::Share>().stop();
                 app.state::<training::Predictor>().shutdown();
                 app.state::<Arc<deploy::Live>>().stop();
                 app.state::<Arc<training::Jobs>>().kill_all();

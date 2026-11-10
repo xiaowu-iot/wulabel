@@ -18,7 +18,9 @@ use crate::images::{self, DeleteScope, ImagePage, ImportResult, LastImport};
 use crate::keypoints::{self, Template};
 use crate::project::{self, Project, ProjectInfo, RecentProject, Stats};
 use crate::runtime::{self, EnvStatus, Runtime, Settings, SpeedResult};
+use crate::share::{self, Share, ShareOptions, ShareStatus};
 use crate::state::AppState;
+use crate::team::{self, AssignOptions, AssignResult, Member, MemberPatch};
 use crate::quality;
 use crate::report;
 use crate::track;
@@ -35,6 +37,8 @@ fn opened(app: &AppHandle, state: &AppState, p: Project) -> AppResult<ProjectInf
     training::recover(&p, &app.state::<Arc<Jobs>>());
     // 换项目后推理进程里缓存的模型没用了
     app.state::<Predictor>().shutdown();
+    // 换项目就停止共享（成员连的是原来的项目）
+    app.state::<Share>().stop();
     let info = p.info()?;
     state.set(Some(p));
     Ok(info)
@@ -59,7 +63,8 @@ pub async fn open_project(app: AppHandle, state: State<'_, AppState>, path: Stri
 }
 
 #[tauri::command]
-pub async fn close_project(state: State<'_, AppState>) -> AppResult<()> {
+pub async fn close_project(state: State<'_, AppState>, share: State<'_, Share>) -> AppResult<()> {
+    share.stop();
     state.set(None);
     Ok(())
 }
@@ -912,15 +917,35 @@ pub async fn load_annotations(state: State<'_, AppState>, image_id: i64) -> AppR
 #[tauri::command]
 pub async fn save_annotations(
     state: State<'_, AppState>,
+    share: State<'_, Share>,
     image_id: i64,
     annotations: Vec<Annotation>,
 ) -> AppResult<String> {
-    annotations::save(&*state.current()?, image_id, &annotations)
+    let project = state.current()?;
+    // 正在共享时：别人锁着这张图就不让改；改完通知大家
+    let hub = share.hub_for(&project);
+    if let Some(h) = &hub {
+        h.check_write(&h.host_member(), image_id)?;
+    }
+    let status = annotations::save(&project, image_id, &annotations)?;
+    if let Some(h) = hub {
+        h.saved(&h.host_member(), image_id, &status);
+    }
+    Ok(status)
 }
 
 #[tauri::command]
-pub async fn set_image_status(state: State<'_, AppState>, image_id: i64, status: String) -> AppResult<()> {
-    annotations::set_status(&*state.current()?, image_id, &status)
+pub async fn set_image_status(state: State<'_, AppState>, share: State<'_, Share>, image_id: i64, status: String) -> AppResult<()> {
+    let project = state.current()?;
+    match share.hub_for(&project) {
+        Some(h) => {
+            let me = h.host_member();
+            h.check_write(&me, image_id)?;
+            h.set_status(&me, image_id, &status)?;
+            Ok(())
+        }
+        None => annotations::set_status(&project, image_id, &status),
+    }
 }
 
 // ---------- 类别 ----------
@@ -931,8 +956,13 @@ pub async fn list_labels(state: State<'_, AppState>) -> AppResult<Vec<Label>> {
 }
 
 #[tauri::command]
-pub async fn add_label(state: State<'_, AppState>, name: String, color: String) -> AppResult<Label> {
-    annotations::add_label(&*state.current()?, &name, &color)
+pub async fn add_label(state: State<'_, AppState>, share: State<'_, Share>, name: String, color: String) -> AppResult<Label> {
+    let project = state.current()?;
+    let l = annotations::add_label(&project, &name, &color)?;
+    if let Some(h) = share.hub_for(&project) {
+        h.labels_changed(&h.host_member(), &format!("新增类别「{name}」"));
+    }
+    Ok(l)
 }
 
 #[tauri::command]
@@ -942,11 +972,220 @@ pub async fn update_label(
     name: String,
     color: String,
     prompt: Option<String>,
+    description: Option<String>,
+    share: State<'_, Share>,
 ) -> AppResult<()> {
-    annotations::update_label(&*state.current()?, id, &name, &color, prompt.as_deref())
+    let project = state.current()?;
+    annotations::update_label(&project, id, &name, &color, prompt.as_deref())?;
+    if let Some(d) = description {
+        annotations::set_label_description(&project, id, &d)?;
+    }
+    if let Some(h) = share.hub_for(&project) {
+        h.labels_changed(&h.host_member(), &format!("修改类别「{name}」"));
+    }
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn delete_label(state: State<'_, AppState>, id: i64) -> AppResult<usize> {
-    annotations::delete_label(&*state.current()?, id)
+pub async fn delete_label(state: State<'_, AppState>, share: State<'_, Share>, id: i64) -> AppResult<usize> {
+    let project = state.current()?;
+    let n = annotations::delete_label(&project, id)?;
+    if let Some(h) = share.hub_for(&project) {
+        h.labels_changed(&h.host_member(), "删除了一个类别");
+    }
+    Ok(n)
+}
+
+// ---------- 实时协作（主机这边） ----------
+
+fn host_name(share: &Share, p: &Project) -> String {
+    share.hub_for(p).map(|h| h.opts.lock().host_name.clone()).unwrap_or_else(|| share::load_options(p).host_name)
+}
+
+#[tauri::command]
+pub async fn share_status(state: State<'_, AppState>, share: State<'_, Share>) -> AppResult<ShareStatus> {
+    let p = state.try_current();
+    Ok(share.status(p.as_deref()))
+}
+
+#[tauri::command]
+pub async fn share_start(app: AppHandle, state: State<'_, AppState>, share: State<'_, Share>, options: ShareOptions) -> AppResult<ShareStatus> {
+    let project = state.current()?;
+    share.start(app, project, options).await
+}
+
+#[tauri::command]
+pub async fn share_stop(share: State<'_, Share>) -> AppResult<()> {
+    share.stop();
+    Ok(())
+}
+
+/// 改协作选项。正在共享时立即生效（端口、共享方式要重新开启才生效）
+#[tauri::command]
+pub async fn share_save_options(state: State<'_, AppState>, share: State<'_, Share>, options: ShareOptions) -> AppResult<()> {
+    let project = state.current()?;
+    share::save_options(&project, &options)?;
+    if let Some(h) = share.hub_for(&project) {
+        {
+            let mut o = h.opts.lock();
+            o.host_name = options.host_name.clone();
+            o.allow_ai = options.allow_ai;
+            o.watermark = options.watermark;
+            o.members_edit_labels = options.members_edit_labels;
+        }
+        h.broadcast(
+            "options",
+            serde_json::json!({ "allowAi": options.allow_ai, "watermark": options.watermark, "membersEditLabels": options.members_edit_labels }),
+        );
+        h.emit_status();
+    }
+    Ok(())
+}
+
+/// 主机打开一张图：正在共享时加锁，返回锁的人（别人在改就只读）和这张图的分配、审核信息
+#[tauri::command]
+pub async fn share_lock(state: State<'_, AppState>, share: State<'_, Share>, image_id: i64) -> AppResult<serde_json::Value> {
+    let project = state.current()?;
+    let holder = share.hub_for(&project).and_then(|h| h.lock(&h.host_member(), image_id));
+    let info = team::image_info(&project, image_id, &host_name(&share, &project))?;
+    Ok(serde_json::json!({ "holder": holder, "info": info }))
+}
+
+#[tauri::command]
+pub async fn share_unlock(state: State<'_, AppState>, share: State<'_, Share>) -> AppResult<()> {
+    let project = state.current()?;
+    if let Some(h) = share.hub_for(&project) {
+        h.release(team::HOST);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn share_review(state: State<'_, AppState>, share: State<'_, Share>, image_id: i64, pass: bool, reason: String) -> AppResult<String> {
+    let project = state.current()?;
+    match share.hub_for(&project) {
+        Some(h) => h.review(&h.host_member(), image_id, pass, &reason),
+        None => team::review(&project, team::HOST, image_id, pass, &reason),
+    }
+}
+
+#[tauri::command]
+pub async fn team_members(state: State<'_, AppState>) -> AppResult<Vec<Member>> {
+    team::list_members(&*state.current()?)
+}
+
+#[tauri::command]
+pub async fn team_add_member(state: State<'_, AppState>, name: String, role: String, password: String) -> AppResult<Member> {
+    team::add_member(&*state.current()?, &name, &role, &password)
+}
+
+#[tauri::command]
+pub async fn team_update_member(state: State<'_, AppState>, share: State<'_, Share>, id: i64, patch: MemberPatch) -> AppResult<Member> {
+    let project = state.current()?;
+    let m = team::update_member(&project, id, &patch)?;
+    if let Some(h) = share.hub_for(&project) {
+        // 停用、改了密码就让他重新登录
+        if patch.disabled == Some(true) || patch.password.as_deref().is_some_and(|s| !s.is_empty()) {
+            h.kick(id);
+        }
+        h.emit_status();
+    }
+    Ok(m)
+}
+
+#[tauri::command]
+pub async fn team_delete_member(state: State<'_, AppState>, share: State<'_, Share>, id: i64) -> AppResult<()> {
+    let project = state.current()?;
+    team::delete_member(&project, id)?;
+    if let Some(h) = share.hub_for(&project) {
+        h.kick(id);
+        h.broadcast("assign", serde_json::json!({}));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn team_assign(state: State<'_, AppState>, share: State<'_, Share>, options: AssignOptions) -> AppResult<Vec<AssignResult>> {
+    let project = state.current()?;
+    let r = team::assign(&project, &options)?;
+    let total: usize = r.iter().map(|x| x.count).sum();
+    team::log(&project, team::HOST, None, "assign", None, total as i64, &format!("分配 {total} 张"))?;
+    if let Some(h) = share.hub_for(&project) {
+        h.broadcast("assign", serde_json::json!({}));
+    }
+    Ok(r)
+}
+
+#[tauri::command]
+pub async fn team_unassign(state: State<'_, AppState>, share: State<'_, Share>, member_id: i64, only_unfinished: bool) -> AppResult<usize> {
+    let project = state.current()?;
+    let n = team::unassign(&project, member_id, only_unfinished)?;
+    if let Some(h) = share.hub_for(&project) {
+        h.broadcast("assign", serde_json::json!({}));
+    }
+    Ok(n)
+}
+
+#[tauri::command]
+pub async fn team_stats(state: State<'_, AppState>, share: State<'_, Share>, from: i64, to: i64) -> AppResult<Vec<team::MemberStats>> {
+    let project = state.current()?;
+    let name = host_name(&share, &project);
+    tauri::async_runtime::spawn_blocking(move || team::stats(&project, from, to, &name))
+        .await
+        .map_err(|e| msg(format!("统计异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn team_export_csv(state: State<'_, AppState>, share: State<'_, Share>, from: i64, to: i64, path: String) -> AppResult<usize> {
+    let project = state.current()?;
+    let name = host_name(&share, &project);
+    tauri::async_runtime::spawn_blocking(move || team::export_csv(&project, from, to, &name, &PathBuf::from(path)))
+        .await
+        .map_err(|e| msg(format!("导出异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn team_activity(
+    state: State<'_, AppState>,
+    share: State<'_, Share>,
+    limit: usize,
+    member_id: Option<i64>,
+    with_saves: bool,
+) -> AppResult<Vec<team::ActivityRow>> {
+    let project = state.current()?;
+    let name = host_name(&share, &project);
+    team::activity(&project, limit.min(2000), member_id, with_saves, &name)
+}
+
+// ---------- 巡瞳 AI：识别规则、聊天定规则 ----------
+
+#[tauri::command]
+pub async fn ai_rules(state: State<'_, AppState>) -> AppResult<ai::Rules> {
+    ai::rules(&*state.current()?)
+}
+
+#[tauri::command]
+pub async fn ai_save_rules(
+    state: State<'_, AppState>,
+    share: State<'_, Share>,
+    instructions: Option<String>,
+    classes: Vec<ai::ClassRule>,
+) -> AppResult<()> {
+    let project = state.current()?;
+    ai::save_rules(&project, instructions.as_deref(), &classes)?;
+    if let Some(h) = share.hub_for(&project) {
+        h.labels_changed(&h.host_member(), "更新了识别规则");
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn ai_chat_rules(app: AppHandle, state: State<'_, AppState>, messages: Vec<ai::ChatMsg>) -> AppResult<ai::ChatReply> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let log = assist_log(&app);
+        ai::chat_rules(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), &messages, &log)
+    })
+    .await
+    .map_err(|e| msg(format!("聊天异常：{e}")))?
 }

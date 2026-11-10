@@ -12,6 +12,7 @@ use tauri::{Manager, Runtime, UriSchemeContext, UriSchemeResponder};
 
 use crate::error::{msg, AppResult};
 use crate::images;
+use crate::project::Project;
 use crate::state::AppState;
 
 pub fn handle<R: Runtime>(ctx: UriSchemeContext<'_, R>, req: Request<Vec<u8>>, responder: UriSchemeResponder) {
@@ -37,23 +38,28 @@ pub fn handle<R: Runtime>(ctx: UriSchemeContext<'_, R>, req: Request<Vec<u8>>, r
     });
 }
 
+/// 读一张图或它的缩略图，返回 (内容, Content-Type)。kind：thumb / image。协作主机服务也用它
+pub fn image_bytes(project: &Project, kind: &str, id: i64) -> AppResult<(Vec<u8>, &'static str)> {
+    let (stored, hash) = images::locate(project, id)?;
+    let file = match kind {
+        "thumb" => images::ensure_thumb(project, &stored, &hash)?,
+        "image" => project.resolve(&stored),
+        _ => return Err(msg("地址格式不对")),
+    };
+    Ok(if is_tiff(&file) {
+        // 浏览器内核不支持 TIFF，转成 JPEG
+        (images::to_jpeg_bytes(&file)?, "image/jpeg")
+    } else {
+        (fs::read(&file)?, mime(&file))
+    })
+}
+
 fn serve(state: &AppState, path: &str) -> AppResult<Response<Vec<u8>>> {
     let project = state.current()?;
     let mut parts = path.trim_matches('/').splitn(2, '/');
     let kind = parts.next().unwrap_or("");
     let id: i64 = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| msg("地址格式不对"))?;
-    let (stored, hash) = images::locate(&project, id)?;
-    let file = match kind {
-        "thumb" => images::ensure_thumb(&project, &stored, &hash)?,
-        "image" => project.resolve(&stored),
-        _ => return Err(msg("地址格式不对")),
-    };
-    let (bytes, content_type) = if is_tiff(&file) {
-        // 浏览器内核不支持 TIFF，转成 JPEG
-        (images::to_jpeg_bytes(&file)?, "image/jpeg")
-    } else {
-        (fs::read(&file)?, mime(&file))
-    };
+    let (bytes, content_type) = image_bytes(&project, kind, id)?;
     Ok(Response::builder()
         .header(header::CONTENT_TYPE, content_type)
         // 同一个 id 的内容不会变（按哈希去重），可以放心缓存

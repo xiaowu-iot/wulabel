@@ -142,6 +142,46 @@ fn migrate(conn: &Connection) -> AppResult<()> {
              COMMIT;",
         )?;
     }
+    if version < 6 {
+        // 实时协作：成员、任务分配、审核打回、操作记录
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE members (
+                 id         INTEGER PRIMARY KEY,
+                 name       TEXT    NOT NULL UNIQUE,
+                 role       TEXT    NOT NULL DEFAULT 'annotator',
+                 pass_hash  TEXT    NOT NULL,
+                 salt       TEXT    NOT NULL,
+                 disabled   INTEGER NOT NULL DEFAULT 0,
+                 created_at INTEGER NOT NULL
+             );
+             ALTER TABLE images ADD COLUMN assignee INTEGER;
+             ALTER TABLE images ADD COLUMN labeled_by INTEGER;
+             ALTER TABLE images ADD COLUMN reviewed_by INTEGER;
+             ALTER TABLE images ADD COLUMN reject_reason TEXT NOT NULL DEFAULT '';
+             CREATE INDEX idx_images_assignee ON images(assignee);
+             CREATE TABLE activity (
+                 id         INTEGER PRIMARY KEY,
+                 member_id  INTEGER NOT NULL,
+                 image_id   INTEGER,
+                 action     TEXT    NOT NULL,
+                 target     INTEGER,
+                 objects    INTEGER NOT NULL DEFAULT 0,
+                 detail     TEXT    NOT NULL DEFAULT '',
+                 created_at INTEGER NOT NULL
+             );
+             CREATE INDEX idx_activity_member ON activity(member_id, created_at);
+             CREATE INDEX idx_activity_time ON activity(created_at);
+             -- 巡瞳 AI 按类别识别：每个类别的识别说明；项目级设置（整体识别规则、协作选项等）
+             ALTER TABLE labels ADD COLUMN description TEXT NOT NULL DEFAULT '';
+             CREATE TABLE settings (
+                 key   TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
+             );
+             PRAGMA user_version = 6;
+             COMMIT;",
+        )?;
+    }
     Ok(())
 }
 
