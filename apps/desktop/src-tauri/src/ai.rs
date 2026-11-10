@@ -26,6 +26,14 @@ const LLM: &str = "llm";
 pub const CLASSES: &str = "classes";
 /// 项目设置里存整体识别规则的键
 const RULES_KEY: &str = "ai_instructions";
+/// 项目绑定的巡瞳平台规则编号（rs_xxx）：同步后巡瞳自己的识别、告警也按这套规则
+const RULE_SET_KEY: &str = "xt_rule_set";
+/// 平台的限制：类别 1–30 个、类别名 ≤30 字、英文提示词 ≤120、识别说明 ≤500、整体规则 ≤1000、每条聊天 ≤2000、最多 30 条
+const MAX_CLASSES: usize = 30;
+const MAX_NAME: usize = 30;
+const MAX_INSTRUCTIONS: usize = 1000;
+const MAX_MESSAGE: usize = 2000;
+const MAX_MESSAGES: usize = 30;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,6 +81,38 @@ pub(crate) fn parse(resp: ureq::Response) -> AppResult<serde_json::Value> {
 pub(crate) fn get(url: &str, key: &str) -> AppResult<serde_json::Value> {
     let r = ureq::get(url).set("Authorization", &format!("Bearer {key}")).timeout(Duration::from_secs(30)).call();
     parse(r.map_err(err_of)?)
+}
+
+/// 发 JSON 请求（PUT 等），返回 JSON
+fn send_json(method: &str, url: &str, key: &str, body: &serde_json::Value) -> AppResult<serde_json::Value> {
+    let r = ureq::request(method, url)
+        .set("Authorization", &format!("Bearer {key}"))
+        .set("Content-Type", "application/json; charset=utf-8")
+        .timeout(Duration::from_secs(60))
+        .send_string(&body.to_string());
+    parse(r.map_err(err_of)?)
+}
+
+fn cut(s: &str, n: usize) -> String {
+    s.trim().chars().take(n).collect()
+}
+
+/// 规则换成平台接口要的 classes（检查数量、类别名长度，超长的说明截断）
+fn platform_classes(r: &Rules) -> AppResult<Vec<serde_json::Value>> {
+    if r.classes.is_empty() {
+        return Err(msg("项目里还没有类别，先在右侧添加类别（可以写上识别说明）"));
+    }
+    if r.classes.len() > MAX_CLASSES {
+        return Err(msg(format!("巡瞳按类别识别最多支持 {MAX_CLASSES} 个类别，项目里有 {} 个", r.classes.len())));
+    }
+    if let Some(c) = r.classes.iter().find(|c| c.name.chars().count() > MAX_NAME) {
+        return Err(msg(format!("类别名「{}」超过 {MAX_NAME} 个字，巡瞳按类别识别用不了，请改短一些", c.name)));
+    }
+    Ok(r
+        .classes
+        .iter()
+        .map(|c| serde_json::json!({ "name": c.name, "prompt": cut(&c.prompt, 120), "description": cut(&c.description, 500) }))
+        .collect())
 }
 
 fn post(url: &str, key: &str, body: &serde_json::Value) -> AppResult<serde_json::Value> {
@@ -160,13 +200,10 @@ fn recognize(base: &str, key: &str, path: &Path, model: &str, conf: f64, rules: 
     let (image, w, h) = encode_image(path)?;
     let mut out = Vec::new();
     if model == CLASSES {
-        if rules.classes.is_empty() {
-            return Err(msg("项目里还没有类别，先在右侧添加类别（可以写上识别说明）"));
-        }
         let body = serde_json::json!({
             "image": image,
-            "classes": rules.classes.iter().map(|c| serde_json::json!({ "name": c.name, "prompt": c.prompt, "description": c.description })).collect::<Vec<_>>(),
-            "instructions": rules.instructions,
+            "classes": platform_classes(rules)?,
+            "instructions": cut(&rules.instructions, MAX_INSTRUCTIONS),
             "minConfidence": conf,
         });
         let v = post(&format!("{base}/v1/detect-classes"), key, &body)?;
@@ -314,6 +351,9 @@ pub struct ClassRule {
 pub struct Rules {
     pub instructions: String,
     pub classes: Vec<ClassRule>,
+    /// 绑定的巡瞳平台规则编号，没同步过是空
+    #[serde(default)]
+    pub rule_set: String,
 }
 
 pub fn rules(p: &Project) -> AppResult<Rules> {
@@ -322,13 +362,47 @@ pub fn rules(p: &Project) -> AppResult<Rules> {
         .into_iter()
         .map(|l| ClassRule { id: l.id, name: l.name, prompt: l.prompt, description: l.description })
         .collect();
-    Ok(Rules { instructions, classes })
+    let rule_set = crate::team::get_setting(p, RULE_SET_KEY)?.unwrap_or_default();
+    Ok(Rules { instructions, classes, rule_set })
+}
+
+/// 把项目的规则同步到巡瞳平台：没绑定就新建一套规则并绑定，绑定了就更新。返回平台规则编号。
+/// 同步后巡瞳自己的识别（/v1/analyze、抓拍、告警推送）也按这套规则。
+pub fn sync_rules(p: &Project, rt: &Runtime) -> AppResult<String> {
+    let (base, key) = config(rt)?;
+    let r = rules(p)?;
+    let body = serde_json::json!({
+        "name": cut(&format!("Wulabel · {}", p.meta.name), 60),
+        "scenes": ["*"],
+        "classes": platform_classes(&r)?,
+        "instructions": cut(&r.instructions, MAX_INSTRUCTIONS),
+        "enabled": true,
+        "source": "API",
+    });
+    let code: String = r.rule_set.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
+    if !code.is_empty() {
+        match send_json("PUT", &format!("{base}/v1/rule-sets/{code}"), &key, &body) {
+            Ok(_) => return Ok(code),
+            // 平台上被删了：重新建一套
+            Err(e) if e.to_string().contains("404") => {}
+            Err(e) => return Err(e),
+        }
+    }
+    let v = post(&format!("{base}/v1/rule-sets"), &key, &body)?;
+    let code = v["code"].as_str().ok_or_else(|| msg("巡瞳平台没有返回规则编号"))?.to_string();
+    crate::team::set_setting(p, RULE_SET_KEY, &code)?;
+    Ok(code)
+}
+
+/// 解除和平台规则的绑定（平台上的规则不删）
+pub fn unbind_rules(p: &Project) -> AppResult<()> {
+    crate::team::set_setting(p, RULE_SET_KEY, "")
 }
 
 /// 保存规则：instructions 为 None 不改；classes 按类别名改识别说明（不会新增、改名类别）
 pub fn save_rules(p: &Project, instructions: Option<&str>, classes: &[ClassRule]) -> AppResult<()> {
     if let Some(s) = instructions {
-        let s: String = s.trim().chars().take(2000).collect();
+        let s = cut(s, MAX_INSTRUCTIONS);
         crate::team::set_setting(p, RULES_KEY, &s)?;
     }
     let labels = annotations::list_labels(p)?;
@@ -375,12 +449,17 @@ pub struct ChatReply {
 pub fn chat_rules(p: &Project, rt: &Runtime, pr: &Predictor, messages: &[ChatMsg], log: &(dyn Fn(String) + Sync)) -> AppResult<ChatReply> {
     let (base, key) = config(rt)?;
     let r = rules(p)?;
-    // 只给最后一张附图编码（前面的图 AI 已经看过，省流量和额度）
+    // 平台最多收 30 条，最后一条必须是用户的
+    let messages = &messages[messages.len().saturating_sub(MAX_MESSAGES)..];
+    if messages.last().map(|m| m.role.as_str()) != Some("user") {
+        return Err(msg("最后一条要是你说的话"));
+    }
+    // 只给最后一张附图编码（平台也只把最近一张图发给 AI，省流量）
     let last_img = messages.iter().rposition(|m| m.image_id.is_some());
     let mut size = None;
     let mut msgs = Vec::new();
     for (i, m) in messages.iter().enumerate() {
-        let mut v = serde_json::json!({ "role": m.role, "content": m.content });
+        let mut v = serde_json::json!({ "role": m.role, "content": cut(&m.content, MAX_MESSAGE) });
         if Some(i) == last_img {
             if let Some(id) = m.image_id {
                 let (stored, _) = crate::images::locate(p, id)?;
@@ -392,8 +471,8 @@ pub fn chat_rules(p: &Project, rt: &Runtime, pr: &Predictor, messages: &[ChatMsg
         msgs.push(v);
     }
     let body = serde_json::json!({
-        "classes": r.classes.iter().map(|c| serde_json::json!({ "name": c.name, "prompt": c.prompt, "description": c.description })).collect::<Vec<_>>(),
-        "instructions": r.instructions,
+        "classes": platform_classes(&r)?,
+        "instructions": cut(&r.instructions, MAX_INSTRUCTIONS),
         "messages": msgs,
     });
     let v = post(&format!("{base}/v1/chat/rules"), &key, &body)?;

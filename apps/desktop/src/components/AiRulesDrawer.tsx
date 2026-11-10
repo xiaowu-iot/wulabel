@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, App, Button, Checkbox, Drawer, Empty, Input, Space, Tabs, Tag } from "antd";
 import { SendOutlined } from "@ant-design/icons";
 import { AiRules, api, ChatMsg, ChatReply, ClassRule, errText, PredResult } from "../api";
+import { useApp } from "../store";
 
 interface Props {
   open: boolean;
@@ -32,6 +33,8 @@ export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApply
   const [text, setText] = useState("");
   const [withImage, setWithImage] = useState(true);
   const [sending, setSending] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const remote = useApp((s) => s.team.remote);
   const listRef = useRef<HTMLDivElement>(null);
 
   const load = () =>
@@ -57,14 +60,42 @@ export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApply
     if (!draft) return;
     setSaving(true);
     try {
-      await api.aiSaveRules(draft.instructions, draft.classes);
-      message.success("识别规则已保存");
+      const warn = await api.aiSaveRules(draft.instructions, draft.classes);
+      if (warn) message.warning(warn);
+      else message.success(rules?.ruleSet ? "识别规则已保存，并同步到巡瞳平台" : "识别规则已保存");
       await load();
       onSaved();
     } catch (e) {
       message.error(errText(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const sync = async () => {
+    if (dirty) {
+      message.warning("先保存规则再同步");
+      return;
+    }
+    setSyncing(true);
+    try {
+      const code = await api.aiSyncRules();
+      message.success(`已同步到巡瞳平台（规则 ${code}）`);
+      await load();
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const unbind = async () => {
+    try {
+      await api.aiUnbindRules();
+      message.success("已解除绑定，平台上的规则没有删除");
+      await load();
+    } catch (e) {
+      message.error(errText(e));
     }
   };
 
@@ -105,8 +136,9 @@ export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApply
       }),
     };
     try {
-      await api.aiSaveRules(next.instructions, next.classes);
-      message.success("已采用 AI 建议的规则");
+      const warn = await api.aiSaveRules(next.instructions, next.classes);
+      if (warn) message.warning(warn);
+      else message.success("已采用 AI 建议的规则");
       await load();
       onSaved();
     } catch (e) {
@@ -246,7 +278,7 @@ export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApply
                   placeholder="比如：只关注画面里的人和车，忽略海报、屏幕里的内容；夜间画面也要识别"
                   value={draft.instructions}
                   disabled={!canEdit}
-                  maxLength={2000}
+                  maxLength={1000}
                   onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
                   style={{ marginBottom: 16 }}
                 />
@@ -260,6 +292,31 @@ export default function AiRulesDrawer({ open, onClose, imageId, canEdit, onApply
                   </Button>
                 ) : (
                   <div className="dim">发起人没有开放修改类别和规则</div>
+                )}
+                {!remote && (
+                  <div style={{ marginTop: 20, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                    <div style={{ marginBottom: 6 }}>
+                      <b>同步到巡瞳平台</b>
+                    </div>
+                    <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
+                      同步后，巡瞳平台自己的识别（抓拍、告警推送）也按这套规则来，只报你要的类别。绑定后，以后每次保存规则会自动同步。
+                    </div>
+                    {rules?.ruleSet ? (
+                      <Space wrap>
+                        <Tag color="green">已绑定平台规则 {rules.ruleSet}</Tag>
+                        <Button size="small" loading={syncing} onClick={sync}>
+                          立即同步
+                        </Button>
+                        <Button size="small" type="link" onClick={unbind}>
+                          解除绑定
+                        </Button>
+                      </Space>
+                    ) : (
+                      <Button size="small" loading={syncing} onClick={sync}>
+                        同步到巡瞳平台
+                      </Button>
+                    )}
+                  </div>
                 )}
               </div>
             ) : null,

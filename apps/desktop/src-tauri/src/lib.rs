@@ -168,6 +168,8 @@ pub fn run() {
             commands::ai_rules,
             commands::ai_save_rules,
             commands::ai_chat_rules,
+            commands::ai_sync_rules,
+            commands::ai_unbind_rules,
             commands::xt_upload_model,
             commands::xt_models,
             commands::xt_pull_alarms,

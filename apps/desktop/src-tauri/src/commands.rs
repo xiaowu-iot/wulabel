@@ -1170,13 +1170,39 @@ pub async fn ai_save_rules(
     share: State<'_, Share>,
     instructions: Option<String>,
     classes: Vec<ai::ClassRule>,
-) -> AppResult<()> {
+    app: AppHandle,
+) -> AppResult<Option<String>> {
     let project = state.current()?;
     ai::save_rules(&project, instructions.as_deref(), &classes)?;
     if let Some(h) = share.hub_for(&project) {
         h.labels_changed(&h.host_member(), "更新了识别规则");
     }
-    Ok(())
+    sync_if_bound(app, project).await
+}
+
+/// 绑定了巡瞳平台规则的项目，改完规则顺手同步；同步失败只提醒，不影响本地保存
+async fn sync_if_bound(app: AppHandle, project: Arc<Project>) -> AppResult<Option<String>> {
+    if ai::rules(&project)?.rule_set.is_empty() {
+        return Ok(None);
+    }
+    let r = tauri::async_runtime::spawn_blocking(move || ai::sync_rules(&project, &app.state::<Runtime>()))
+        .await
+        .map_err(|e| msg(format!("同步异常：{e}")))?;
+    Ok(r.err().map(|e| format!("规则已保存，但同步到巡瞳平台失败：{e}")))
+}
+
+/// 把识别规则同步到巡瞳平台（没绑定就新建并绑定），返回平台规则编号
+#[tauri::command]
+pub async fn ai_sync_rules(app: AppHandle, state: State<'_, AppState>) -> AppResult<String> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || ai::sync_rules(&project, &app.state::<Runtime>()))
+        .await
+        .map_err(|e| msg(format!("同步异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn ai_unbind_rules(state: State<'_, AppState>) -> AppResult<()> {
+    ai::unbind_rules(&*state.current()?)
 }
 
 #[tauri::command]

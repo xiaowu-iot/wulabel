@@ -692,7 +692,15 @@ fn call(hub: &Hub, m: &Member, cmd: &str, args: &Value) -> AppResult<Value> {
             let classes: Vec<crate::ai::ClassRule> = arg(args, "classes")?;
             crate::ai::save_rules(p, instructions.as_deref(), &classes)?;
             hub.labels_changed(m, "更新了识别规则");
-            Value::Null
+            // 绑定了巡瞳平台规则就顺手同步（用的是发起人的账号）；失败只提醒
+            if !crate::ai::rules(p)?.rule_set.is_empty() {
+                match crate::ai::sync_rules(p, &app.state::<Runtime>()) {
+                    Ok(_) => Value::Null,
+                    Err(e) => json!(format!("规则已保存，但同步到巡瞳平台失败：{e}")),
+                }
+            } else {
+                Value::Null
+            }
         }
         "ai_chat_rules" => {
             // 用的是发起人的巡瞳额度，跟着「允许 AI 辅助」开关走

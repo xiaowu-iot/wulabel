@@ -673,7 +673,10 @@ export const api = {
 
   // ---------- 巡瞳 AI 识别规则 ----------
   aiRules: () => invoke<AiRules>("ai_rules"),
-  aiSaveRules: (instructions: string | null, classes: ClassRule[]) => invoke<void>("ai_save_rules", { instructions, classes }),
+  /** 返回非空时是提醒（比如同步到巡瞳平台失败） */
+  aiSaveRules: (instructions: string | null, classes: ClassRule[]) => invoke<string | null>("ai_save_rules", { instructions, classes }),
+  aiSyncRules: () => invoke<string>("ai_sync_rules"),
+  aiUnbindRules: () => invoke<void>("ai_unbind_rules"),
   aiChatRules: (messages: ChatMsg[]) => invoke<ChatReply>("ai_chat_rules", { messages }),
 
   // ---------- 巡瞳 AI 平台：上传模型、拉告警图片 ----------
@@ -850,6 +853,8 @@ export interface ClassRule {
 export interface AiRules {
   instructions: string;
   classes: ClassRule[];
+  /** 绑定的巡瞳平台规则编号，没同步过是空 */
+  ruleSet?: string;
 }
 
 export interface ChatMsg {
