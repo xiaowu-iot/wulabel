@@ -194,6 +194,12 @@ pub fn set_status(p: &Project, image_id: i64, status: &str) -> AppResult<()> {
 pub fn list_ids(p: &Project, status: Option<&str>) -> AppResult<Vec<i64>> {
     let status = status.filter(|s| !s.is_empty() && *s != "all");
     let conn = p.conn.lock();
+    if status == Some("rejected") {
+        // 协作里被审核打回、还没改的图
+        let mut stmt = conn.prepare("SELECT id FROM images WHERE reject_reason != '' ORDER BY id")?;
+        let ids = stmt.query_map([], |r| r.get(0))?.collect::<Result<Vec<i64>, _>>()?;
+        return Ok(ids);
+    }
     let mut stmt = conn.prepare("SELECT id FROM images WHERE (?1 IS NULL OR status = ?1) ORDER BY id")?;
     let ids = stmt.query_map([status], |r| r.get(0))?.collect::<Result<Vec<i64>, _>>()?;
     Ok(ids)

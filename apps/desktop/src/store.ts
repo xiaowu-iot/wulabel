@@ -1,5 +1,14 @@
 import { create } from "zustand";
-import { api, ProjectInfo } from "./api";
+import { api, Member, ProjectInfo } from "./api";
+import { isRemote } from "./transport";
+
+/** 实时协作的状态：成员在浏览器里（remote），或者发起人正在共享（shareRunning） */
+export interface TeamState {
+  remote: boolean;
+  me: Member | null;
+  options: { allowAi: boolean; watermark: boolean; membersEditLabels: boolean };
+  shareRunning: boolean;
+}
 
 export interface Highlight {
   imageId: number;
@@ -7,7 +16,7 @@ export interface Highlight {
   text: string;
 }
 
-export type PageKey = "home" | "data" | "annotate" | "health" | "train" | "eval" | "deploy" | "settings";
+export type PageKey = "home" | "data" | "annotate" | "health" | "train" | "eval" | "deploy" | "team" | "settings";
 
 interface AppStore {
   project: ProjectInfo | null;
@@ -25,6 +34,8 @@ interface AppStore {
   clearQueue: () => void;
   takeFocusImage: () => number | null;
   refreshStats: () => Promise<void>;
+  team: TeamState;
+  setTeam: (t: Partial<TeamState>) => void;
 }
 
 export const useApp = create<AppStore>((set, get) => ({
@@ -43,6 +54,13 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   setProject: (project) => set({ project, page: project ? "data" : "home", queue: null }),
   setPage: (page) => set({ page }),
+  team: {
+    remote: isRemote,
+    me: null,
+    options: { allowAi: true, watermark: false, membersEditLabels: true },
+    shareRunning: false,
+  },
+  setTeam: (t) => set({ team: { ...get().team, ...t } }),
   refreshStats: async () => {
     const p = get().project;
     if (!p) return;

@@ -145,7 +145,8 @@ async fn handle(
 ) -> Option<String> {
     let v: Value = serde_json::from_str(text).ok()?;
     let id = v["id"].as_str().unwrap_or("").to_string();
-    match v["type"].as_str()? {
+    let kind = v["type"].as_str().unwrap_or("").to_string();
+    match kind.as_str() {
         "ready" => set_state(hub, "online", v["url"].as_str().unwrap_or(""), ""),
         "error" => return Some(v["message"].as_str().unwrap_or("中转服务器拒绝了连接").to_string()),
         "req" => {

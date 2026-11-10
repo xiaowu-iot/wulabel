@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 import { App as AntApp, ConfigProvider, theme } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import App from "./App";
+import RemoteApp from "./RemoteApp";
+import { isRemote } from "./transport";
 import "./styles.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
@@ -24,7 +26,7 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       }}
     >
       <AntApp>
-        <App />
+        {isRemote ? <RemoteApp /> : <App />}
       </AntApp>
     </ConfigProvider>
   </React.StrictMode>,

@@ -1189,3 +1189,41 @@ pub async fn ai_chat_rules(app: AppHandle, state: State<'_, AppState>, messages:
     .await
     .map_err(|e| msg(format!("聊天异常：{e}")))?
 }
+
+// ---------- 巡瞳 AI 平台：上传模型、拉告警图片 ----------
+
+#[tauri::command]
+pub async fn xt_upload_model(app: AppHandle, state: State<'_, AppState>, run_id: i64, name: String) -> AppResult<crate::xuntong::UploadResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let a = app.clone();
+        let log = move |line: String| {
+            let _ = a.emit("xuntong-log", line);
+        };
+        crate::xuntong::upload_model(&project, &app.state::<Runtime>(), run_id, &name, &log)
+    })
+    .await
+    .map_err(|e| msg(format!("上传异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn xt_models(app: AppHandle) -> AppResult<Vec<crate::xuntong::PlatformModel>> {
+    tauri::async_runtime::spawn_blocking(move || crate::xuntong::list_models(&app.state::<Runtime>()))
+        .await
+        .map_err(|e| msg(format!("读取异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn xt_pull_alarms(app: AppHandle, state: State<'_, AppState>, options: crate::xuntong::PullOptions) -> AppResult<crate::xuntong::PullResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app.clone(), "xuntong-progress");
+        let a = app.clone();
+        let log = move |line: String| {
+            let _ = a.emit("xuntong-log", line);
+        };
+        crate::xuntong::pull_alarms(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), &options, &progress, &log)
+    })
+    .await
+    .map_err(|e| msg(format!("拉取异常：{e}")))?
+}

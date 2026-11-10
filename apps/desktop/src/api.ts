@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { getToken, invoke, isRemote, postJson } from "./transport";
 
 export type Task = "detect" | "segment" | "classify" | "pose";
 
@@ -129,6 +129,8 @@ export interface Label {
   count: number;
   /** 英文提示词（文本提示自动标注用），可为空 */
   prompt?: string;
+  /** 识别说明（巡瞳 AI 按项目类别识别时用），可为空 */
+  description?: string;
 }
 
 /** SAM 分割结果：多边形 [x1, y1, ...] 和外接框 [x, y, w, h]，原图像素坐标 */
@@ -577,8 +579,8 @@ export const api = {
   interpolateFrames: (imageId: number) => invoke<InterpResult>("interpolate_frames", { imageId }),
   trackFrames: (imageId: number, count: number) => invoke<TrackResult>("track_frames", { imageId, count }),
   addLabel: (name: string, color: string) => invoke<Label>("add_label", { name, color }),
-  updateLabel: (id: number, name: string, color: string, prompt?: string) =>
-    invoke<void>("update_label", { id, name, color, prompt: prompt ?? null }),
+  updateLabel: (id: number, name: string, color: string, prompt?: string, description?: string) =>
+    invoke<void>("update_label", { id, name, color, prompt: prompt ?? null, description: description ?? null }),
   samSegment: (imageId: number, points: number[][], box: number[] | null) =>
     invoke<SamResult>("sam_segment", { imageId, points, bbox: box }),
   textDetect: (imageId: number, conf: number) => invoke<PredResult>("text_detect", { imageId, conf }),
@@ -641,7 +643,213 @@ export const api = {
   listImages: (status: string | null, offset: number, limit: number) =>
     invoke<ImagePage>("list_images", { status, offset, limit }),
   projectStats: () => invoke<Stats>("project_stats"),
+
+  // ---------- 实时协作 ----------
+  shareStatus: () => invoke<ShareStatus>("share_status"),
+  shareStart: (options: ShareOptions) => invoke<ShareStatus>("share_start", { options }),
+  shareStop: () => invoke<void>("share_stop"),
+  shareSaveOptions: (options: ShareOptions) => invoke<void>("share_save_options", { options }),
+  /** 打开一张图时加锁：别人正在改返回他的名字（只读打开） */
+  lockImage: (imageId: number) => invoke<LockResult>(isRemote ? "lock_image" : "share_lock", { imageId }),
+  unlockImage: () => invoke<void>(isRemote ? "unlock_image" : "share_unlock"),
+  reviewImage: (imageId: number, pass: boolean, reason: string) =>
+    invoke<ImageStatus>(isRemote ? "review_image" : "share_review", { imageId, pass, reason }),
+  teamMembers: () => invoke<Member[]>("team_members"),
+  teamAddMember: (name: string, role: Role, password: string) => invoke<Member>("team_add_member", { name, role, password }),
+  teamUpdateMember: (id: number, patch: MemberPatch) => invoke<Member>("team_update_member", { id, patch }),
+  teamDeleteMember: (id: number) => invoke<void>("team_delete_member", { id }),
+  teamAssign: (options: { memberIds: number[]; scope: "unassigned" | "todo" | "unreviewed"; perPerson: number | null }) =>
+    invoke<AssignResult[]>("team_assign", { options }),
+  teamUnassign: (memberId: number, onlyUnfinished: boolean) => invoke<number>("team_unassign", { memberId, onlyUnfinished }),
+  teamStats: (from: number, to: number) => invoke<MemberStats[]>("team_stats", { from, to }),
+  teamExportCsv: (from: number, to: number, path: string) => invoke<number>("team_export_csv", { from, to, path }),
+  teamActivity: (limit: number, memberId: number | null, withSaves: boolean) =>
+    invoke<ActivityRow[]>("team_activity", { limit, memberId, withSaves }),
+  /** 成员端：我是谁、项目、协作选项 */
+  whoami: () => invoke<Whoami>("whoami"),
+  myStats: () => invoke<{ member: Member | null; all: MemberStats | null; today: MemberStats | null }>("my_stats"),
+  login: (name: string, password: string) => postJson<Whoami & { token: string }>("api/login", { name, password }),
+  shareInfo: () => postJson<{ project: string; task: Task; hostName: string }>("api/info"),
+
+  // ---------- 巡瞳 AI 识别规则 ----------
+  aiRules: () => invoke<AiRules>("ai_rules"),
+  aiSaveRules: (instructions: string | null, classes: ClassRule[]) => invoke<void>("ai_save_rules", { instructions, classes }),
+  aiChatRules: (messages: ChatMsg[]) => invoke<ChatReply>("ai_chat_rules", { messages }),
+
+  // ---------- 巡瞳 AI 平台：上传模型、拉告警图片 ----------
+  xtUploadModel: (runId: number, name: string) => invoke<XtUploadResult>("xt_upload_model", { runId, name }),
+  xtModels: () => invoke<{ id: unknown; code: string; name: string; status: string; createdAt: number | null }[]>("xt_models"),
+  xtPullAlarms: (options: { days: number; model: string | null; max: number; withBoxes: boolean }) =>
+    invoke<XtPullResult>("xt_pull_alarms", { options }),
 };
+
+export interface XtUploadResult {
+  id: unknown;
+  code: string;
+  status: string;
+  message: string;
+  consoleUrl: string;
+}
+
+export interface XtPullResult {
+  fetched: number;
+  added: number;
+  duplicated: number;
+  failed: number;
+  boxes: number;
+  folder: string;
+}
+
+// ---------- 实时协作类型 ----------
+
+export type Role = "annotator" | "reviewer" | "admin";
+
+export const ROLE_NAMES: Record<Role, string> = { annotator: "标注员", reviewer: "审核员", admin: "管理员" };
+
+export interface Member {
+  id: number;
+  name: string;
+  role: Role;
+  disabled: boolean;
+  createdAt: number;
+  assigned: number;
+  done: number;
+  rejected: number;
+}
+
+export interface MemberPatch {
+  name?: string;
+  role?: Role;
+  password?: string;
+  disabled?: boolean;
+}
+
+export type ShareMode = "lan" | "relay" | "xuntong";
+
+export interface ShareOptions {
+  mode: ShareMode;
+  port: number;
+  relayUrl: string;
+  relaySecret: string;
+  xuntongRelayUrl: string;
+  hostName: string;
+  allowAi: boolean;
+  watermark: boolean;
+  membersEditLabels: boolean;
+  shareId: string;
+}
+
+export interface Presence {
+  memberId: number;
+  name: string;
+  role: Role;
+  imageId: number | null;
+  since: number;
+}
+
+export interface RelayStatus {
+  state: "off" | "connecting" | "online" | "error";
+  url: string;
+  error: string;
+}
+
+export interface ShareStatus {
+  running: boolean;
+  options: ShareOptions;
+  lanUrls: string[];
+  relay: RelayStatus;
+  online: Presence[];
+}
+
+export interface ImageTeamInfo {
+  assignee: string | null;
+  labeledBy: string | null;
+  reviewedBy: string | null;
+  rejectReason: string;
+}
+
+export interface LockResult {
+  holder: string | null;
+  info: ImageTeamInfo;
+}
+
+export interface AssignResult {
+  memberId: number;
+  name: string;
+  count: number;
+}
+
+export interface MemberStats {
+  memberId: number;
+  name: string;
+  role: Role;
+  assigned: number;
+  submitted: number;
+  objects: number;
+  passed: number;
+  rejected: number;
+  reviews: number;
+  activeSecs: number;
+}
+
+export interface ActivityRow {
+  id: number;
+  time: number;
+  member: string;
+  imageId: number | null;
+  action: string;
+  objects: number;
+  detail: string;
+}
+
+export interface Whoami {
+  member: Member;
+  project: { name: string; task: Task };
+  hostName: string;
+  options: { allowAi: boolean; watermark: boolean; membersEditLabels: boolean };
+}
+
+/** 实时事件（事件名 share-event） */
+export interface ShareEvent {
+  kind: "presence" | "ann" | "status" | "lock" | "labels" | "assign" | "kick" | "options" | "closed";
+  imageId?: number;
+  memberId?: number;
+  by?: string;
+  status?: ImageStatus;
+  action?: string;
+  holder?: string | null;
+  online?: Presence[];
+  allowAi?: boolean;
+  watermark?: boolean;
+  membersEditLabels?: boolean;
+}
+
+// ---------- 巡瞳 AI 识别规则 ----------
+
+export interface ClassRule {
+  id?: number;
+  name: string;
+  prompt?: string;
+  description: string;
+}
+
+export interface AiRules {
+  instructions: string;
+  classes: ClassRule[];
+}
+
+export interface ChatMsg {
+  role: "user" | "assistant";
+  content: string;
+  imageId?: number | null;
+}
+
+export interface ChatReply {
+  reply: string;
+  rules: { instructions?: string | null; classes: ClassRule[] } | null;
+  preview: PredResult | null;
+  previewImageId: number | null;
+}
 
 // 图片走自定义协议 xl://，Windows 上的实际地址是 http://xl.localhost
 const BASE = navigator.userAgent.includes("Windows") ? "http://xl.localhost" : "xl://localhost";
@@ -653,7 +861,10 @@ function projectKey(path: string) {
   return (h >>> 0).toString(36);
 }
 
-export const thumbUrl = (projectPath: string, id: number) => `${BASE}/thumb/${id}?p=${projectKey(projectPath)}`;
-export const imageUrl = (projectPath: string, id: number) => `${BASE}/image/${id}?p=${projectKey(projectPath)}`;
+// 协作成员在浏览器里：图片从主机的接口取，带上登录令牌
+export const thumbUrl = (projectPath: string, id: number) =>
+  isRemote ? `api/thumb/${id}?t=${encodeURIComponent(getToken())}` : `${BASE}/thumb/${id}?p=${projectKey(projectPath)}`;
+export const imageUrl = (projectPath: string, id: number) =>
+  isRemote ? `api/image/${id}?t=${encodeURIComponent(getToken())}` : `${BASE}/image/${id}?p=${projectKey(projectPath)}`;
 
 export const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : String(e));

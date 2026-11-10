@@ -26,6 +26,7 @@ mod training;
 mod tunnel;
 mod versions;
 mod video;
+mod xuntong;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -167,6 +168,9 @@ pub fn run() {
             commands::ai_rules,
             commands::ai_save_rules,
             commands::ai_chat_rules,
+            commands::xt_upload_model,
+            commands::xt_models,
+            commands::xt_pull_alarms,
             feedback::submit_feedback,
         ])
         .build(tauri::generate_context!())

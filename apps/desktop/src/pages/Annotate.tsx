@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, ColorPicker, Empty, Input, InputNumber, Modal, Popover, Progress, Segmented, Select, Slider, Space, Switch, Tag, Tooltip } from "antd";
-import { listen } from "@tauri-apps/api/event";
+import { Alert, App, Button, ColorPicker, Empty, Input, InputNumber, Modal, Popover, Progress, Segmented, Select, Slider, Space, Switch, Tag, Tooltip } from "antd";
+import { listen, sendLive } from "../transport";
 import {
   AimOutlined,
   BorderOutlined,
@@ -13,10 +13,12 @@ import {
   HighlightOutlined,
   LeftOutlined,
   LoadingOutlined,
+  MessageOutlined,
   NodeIndexOutlined,
   PlusOutlined,
   RedoOutlined,
   RightOutlined,
+  RollbackOutlined,
   SelectOutlined,
   StepForwardOutlined,
   ThunderboltOutlined,
@@ -29,6 +31,7 @@ import {
   errText,
   ImageAnnotations,
   ImageStatus,
+  ImageTeamInfo,
   ImportProgress,
   imageUrl,
   KeypointData,
@@ -39,10 +42,12 @@ import {
   ProjectInfo,
   RunInfo,
   SamResult,
+  ShareEvent,
   thumbUrl,
 } from "../api";
 import { prefs, useApp } from "../store";
 import AnnotCanvas, { Box, Poly, RectXYWH, Tool } from "../components/AnnotCanvas";
+import AiRulesDrawer from "../components/AiRulesDrawer";
 
 const PALETTE = ["#3d8bfd", "#e5534b", "#2fb67c", "#e7a33e", "#9b7bf2", "#14b8a6", "#f472b6", "#a3e635", "#f97316", "#60a5fa"];
 const FILTERS = [
@@ -176,6 +181,23 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const highlight = useApp((s) => s.highlight);
   const queue = useApp((s) => s.queue);
   const clearQueue = useApp((s) => s.clearQueue);
+  // 实时协作：浏览器里的成员（remote），或者发起人正在共享
+  const team = useApp((s) => s.team);
+  const remote = team.remote;
+  const myId = remote ? (team.me?.id ?? -1) : 0;
+  const isAnnotator = remote && team.me?.role === "annotator";
+  const canReview = !remote || team.me?.role === "reviewer";
+  const collab = remote || team.shareRunning;
+  const canEditLabels = !remote || team.options.membersEditLabels;
+  const aiAllowed = !remote || team.options.allowAi;
+  /** 别人正在改这张图时是他的名字（只读） */
+  const [lockHolder, setLockHolder] = useState<string | null>(null);
+  const [teamInfo, setTeamInfo] = useState<ImageTeamInfo | null>(null);
+  const [idsVersion, setIdsVersion] = useState(0);
+  /** 正在填打回原因（null 表示没在打回） */
+  const [rejecting, setRejecting] = useState<string | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const readOnlyRef = useRef<string | null>(null);
 
   const task = project.task;
   const isSeg = task === "segment";
@@ -290,6 +312,10 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
 
   /** 修改标注：记历史、自动保存 */
   const change = (s: Partial<Snap>) => {
+    if (readOnlyRef.current) {
+      message.warning(`「${readOnlyRef.current}」正在标这张图，现在只能看`);
+      return;
+    }
     const h = history.current;
     h.past.push(snap());
     if (h.past.length > HISTORY_MAX) h.past.shift();
@@ -304,6 +330,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const commitTag = (t: ClsTag | null) => change({ tag: t });
 
   const undo = () => {
+    if (readOnlyRef.current) return;
     const h = history.current;
     const prev = h.past.pop();
     if (!prev) return;
@@ -316,6 +343,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   };
 
   const redo = () => {
+    if (readOnlyRef.current) return;
     const h = history.current;
     const next = h.future.pop();
     if (!next) return;
@@ -371,7 +399,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const saveLabelEdit = async () => {
     if (!editing) return;
     try {
-      await api.updateLabel(editing.id, editing.name, editing.color, editing.prompt ?? "");
+      await api.updateLabel(editing.id, editing.name, editing.color, editing.prompt ?? "", editing.description ?? "");
       setEditing(null);
       await loadLabels();
     } catch (e) {
@@ -445,7 +473,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     return () => {
       alive = false;
     };
-  }, [filter, flush, takeFocusImage, message, queue]);
+  }, [filter, flush, takeFocusImage, message, queue, idsVersion]);
 
   const clearSam = () => {
     setSamPoints([]);
@@ -487,15 +515,96 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
       return;
     }
     let alive = true;
+    readOnlyRef.current = null;
     (async () => {
       await flush();
       const m = await api.loadAnnotations(imageId);
       if (alive) applyLoaded(m);
+      // 加锁（协作时别人正在改就只读），顺便取分配、打回信息
+      const r = await api.lockImage(imageId).catch(() => null);
+      if (alive && r) {
+        readOnlyRef.current = r.holder;
+        setLockHolder(r.holder);
+        setTeamInfo(r.info);
+      }
     })().catch((e) => message.error(errText(e)));
     return () => {
       alive = false;
     };
   }, [imageId, flush, message]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 协作：每 30 秒续一次锁、报告在看哪张
+  useEffect(() => {
+    if (!collab || imageId === undefined) return;
+    if (remote) sendLive({ type: "view", imageId });
+    const timer = window.setInterval(() => {
+      if (remote) sendLive({ type: "view", imageId });
+      else
+        api
+          .lockImage(imageId)
+          .then((r) => {
+            if (metaRef.current?.id !== imageId) return;
+            readOnlyRef.current = r.holder;
+            setLockHolder(r.holder);
+          })
+          .catch(() => {});
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, [collab, remote, imageId]);
+
+  // 离开标注页时放开锁
+  useEffect(
+    () => () => {
+      api.unlockImage().catch(() => {});
+    },
+    [],
+  );
+
+  // 协作的实时事件：别人改了这张图就刷新；锁放开了就接手；类别、分配变了就重新读
+  useEffect(() => {
+    if (!collab) return;
+    const relock = (cur: number, notify: boolean) =>
+      api
+        .lockImage(cur)
+        .then((r) => {
+          if (metaRef.current?.id !== cur) return;
+          const was = readOnlyRef.current;
+          readOnlyRef.current = r.holder;
+          setLockHolder(r.holder);
+          setTeamInfo(r.info);
+          if (notify && was && !r.holder) message.info("对方已经离开这张图，现在可以编辑了");
+        })
+        .catch(() => {});
+    const un = listen<ShareEvent>("share-event", (e) => {
+      const ev = e.payload;
+      if (ev.kind === "labels") {
+        loadLabels().catch(() => {});
+        return;
+      }
+      if (ev.kind === "assign") {
+        if (remote) setIdsVersion((n) => n + 1);
+        return;
+      }
+      const cur = metaRef.current?.id;
+      if (cur == null || ev.imageId !== cur) return;
+      if ((ev.kind === "ann" || ev.kind === "status") && ev.memberId !== myId) {
+        if (readOnlyRef.current || !dirty.current) {
+          api
+            .loadAnnotations(cur)
+            .then((m) => {
+              if (metaRef.current?.id === cur) applyLoaded(m);
+            })
+            .catch(() => {});
+        }
+        relock(cur, false);
+        if (ev.kind === "status" && ev.action === "reject") message.warning(`「${ev.by}」打回了这张图`);
+      }
+      if (ev.kind === "lock" && ev.holder == null && readOnlyRef.current) relock(cur, true);
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [collab, remote, myId, loadLabels, message]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = useCallback(
     (i: number) => {
@@ -510,10 +619,17 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const setStatus = async (status: ImageStatus, next: boolean) => {
     const m = metaRef.current;
     if (!m) return;
+    if (readOnlyRef.current) {
+      message.warning(`「${readOnlyRef.current}」正在标这张图，现在只能看`);
+      return;
+    }
+    // 标注员的「通过」是提交，等审核
+    const real: ImageStatus = isAnnotator && status === "reviewed" ? "labeled" : status;
     try {
       await flush();
       await api.setImageStatus(m.id, status);
-      metaRef.current = { ...m, status };
+      if (real === "labeled" || real === "reviewed") setTeamInfo((ti) => (ti ? { ...ti, rejectReason: "" } : ti));
+      metaRef.current = { ...m, status: real };
       setMeta(metaRef.current);
       if (next) go(idx + 1);
       else refreshStats();
@@ -670,7 +786,10 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const confDefault = (src: AiSrc) => (src === "text" ? "0.2" : "0.4");
   const [models, setModels] = useState<RunInfo[]>([]);
   const [modelId, setModelId] = useState<number | null>(null);
-  const [aiSrc, setAiSrc] = useState<AiSrc>(isCls ? "model" : ((prefs.get("aiSrc", "model") as AiSrc) || "model"));
+  const [aiSrc, setAiSrc] = useState<AiSrc>(() => {
+    const saved = (prefs.get("aiSrc", "model") as AiSrc) || "model";
+    return isCls || (team.remote && saved === "ai") ? "model" : saved;
+  });
   const [conf, setConf] = useState(() => Number(prefs.get(confKey(aiSrc), confDefault(aiSrc))));
   const [predicting, setPredicting] = useState(false);
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
@@ -916,7 +1035,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const [videoBusy, setVideoBusy] = useState<"interp" | "track" | null>(null);
   const [trackN, setTrackN] = useState(() => Number(prefs.get("trackCount", "30")) || 30);
   const [trackProg, setTrackProg] = useState<ImportProgress | null>(null);
-  const canVideo = !isCls && !isSeg;
+  const canVideo = !isCls && !isSeg && !remote;
 
   const interpolate = async () => {
     const m = metaRef.current;
@@ -1091,16 +1210,37 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     return () => window.removeEventListener("keydown", h);
   }, []);
 
+  /** 审核打回：图退回未标注，原因显示给标注员 */
+  const reject = async () => {
+    const m = metaRef.current;
+    if (!m || rejecting === null) return;
+    try {
+      await flush();
+      await api.reviewImage(m.id, false, rejecting);
+      metaRef.current = { ...m, status: "todo" };
+      setMeta(metaRef.current);
+      setRejecting(null);
+      message.success("已打回，图回到标注员的任务里");
+      go(idx + 1);
+    } catch (e) {
+      message.error(errText(e));
+    }
+  };
+
   // ---------- 渲染 ----------
 
   if (ids && ids.length === 0 && filter === "all") {
     return (
       <div className="empty-page">
-        <Empty description="项目里还没有图片">
-          <Button type="primary" onClick={() => setPage("data")}>
-            去导入图片
-          </Button>
-        </Empty>
+        {remote ? (
+          <Empty description={isAnnotator ? "还没有分给你的图。发起人分配后这里会自动出现" : "项目里还没有图片"} />
+        ) : (
+          <Empty description="项目里还没有图片">
+            <Button type="primary" onClick={() => setPage("data")}>
+              去导入图片
+            </Button>
+          </Empty>
+        )}
       </div>
     );
   }
@@ -1125,7 +1265,12 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     : `${isSeg ? "R 画轮廓（逐点点击，双击或 Enter 闭合，退格撤点）" : isPose ? "R 画目标框后逐个点关键点" : "R 画框"} · S 智能选取 · V 选择 · 1–9 切换类别 · Del 删除 · A/D 翻图 · Enter 审核通过 · P 预标注 · 滚轮缩放 · 空格或右键拖动 · H 隐藏类别名`;
   const srcOptions = [
     { label: "我的模型", value: "model" },
-    ...(isCls ? [] : [{ label: "文本提示", value: "text" }, { label: "巡瞳 AI", value: "ai" }]),
+    // 协作成员不能直接用巡瞳 AI（用的是发起人的额度），可以用「识别规则」和 AI 聊
+    ...(isCls ? [] : [{ label: "文本提示", value: "text" }, ...(remote ? [] : [{ label: "巡瞳 AI", value: "ai" }])]),
+  ];
+  const filterOpts = [
+    ...FILTERS.map((f) => (f.value === "all" && isAnnotator ? { ...f, label: "我的全部" } : f)),
+    ...(collab ? [{ label: "被打回", value: "rejected" }] : []),
   ];
   const canPredict = aiSrc === "model" ? modelId != null : aiSrc === "ai" ? !!aiModel && !aiError : labels.length > 0;
 
@@ -1145,7 +1290,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
         <Segmented
           size="small"
           value={filter}
-          options={queue ? [...FILTERS, { label: `${queue.name} ${queue.ids.length}`, value: "queue" }] : FILTERS}
+          options={queue ? [...filterOpts, { label: `${queue.name} ${queue.ids.length}`, value: "queue" }] : filterOpts}
           onChange={(v) => setFilter(v as string)}
         />
         {queue && (
@@ -1163,6 +1308,11 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
           </Tooltip>
         )}
         <div className="spacer" />
+        {!remote && teamInfo?.assignee && (
+          <span className="dim" style={{ fontSize: 12 }}>
+            分配给 {teamInfo.assignee}
+          </span>
+        )}
         <span className="dim" style={{ fontSize: 12 }}>
           {Math.round(scale * 100)}%
         </span>
@@ -1258,6 +1408,28 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
       </div>
 
       <div className="annot-stage">
+        {(lockHolder || teamInfo?.rejectReason) && (
+          <div className="annot-banner">
+            {lockHolder && <Alert type="info" showIcon message={`「${lockHolder}」正在标这张图，你现在只能看，他的改动会实时显示`} />}
+            {teamInfo?.rejectReason && (
+              <Alert
+                type="warning"
+                showIcon
+                message={`被打回：${teamInfo.rejectReason}`}
+                description={teamInfo.reviewedBy ? `审核：${teamInfo.reviewedBy}。改好后点「${isAnnotator ? "提交并下一张" : "通过并下一张"}」` : undefined}
+              />
+            )}
+          </div>
+        )}
+        {remote && team.options.watermark && team.me && (
+          <div className="annot-watermark">
+            {Array.from({ length: 24 }, (_, i) => (
+              <span key={i} style={{ left: `${(i % 4) * 26 + 2}%`, top: `${Math.floor(i / 4) * 17 + 4}%` }}>
+                {team.me!.name} · {new Date().toLocaleDateString()}
+              </span>
+            ))}
+          </div>
+        )}
         {meta && imageId !== undefined ? (
           <AnnotCanvas
             src={imageUrl(project.path, imageId)}
@@ -1322,8 +1494,18 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
       </div>
 
       <aside className="annot-side">
+        {aiAllowed && (
         <section>
-          <h3>AI 辅助</h3>
+          <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
+            <h3 style={{ margin: 0 }}>AI 辅助</h3>
+            {!isCls && (
+              <Tooltip title="告诉巡瞳 AI 每个类别具体指什么；可以和 AI 聊，它帮你整理规则、在这张图上试识别">
+                <Button size="small" type="link" icon={<MessageOutlined />} style={{ padding: 0 }} onClick={() => setRulesOpen(true)}>
+                  识别规则
+                </Button>
+              </Tooltip>
+            )}
+          </div>
           {srcOptions.length > 1 && (
             <Segmented size="small" block value={aiSrc} options={srcOptions} onChange={(v) => pickSrc(v as AiSrc)} style={{ marginBottom: 8 }} />
           )}
@@ -1415,9 +1597,11 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
                 <Button size="small" type="primary" icon={<ThunderboltOutlined />} loading={predicting} disabled={!canPredict} onClick={predictCurrent}>
                   {isCls ? "预测本图 (P)" : "标注本图 (P)"}
                 </Button>
-                <Button size="small" onClick={predictAll} disabled={!!batch || !canPredict}>
-                  批量预标注
-                </Button>
+                {!remote && (
+                  <Button size="small" onClick={predictAll} disabled={!!batch || !canPredict}>
+                    批量预标注
+                  </Button>
+                )}
               </div>
             </>
           )}
@@ -1435,6 +1619,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             </div>
           )}
         </section>
+        )}
 
         <section>
           <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
@@ -1468,22 +1653,27 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
                 </span>
                 {i < 9 && <kbd>{i + 1}</kbd>}
                 <span className="ops">
-                  <EditOutlined
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditing({ ...l, prompt: l.prompt ?? "" });
-                    }}
-                  />
-                  <DeleteOutlined
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeLabel(l);
-                    }}
-                  />
+                  {canEditLabels && (
+                    <EditOutlined
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditing({ ...l, prompt: l.prompt ?? "" });
+                      }}
+                    />
+                  )}
+                  {!remote && (
+                    <DeleteOutlined
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeLabel(l);
+                      }}
+                    />
+                  )}
                 </span>
               </div>
             );
           })}
+          {canEditLabels && (
           <Space.Compact style={{ width: "100%", marginTop: 8 }}>
             <Input
               size="small"
@@ -1495,6 +1685,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             />
             <Button size="small" icon={<PlusOutlined />} onClick={addLabel} />
           </Space.Compact>
+          )}
         </section>
 
         {isPose && template && (
@@ -1503,9 +1694,11 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
               <h3 style={{ margin: 0 }}>
                 关键点模板 <span className="dim">{nk} 点</span>
               </h3>
-              <Button size="small" type="link" onClick={openTplEdit} style={{ padding: 0 }}>
-                编辑
-              </Button>
+              {!remote && (
+                <Button size="small" type="link" onClick={openTplEdit} style={{ padding: 0 }}>
+                  编辑
+                </Button>
+              )}
             </div>
             <div className="dim" style={{ fontSize: 12 }}>{template.name}</div>
           </section>
@@ -1621,10 +1814,15 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
 
         <section>
           <h3>审核</h3>
-          <div className="row" style={{ gap: 6 }}>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
             <Button size="small" icon={<CheckOutlined />} onClick={() => setStatus("reviewed", true)}>
-              通过并下一张
+              {isAnnotator ? "提交并下一张" : "通过并下一张"}
             </Button>
+            {collab && canReview && meta && (meta.status === "labeled" || meta.status === "reviewed") && (
+              <Button size="small" danger icon={<RollbackOutlined />} onClick={() => setRejecting("")}>
+                打回
+              </Button>
+            )}
             <Button size="small" icon={<StepForwardOutlined />} onClick={() => setStatus("skipped", true)}>
               跳过
             </Button>
@@ -1634,8 +1832,21 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
               </Button>
             )}
           </div>
+          {teamInfo && (teamInfo.assignee || teamInfo.labeledBy || teamInfo.reviewedBy) && (
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              {[
+                teamInfo.assignee && `分配给 ${teamInfo.assignee}`,
+                teamInfo.labeledBy && `${teamInfo.labeledBy} 标的`,
+                teamInfo.reviewedBy && `${teamInfo.reviewedBy} 审过`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </div>
+          )}
           <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-            「跳过」的图不参与训练，可用于模糊、无关的图片。
+            {isAnnotator
+              ? "提交后等审核员审核；被打回的图会出现在「被打回」里，原因显示在图上方。"
+              : "「跳过」的图不参与训练，可用于模糊、无关的图片。"}
           </div>
         </section>
       </aside>
@@ -1647,6 +1858,52 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
           </div>
         ))}
       </div>
+
+      <AiRulesDrawer
+        open={rulesOpen}
+        onClose={() => setRulesOpen(false)}
+        imageId={imageId ?? null}
+        canEdit={canEditLabels}
+        onApplyPreview={(p) => applyPreds(p, "ai")}
+        onSaved={() => loadLabels().catch(() => {})}
+      />
+
+      <Modal
+        title="打回这张图"
+        open={rejecting !== null}
+        onCancel={() => setRejecting(null)}
+        onOk={reject}
+        okText="打回"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+        width={440}
+      >
+        <div className="dim" style={{ fontSize: 12, margin: "8px 0" }}>
+          写清楚哪里要改，标注员会在图上方看到。
+        </div>
+        <Space wrap style={{ marginBottom: 8 }}>
+          {["漏标", "框不准", "类别标错", "多标了", "关键点不对"].map((r) => (
+            <Tag.CheckableTag
+              key={r}
+              checked={(rejecting ?? "").split("；").includes(r)}
+              onChange={(on) =>
+                setRejecting((s) => {
+                  const parts = (s ?? "").split("；").filter((x) => x && x !== r);
+                  return (on ? [...parts, r] : parts).join("；");
+                })
+              }
+            >
+              {r}
+            </Tag.CheckableTag>
+          ))}
+        </Space>
+        <Input.TextArea
+          autoSize={{ minRows: 2, maxRows: 5 }}
+          value={rejecting ?? ""}
+          placeholder="比如：左下角还有两个安全帽没标"
+          onChange={(e) => setRejecting(e.target.value)}
+        />
+      </Modal>
 
       <Modal
         title="编辑类别"
@@ -1685,6 +1942,20 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
                   placeholder="例如 helmet"
                   onChange={(e) => setEditing({ ...editing, prompt: e.target.value })}
                   onPressEnter={saveLabelEdit}
+                />
+              </div>
+            )}
+            {!isCls && (
+              <div style={{ marginTop: 12 }}>
+                <div className="dim" style={{ fontSize: 12, marginBottom: 4 }}>
+                  识别说明（巡瞳 AI「按项目类别识别」用：这个类别具体指什么、什么情况算 / 不算，可不填）
+                </div>
+                <Input.TextArea
+                  autoSize={{ minRows: 2, maxRows: 5 }}
+                  maxLength={500}
+                  value={editing.description ?? ""}
+                  placeholder="比如：头上没有安全帽的人；戴了帽子但没系带也算"
+                  onChange={(e) => setEditing({ ...editing, description: e.target.value })}
                 />
               </div>
             )}

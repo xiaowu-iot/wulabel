@@ -11,8 +11,10 @@ import {
   MessageOutlined,
   PictureOutlined,
   SettingOutlined,
+  TeamOutlined,
 } from "@ant-design/icons";
-import { api, taskName } from "./api";
+import { api, ShareStatus, taskName } from "./api";
+import { listen } from "./transport";
 import { PageKey, useApp } from "./store";
 import Home from "./pages/Home";
 import Data from "./pages/Data";
@@ -22,6 +24,7 @@ import Health from "./pages/Health";
 import Eval from "./pages/Eval";
 import Settings from "./pages/Settings";
 import Deploy from "./pages/Deploy";
+import Team from "./pages/Team";
 import FeedbackModal from "./components/FeedbackModal";
 import html2canvas from "html2canvas";
 
@@ -33,6 +36,7 @@ const NAV: { key: PageKey; label: string; icon: ReactNode; needProject: boolean 
   { key: "train", label: "训练", icon: <BarChartOutlined />, needProject: true },
   { key: "eval", label: "评估", icon: <AimOutlined />, needProject: true },
   { key: "deploy", label: "部署", icon: <CodeSandboxOutlined />, needProject: true },
+  { key: "team", label: "协作", icon: <TeamOutlined />, needProject: true },
 ];
 
 const TITLES: Record<PageKey, string> = {
@@ -43,11 +47,12 @@ const TITLES: Record<PageKey, string> = {
   train: "训练",
   eval: "评估",
   deploy: "部署",
+  team: "实时协作",
   settings: "设置",
 };
 
 export default function App() {
-  const { project, page, setPage, setProject } = useApp();
+  const { project, page, setPage, setProject, setTeam, team } = useApp();
 
   const [fbOpen, setFbOpen] = useState(false);
   const [fbShot, setFbShot] = useState<string | null>(null);
@@ -76,6 +81,18 @@ export default function App() {
   useEffect(() => {
     api.currentProject().then((p) => p && setProject(p)).catch(() => {});
   }, [setProject]);
+
+  // 协作开没开（标注页据此加锁、显示审核打回）
+  useEffect(() => {
+    api
+      .shareStatus()
+      .then((s) => setTeam({ shareRunning: s.running }))
+      .catch(() => {});
+    const un = listen<ShareStatus | { running: false }>("share-status", (e) => setTeam({ shareRunning: e.payload.running }));
+    return () => {
+      un.then((f) => f());
+    };
+  }, [setTeam, project?.path]);
 
   const close = async () => {
     await api.closeProject();
@@ -120,6 +137,7 @@ export default function App() {
           >
             {n.icon}
             {n.label}
+            {n.key === "team" && team.shareRunning && <span className="presence-dot" style={{ position: "absolute", marginLeft: 22 }} />}
           </button>
         ))}
         <div className="gap" />
@@ -137,6 +155,7 @@ export default function App() {
         {page === "train" && project && <Train project={project} />}
         {page === "eval" && project && <Eval project={project} />}
         {page === "deploy" && project && <Deploy project={project} />}
+        {page === "team" && project && <Team project={project} />}
         {page === "settings" && <Settings />}
       </main>
 

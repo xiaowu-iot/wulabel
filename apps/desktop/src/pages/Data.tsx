@@ -5,6 +5,7 @@ import {
   CheckSquareOutlined,
   EyeInvisibleOutlined,
   ClearOutlined,
+  CloudDownloadOutlined,
   HistoryOutlined,
   DatabaseOutlined,
   DownOutlined,
@@ -39,6 +40,7 @@ import ExportModal from "../components/ExportModal";
 import VersionsModal from "../components/VersionsModal";
 import { PickModal, QualityModal } from "../components/DataTools";
 import CollabModal from "../components/CollabModal";
+import { XuntongPullModal } from "../components/Xuntong";
 
 const PAGE_SIZE = 120;
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
@@ -84,6 +86,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const [videoMax, setVideoMax] = useState(Number(prefs.get("videoMax", "0")));
   const [videoProgress, setVideoProgress] = useState<VideoProgress | null>(null);
   const [streamOpen, setStreamOpen] = useState(false);
+  const [xtOpen, setXtOpen] = useState(false);
   const [streamUrl, setStreamUrl] = useState(prefs.get("streamUrl", ""));
   const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
   const [probing, setProbing] = useState(false);
@@ -463,11 +466,13 @@ export default function Data({ project }: { project: ProjectInfo }) {
                         ? "导入带标注的数据集（YOLO-pose / COCO 关键点）"
                         : "导入带标注的数据集（YOLO / COCO / VOC）",
                 },
+                ...(project.task === "classify" ? [] : [{ key: "xuntong", icon: <CloudDownloadOutlined />, label: "从巡瞳 AI 拉取告警图片" }]),
               ],
               onClick: ({ key }) => {
                 if (key === "files") pickFiles();
                 else if (key === "video") pickVideos();
                 else if (key === "stream") setStreamOpen(true);
+                else if (key === "xuntong") setXtOpen(true);
                 else pickDataset();
               },
             }}
@@ -624,6 +629,14 @@ export default function Data({ project }: { project: ProjectInfo }) {
       />
 
       <ExportModal project={project} open={showExport} onClose={() => setShowExport(false)} />
+      <XuntongPullModal
+        open={xtOpen}
+        onClose={() => setXtOpen(false)}
+        onDone={() => {
+          load();
+          refreshStats();
+        }}
+      />
       <QualityModal project={project} open={showQuality} onClose={() => setShowQuality(false)} onChanged={load} />
       <PickModal project={project} open={showPick} onClose={() => setShowPick(false)} />
       <CollabModal

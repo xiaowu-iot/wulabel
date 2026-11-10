@@ -35,7 +35,7 @@ pub struct AiModel {
     pub description: String,
 }
 
-fn config(rt: &Runtime) -> AppResult<(String, String)> {
+pub(crate) fn config(rt: &Runtime) -> AppResult<(String, String)> {
     let s = rt.settings();
     let key = s.ai_key.unwrap_or_default().trim().to_string();
     if key.is_empty() {
@@ -45,7 +45,7 @@ fn config(rt: &Runtime) -> AppResult<(String, String)> {
     Ok((url.trim().trim_end_matches('/').to_string(), key))
 }
 
-fn err_of(e: ureq::Error) -> AppError {
+pub(crate) fn err_of(e: ureq::Error) -> AppError {
     match e {
         ureq::Error::Status(code, resp) => {
             let body = resp.into_string().unwrap_or_default();
@@ -65,12 +65,12 @@ fn err_of(e: ureq::Error) -> AppError {
     }
 }
 
-fn parse(resp: ureq::Response) -> AppResult<serde_json::Value> {
+pub(crate) fn parse(resp: ureq::Response) -> AppResult<serde_json::Value> {
     let text = resp.into_string().map_err(|e| msg(format!("读取巡瞳 AI 返回失败：{e}")))?;
     serde_json::from_str(&text).map_err(|_| msg("巡瞳 AI 返回的不是 JSON，请检查设置里的地址"))
 }
 
-fn get(url: &str, key: &str) -> AppResult<serde_json::Value> {
+pub(crate) fn get(url: &str, key: &str) -> AppResult<serde_json::Value> {
     let r = ureq::get(url).set("Authorization", &format!("Bearer {key}")).timeout(Duration::from_secs(30)).call();
     parse(r.map_err(err_of)?)
 }
@@ -200,7 +200,7 @@ fn recognize(base: &str, key: &str, path: &Path, model: &str, conf: f64, rules: 
 }
 
 /// detections[{name, confidence, box}] 换成 (类别名, 分数, 像素框)
-fn parse_detections(v: &serde_json::Value, w: f64, h: f64) -> Vec<(String, f64, [f64; 4])> {
+pub(crate) fn parse_detections(v: &serde_json::Value, w: f64, h: f64) -> Vec<(String, f64, [f64; 4])> {
     v.as_array()
         .into_iter()
         .flatten()
@@ -213,7 +213,7 @@ fn parse_detections(v: &serde_json::Value, w: f64, h: f64) -> Vec<(String, f64, 
 }
 
 /// 识别结果换成预测结果：类别名对应到项目类别（没有的自动新建）；分割项目用 SAM 把框变成轮廓
-fn to_pred(
+pub(crate) fn to_pred(
     p: &Project,
     rt: &Runtime,
     pr: &Predictor,
