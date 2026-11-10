@@ -1227,3 +1227,10 @@ pub async fn xt_pull_alarms(app: AppHandle, state: State<'_, AppState>, options:
     .await
     .map_err(|e| msg(format!("拉取异常：{e}")))?
 }
+
+#[tauri::command]
+pub async fn xt_delete_model(app: AppHandle, id: String) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(move || crate::xuntong::delete_model(&app.state::<Runtime>(), &id))
+        .await
+        .map_err(|e| msg(format!("删除异常：{e}")))?
+}

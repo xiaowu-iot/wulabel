@@ -34,7 +34,10 @@ fn find_f64(v: &serde_json::Value, paths: &[&[&str]]) -> Option<f64> {
 pub struct UploadResult {
     pub id: Option<serde_json::Value>,
     pub code: String,
+    /// pending 平台校验中 / ready 可以启用 / failed
     pub status: String,
+    /// 平台上已启用（ready 之后要在控制台点启用）
+    pub enabled: bool,
     pub message: String,
     /// 平台控制台地址，去那里配置、启用模型
     pub console_url: String,
@@ -48,8 +51,8 @@ pub fn upload_model(p: &Project, rt: &Runtime, run_id: i64, name: &str, log: &(d
         return Err(msg("导入的外部模型不能上传，请上传在 Wulabel 里训练的模型"));
     }
     let task = p.meta.task.as_str();
-    if task != "detect" && task != "classify" {
-        return Err(msg("巡瞳平台目前只支持检测和分类模型"));
+    if task != "detect" {
+        return Err(msg("巡瞳平台目前只支持目标检测模型"));
     }
     let dir = PathBuf::from(&run.dir);
     let onnx = dir.join("model.onnx");
@@ -78,7 +81,7 @@ pub fn upload_model(p: &Project, rt: &Runtime, run_id: i64, name: &str, log: &(d
         "inputSize": run.config["imgSize"].as_u64(),
         "description": format!("Wulabel 训练（{}），{} {}", run.name, if task == "classify" { "准确率" } else { "mAP50" }, run.best_map50.map(|v| format!("{v:.3}")).unwrap_or_else(|| "—".into())),
         "source": "wulabel",
-        "recommendedConf": conf,
+        "recommendedConf": conf.map(|c| c.clamp(0.05, 0.95)),
         "metrics": { "map50": run.best_map50, "precision": precision, "recall": recall },
     });
     let file = fs::read(&onnx).map_err(|e| msg(format!("读取模型文件失败：{e}")))?;
@@ -103,6 +106,7 @@ pub fn upload_model(p: &Project, rt: &Runtime, run_id: i64, name: &str, log: &(d
         id: v.get("id").cloned(),
         code: v["code"].as_str().unwrap_or("").to_string(),
         status: v["status"].as_str().unwrap_or("pending").to_string(),
+        enabled: v["enabled"].as_bool().unwrap_or(false),
         message: v["message"].as_str().unwrap_or("").to_string(),
         console_url: format!("{base}/console"),
     })
@@ -115,6 +119,8 @@ pub struct PlatformModel {
     pub code: String,
     pub name: String,
     pub status: String,
+    pub enabled: bool,
+    pub message: String,
     pub created_at: Option<i64>,
 }
 
@@ -129,9 +135,24 @@ pub fn list_models(rt: &Runtime) -> AppResult<Vec<PlatformModel>> {
             code: m["code"].as_str().unwrap_or("").to_string(),
             name: m["name"].as_str().unwrap_or("").to_string(),
             status: m["status"].as_str().unwrap_or("").to_string(),
+            enabled: m["enabled"].as_bool().unwrap_or(false),
+            message: m["message"].as_str().unwrap_or("").to_string(),
             created_at: m["createdAt"].as_i64(),
         })
         .collect())
+}
+
+/// 删除平台上的一个自定义模型（托管名额满了时先删旧版本）
+pub fn delete_model(rt: &Runtime, id: &str) -> AppResult<()> {
+    let (base, key) = ai::config(rt)?;
+    let id: String = id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
+    let resp = ureq::delete(&format!("{base}/v1/custom-models/{id}"))
+        .set("Authorization", &format!("Bearer {key}"))
+        .timeout(Duration::from_secs(30))
+        .call()
+        .map_err(ai::err_of)?;
+    ai::parse(resp)?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -154,6 +175,8 @@ pub struct PullResult {
     pub added: usize,
     pub duplicated: usize,
     pub failed: usize,
+    /// 平台上没有原图的告警（平台加原图功能之前的，或超过 7 天图片已清理）
+    pub no_image: usize,
     pub boxes: usize,
     pub folder: String,
 }
@@ -193,7 +216,7 @@ pub fn pull_alarms(
     }
     items.truncate(max);
     if items.is_empty() {
-        return Err(msg("这段时间平台上没有告警记录"));
+        return Err(msg("这段时间平台上没有告警记录（只有配置了推送通道的账号才会产生告警记录）"));
     }
     // 2. 下载图片到项目的 images/xuntong_日期/
     let folder = format!("xuntong_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
@@ -202,10 +225,11 @@ pub fn pull_alarms(
     let total = items.len();
     let mut files: Vec<(PathBuf, usize)> = Vec::new();
     let mut failed = 0;
+    let mut no_image = 0;
     for (i, it) in items.iter().enumerate() {
         progress(i, total * 2);
-        let Some(url) = it["imageUrl"].as_str() else {
-            failed += 1;
+        let Some(url) = it["imageUrl"].as_str().filter(|s| !s.is_empty()) else {
+            no_image += 1;
             continue;
         };
         let url = if url.starts_with("http") { url.to_string() } else { format!("{base}/{}", url.trim_start_matches('/')) };
@@ -237,9 +261,13 @@ pub fn pull_alarms(
     if opts.with_boxes {
         for (path, i) in &files {
             let Some(&image_id) = map.get(path) else { continue };
+            // 框是按平台的原图尺寸归一化的；下载的图就是原图，读不出尺寸时用平台给的宽高
             let (w, h) = match image::image_dimensions(path) {
                 Ok((w, h)) => (w as f64, h as f64),
-                Err(_) => continue,
+                Err(_) => match (items[*i]["width"].as_f64(), items[*i]["height"].as_f64()) {
+                    (Some(w), Some(h)) => (w, h),
+                    _ => continue,
+                },
             };
             let found = ai::parse_detections(&items[*i]["detections"], w, h);
             if found.is_empty() {
@@ -257,6 +285,7 @@ pub fn pull_alarms(
         added: res.added,
         duplicated: res.duplicated,
         failed: failed + res.failed.len(),
+        no_image,
         boxes,
         folder: format!("{IMAGES_DIR}/{folder}"),
     })

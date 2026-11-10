@@ -171,6 +171,7 @@ pub fn run() {
             commands::xt_upload_model,
             commands::xt_models,
             commands::xt_pull_alarms,
+            commands::xt_delete_model,
             feedback::submit_feedback,
         ])
         .build(tauri::generate_context!())

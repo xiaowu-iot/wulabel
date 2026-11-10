@@ -1,20 +1,50 @@
 // 巡瞳 AI 平台对接：把训练好的模型上传到平台；把平台上的告警图片拉回来标注
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, App, Button, Checkbox, Input, InputNumber, Modal, Progress, Select, Space, Tag } from "antd";
 import { CloudUploadOutlined } from "@ant-design/icons";
-import { AiModel, api, errText, ImportProgress, ProjectInfo, RunInfo, XtPullResult, XtUploadResult } from "../api";
+import { AiModel, api, errText, ImportProgress, ProjectInfo, RunInfo, XtModel, XtPullResult, XtUploadResult } from "../api";
 import { listen } from "../transport";
 import { useApp } from "../store";
 
+const STATUS: Record<string, { text: string; color: string }> = {
+  pending: { text: "校验中", color: "processing" },
+  ready: { text: "校验通过", color: "success" },
+  failed: { text: "校验失败", color: "error" },
+};
+
 /** 部署页「导出模型」里：上传到巡瞳 AI 平台 */
 export function XuntongUpload({ run, project }: { run: RunInfo; project: ProjectInfo }) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const setPage = useApp((s) => s.setPage);
   const [name, setName] = useState(`${project.name} ${run.name}`);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState("");
   const [result, setResult] = useState<XtUploadResult | null>(null);
-  const supported = project.task === "detect" || project.task === "classify";
+  const [list, setList] = useState<XtModel[] | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
+  const supported = project.task === "detect";
+
+  const loadList = useCallback(() => {
+    api
+      .xtModels()
+      .then((l) => {
+        setList(l);
+        setListErr(null);
+      })
+      .catch((e) => setListErr(errText(e)));
+  }, []);
+
+  useEffect(() => {
+    if (supported) loadList();
+  }, [supported, loadList]);
+
+  // 刚上传的模型平台要校验几秒到一分钟，期间每 5 秒刷新一次
+  const waiting = result?.status === "pending" || !!list?.some((m) => m.status === "pending");
+  useEffect(() => {
+    if (!waiting) return;
+    const t = window.setInterval(loadList, 5000);
+    return () => window.clearInterval(t);
+  }, [waiting, loadList]);
 
   const upload = async () => {
     setBusy(true);
@@ -23,6 +53,7 @@ export function XuntongUpload({ run, project }: { run: RunInfo; project: Project
     const un = await listen<string>("xuntong-log", (e) => setLog(e.payload));
     try {
       setResult(await api.xtUploadModel(run.id, name));
+      loadList();
     } catch (e) {
       message.error(errText(e));
     } finally {
@@ -31,6 +62,26 @@ export function XuntongUpload({ run, project }: { run: RunInfo; project: Project
     }
   };
 
+  const remove = (m: XtModel) =>
+    modal.confirm({
+      title: `删除平台上的模型「${m.name}」？`,
+      content: "平台上用这个模型的摄像头会停止识别。托管名额满了时，可以先删旧版本再上传新的。",
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          await api.xtDeleteModel(String(m.id));
+          loadList();
+        } catch (e) {
+          message.error(errText(e));
+        }
+      },
+    });
+
+  const latest = result ? list?.find((m) => String(m.id) === String(result.id)) : undefined;
+  const st = latest?.status ?? result?.status ?? "";
+
   return (
     <div className="card" style={{ marginTop: 16 }}>
       <div style={{ marginBottom: 8 }}>
@@ -38,7 +89,7 @@ export function XuntongUpload({ run, project }: { run: RunInfo; project: Project
         <span className="muted">· 用你在「设置 → 巡瞳 AI」填的账号，上传后在平台上接摄像头、配告警，不用自己部署服务</span>
       </div>
       {!supported ? (
-        <div className="dim">巡瞳平台目前只支持检测和分类模型。</div>
+        <div className="dim">巡瞳平台目前只支持目标检测模型。</div>
       ) : (
         <>
           <Space.Compact style={{ width: "100%", maxWidth: 560 }}>
@@ -55,17 +106,19 @@ export function XuntongUpload({ run, project }: { run: RunInfo; project: Project
           {result && (
             <Alert
               style={{ marginTop: 10 }}
-              type={result.status === "failed" ? "error" : "success"}
+              type={st === "failed" ? "error" : st === "ready" ? "success" : "info"}
               showIcon
               message={
                 <span>
-                  {result.status === "failed" ? "平台没有接受这个模型" : "已上传"} <Tag>{result.status}</Tag>
-                  {result.code && <span className="muted">编码 {result.code}</span>}
+                  {st === "failed" ? "平台校验没通过" : st === "ready" ? "已上传，校验通过" : "已上传，平台正在校验（几秒到一分钟）…"}
+                  {result.code && <span className="muted"> · 编码 {result.code}</span>}
                 </span>
               }
               description={
                 <span>
-                  {result.message || "到巡瞳 AI 控制台的「自定义模型」里配置、启用后就能用。推荐阈值已经一起传上去了。"}{" "}
+                  {st === "failed"
+                    ? latest?.message || result.message || "请检查模型后重新上传"
+                    : "校验通过后，到巡瞳 AI 控制台的「自定义模型」里点启用，就能在平台上接摄像头、配告警了。推荐阈值已经一起传上去。"}{" "}
                   <a href={result.consoleUrl} target="_blank" rel="noreferrer">
                     打开控制台
                   </a>
@@ -73,15 +126,42 @@ export function XuntongUpload({ run, project }: { run: RunInfo; project: Project
               }
             />
           )}
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-            还没填巡瞳 API Key？<a onClick={() => setPage("settings")}>去设置</a>
+          <div style={{ marginTop: 12 }}>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <span className="muted">平台上的自定义模型</span>
+              <Button size="small" type="link" onClick={loadList}>
+                刷新
+              </Button>
+            </div>
+            {listErr ? (
+              <div className="dim" style={{ fontSize: 12 }}>
+                {listErr} · <a onClick={() => setPage("settings")}>去设置</a>
+              </div>
+            ) : !list ? (
+              <div className="dim" style={{ fontSize: 12 }}>读取中…</div>
+            ) : list.length === 0 ? (
+              <div className="dim" style={{ fontSize: 12 }}>还没有上传过模型</div>
+            ) : (
+              list.map((m) => (
+                <div key={String(m.id)} className="row" style={{ justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid var(--line)" }}>
+                  <span>
+                    {m.name} <span className="dim" style={{ fontSize: 12 }}>{m.code}</span>{" "}
+                    <Tag color={STATUS[m.status]?.color}>{STATUS[m.status]?.text ?? m.status}</Tag>
+                    {m.enabled ? <Tag color="green">已启用</Tag> : m.status === "ready" && <Tag>未启用</Tag>}
+                    {m.status === "failed" && m.message && <span className="dim" style={{ fontSize: 12 }}>{m.message}</span>}
+                  </span>
+                  <Button size="small" type="link" danger onClick={() => remove(m)}>
+                    删除
+                  </Button>
+                </div>
+              ))
+            )}
           </div>
         </>
       )}
     </div>
   );
 }
-
 /** 数据页「更多导入」里：从巡瞳 AI 拉取告警图片 */
 export function XuntongPullModal({ open, onClose, onDone }: { open: boolean; onClose: () => void; onDone: () => void }) {
   const { message, modal } = App.useApp();
@@ -125,6 +205,7 @@ export function XuntongPullModal({ open, onClose, onDone }: { open: boolean; onC
             <div>
               {r.fetched} 条告警，新增 {r.added} 张图{r.duplicated ? `，${r.duplicated} 张已经有了` : ""}
               {r.failed ? `，${r.failed} 张下载失败` : ""}
+              {r.noImage ? `，${r.noImage} 条没有原图（平台加原图功能之前的告警）` : ""}
             </div>
             {withBoxes && <div>平台的识别框加成了 {r.boxes} 个预标注（虚线，来源「巡瞳」），到标注页检查：误报的删掉、漏的补上。</div>}
             <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
@@ -156,7 +237,7 @@ export function XuntongPullModal({ open, onClose, onDone }: { open: boolean; onC
       destroyOnHidden
     >
       <p className="muted" style={{ marginTop: 8 }}>
-        把巡瞳平台上的告警截图拉回来标注、再训练。现场的误报、漏报正是最值得补的数据。
+        把巡瞳平台上的告警截图拉回来标注、再训练。现场的误报、漏报正是最值得补的数据。平台的告警图片保留 7 天，记得定期拉；只有配置了推送通道的账号才会产生告警记录。
       </p>
       {err ? (
         <Alert type="warning" showIcon message={err} />
@@ -171,8 +252,7 @@ export function XuntongPullModal({ open, onClose, onDone }: { open: boolean; onC
                 { value: 1, label: "最近 1 天" },
                 { value: 3, label: "最近 3 天" },
                 { value: 7, label: "最近 7 天" },
-                { value: 30, label: "最近 30 天" },
-                { value: 90, label: "最近 90 天" },
+
               ]}
             />
             <Select

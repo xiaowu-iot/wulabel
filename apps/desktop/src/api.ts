@@ -678,15 +678,28 @@ export const api = {
 
   // ---------- 巡瞳 AI 平台：上传模型、拉告警图片 ----------
   xtUploadModel: (runId: number, name: string) => invoke<XtUploadResult>("xt_upload_model", { runId, name }),
-  xtModels: () => invoke<{ id: unknown; code: string; name: string; status: string; createdAt: number | null }[]>("xt_models"),
+  xtModels: () => invoke<XtModel[]>("xt_models"),
+  xtDeleteModel: (id: string) => invoke<void>("xt_delete_model", { id }),
   xtPullAlarms: (options: { days: number; model: string | null; max: number; withBoxes: boolean }) =>
     invoke<XtPullResult>("xt_pull_alarms", { options }),
 };
 
+export interface XtModel {
+  id: string | number;
+  code: string;
+  name: string;
+  /** pending 校验中 / ready / failed */
+  status: string;
+  enabled: boolean;
+  message: string;
+  createdAt: number | null;
+}
+
 export interface XtUploadResult {
-  id: unknown;
+  id: string | number | null;
   code: string;
   status: string;
+  enabled: boolean;
   message: string;
   consoleUrl: string;
 }
@@ -696,6 +709,7 @@ export interface XtPullResult {
   added: number;
   duplicated: number;
   failed: number;
+  noImage: number;
   boxes: number;
   folder: string;
 }

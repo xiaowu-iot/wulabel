@@ -10,3 +10,6 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+
+# 本地联调用的样例模型
+samples/

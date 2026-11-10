@@ -455,7 +455,7 @@ pub fn stats(p: &Project, from: i64, to: i64, host_name: &str) -> AppResult<Vec<
     let mut out = Vec::new();
     for (id, name, role) in people {
         let one = |sql: &str| -> rusqlite::Result<i64> { conn.query_row(sql, params![id, from, to], |r| r.get(0)) };
-        let assigned = conn.query_row("SELECT COUNT(*) FROM images WHERE assignee = ?1", [id], |r| r.get(0))?;
+        let assigned: i64 = conn.query_row("SELECT COUNT(*) FROM images WHERE assignee = ?1", [id], |r| r.get(0))?;
         let submitted = one(
             "SELECT COUNT(DISTINCT image_id) FROM activity WHERE member_id = ?1 AND action = 'submit' AND created_at BETWEEN ?2 AND ?3",
         )?;
