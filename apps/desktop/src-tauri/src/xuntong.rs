@@ -350,6 +350,7 @@ pub fn login_start(rt: &Runtime) -> AppResult<DeviceCode> {
         .send_string(&body.to_string())
         .map_err(|e| match e {
             ureq::Error::Status(404, _) => msg("巡瞳平台还不支持在 Wulabel 里登录（平台升级后就能用）。现在请先到巡瞳控制台创建 API Key，在下面的「手动填 API Key」里填"),
+            ureq::Error::Status(429, _) => msg("登录请求太频繁了，请过 10 分钟再试"),
             e => ai::err_of(e),
         })?;
     let v = ai::parse(resp)?;

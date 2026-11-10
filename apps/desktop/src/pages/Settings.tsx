@@ -406,9 +406,13 @@ export default function Settings() {
                         <span key={q.name} style={{ marginRight: 16 }}>
                           {q.name}：剩 <b>{q.total == null ? "不限" : Math.max(0, q.total - (q.used ?? 0))}</b>
                           {q.total != null && ` / ${q.total}`} {q.unit ?? ""}
+                          {q.expiresAt ? <span className="dim" style={{ fontSize: 12 }}>（{new Date(q.expiresAt).toLocaleDateString()} 到期）</span> : null}
                         </span>
                       ))}
                     </div>
+                  )}
+                  {account?.plan === "未开通套餐" && (
+                    <div style={{ marginBottom: 6, color: "var(--warn)" }}>账号还没有开通套餐，识别会失败，请先到巡瞳 AI 开通。</div>
                   )}
                   <div style={{ marginBottom: 4 }}>
                     可用的识别方式（在标注页「AI 辅助 → 巡瞳 AI」里选）：

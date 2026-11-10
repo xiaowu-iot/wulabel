@@ -706,7 +706,7 @@ export interface XtAccount {
   name?: string;
   plan?: string;
   keyName?: string;
-  quota?: { name: string; used?: number | null; total?: number | null; unit?: string }[];
+  quota?: { name: string; used?: number | null; total?: number | null; unit?: string; expiresAt?: number | null }[];
   expiresAt?: number | null;
 }
 

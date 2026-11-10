@@ -335,36 +335,50 @@ pub fn prelabel_all(
     Ok(result)
 }
 
-/// 一批几张、同时几批：平台每个 Key 每秒最多 20 次识别，批内逐张识别，2 批并发不会超；
-/// 超了整批会失败（前面识别过的也白算），所以宁可保守
+/// 一批几张、同时几批：平台每个 Key 每秒最多 20 张，批内逐张识别，2 批并发不会超；
+/// 批里任何一张出错整批都返回错误（前面的图已经计数），所以宁可保守
 const BATCH: usize = 8;
 const WORKERS: usize = 2;
 
-/// 发一批到 /v1/detect/batch，429（太频繁）时退避重试
-fn detect_batch(base: &str, key: &str, reqs: &[serde_json::Value]) -> AppResult<Vec<serde_json::Value>> {
+/// 发一批到 /v1/detect/batch。返回 Ok(None) 表示被限流（429）：批里前面的图平台已经算过次数，
+/// 整批重发会重复扣，所以由调用方改成一张一张发
+fn detect_batch(base: &str, key: &str, reqs: &[serde_json::Value]) -> AppResult<Option<Vec<serde_json::Value>>> {
     let body = serde_json::Value::Array(reqs.to_vec()).to_string();
+    let r = ureq::post(&format!("{base}/v1/detect/batch"))
+        .set("Authorization", &format!("Bearer {key}"))
+        .set("Content-Type", "application/json; charset=utf-8")
+        .timeout(Duration::from_secs(300))
+        .send_string(&body);
+    match r {
+        Ok(resp) => {
+            let v = parse(resp)?;
+            v.as_array().cloned().map(Some).ok_or_else(|| msg("巡瞳 AI 批量识别返回的格式不对"))
+        }
+        Err(ureq::Error::Status(429, _)) => Ok(None),
+        Err(e) => Err(err_of(e)),
+    }
+}
+
+/// 单张识别（批量被限流后的退路），429 时退避重试
+fn detect_single(base: &str, key: &str, req: &serde_json::Value) -> AppResult<serde_json::Value> {
     let mut wait = 2;
-    for attempt in 0..5 {
-        let r = ureq::post(&format!("{base}/v1/detect/batch"))
+    for attempt in 0..6 {
+        let r = ureq::post(&format!("{base}/v1/detect"))
             .set("Authorization", &format!("Bearer {key}"))
             .set("Content-Type", "application/json; charset=utf-8")
-            .timeout(Duration::from_secs(300))
-            .send_string(&body);
+            .timeout(Duration::from_secs(120))
+            .send_string(&req.to_string());
         match r {
-            Ok(resp) => {
-                let v = parse(resp)?;
-                return v.as_array().cloned().ok_or_else(|| msg("巡瞳 AI 批量识别返回的格式不对"));
-            }
-            Err(ureq::Error::Status(429, _)) if attempt < 4 => {
+            Ok(resp) => return parse(resp),
+            Err(ureq::Error::Status(429, _)) if attempt < 5 => {
                 std::thread::sleep(Duration::from_secs(wait));
-                wait *= 2;
+                wait = (wait * 2).min(30);
             }
             Err(e) => return Err(err_of(e)),
         }
     }
     Err(msg("巡瞳 AI 一直提示调用太频繁，请稍后再试"))
 }
-
 /// 专用模型批量预标注：每批 8 张走批量接口，2 批并发；图片编码在后台线程里做。
 /// 结果回到当前线程统一保存（数据库、进度都在这里）
 #[allow(clippy::too_many_arguments)]
@@ -413,7 +427,14 @@ fn prelabel_special(
                         reqs.push(serde_json::json!({ "image": image, "model": model, "minConfidence": conf }));
                         meta.push((*id, w, h));
                     }
-                    let res = detect_batch(base, key, &reqs)?;
+                    let res = match detect_batch(base, key, &reqs)? {
+                        Some(r) => r,
+                        // 被限流：这一批改成一张一张发（不整批重发，免得重复扣次数）
+                        None => {
+                            std::thread::sleep(Duration::from_secs(2));
+                            reqs.iter().map(|q| detect_single(base, key, q)).collect::<AppResult<Vec<_>>>()?
+                        }
+                    };
                     Ok(meta.into_iter().zip(res).map(|((id, w, h), v)| (id, w, h, v["detections"].clone())).collect())
                 })();
                 if tx.send(r).is_err() {
