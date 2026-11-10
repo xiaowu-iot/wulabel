@@ -686,9 +686,29 @@ export const api = {
   xtUploadModel: (runId: number, name: string) => invoke<XtUploadResult>("xt_upload_model", { runId, name }),
   xtModels: () => invoke<XtModel[]>("xt_models"),
   xtDeleteModel: (id: string) => invoke<void>("xt_delete_model", { id }),
+  /** 登录巡瞳账号：申请登录码并在浏览器打开确认页 */
+  xtLoginStart: () =>
+    invoke<{ deviceCode: string; userCode: string; verifyUrl: string; expiresIn: number; interval: number }>("xt_login_start"),
+  xtLoginPoll: (deviceCode: string) =>
+    invoke<{ status: "pending" | "slow_down" | "expired" | "denied" | "ok"; account?: { name?: string; plan?: string } | null; keyName?: string | null }>(
+      "xt_login_poll",
+      { deviceCode },
+    ),
+  /** 账号和额度；平台还不支持时是 null */
+  xtAccount: () => invoke<XtAccount | null>("xt_account"),
+  xtLogout: () => invoke<void>("xt_logout"),
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
   xtPullAlarms: (options: { days: number; model: string | null; max: number; withBoxes: boolean }) =>
     invoke<XtPullResult>("xt_pull_alarms", { options }),
 };
+
+export interface XtAccount {
+  name?: string;
+  plan?: string;
+  keyName?: string;
+  quota?: { name: string; used?: number | null; total?: number | null; unit?: string }[];
+  expiresAt?: number | null;
+}
 
 export interface XtModel {
   id: string | number;

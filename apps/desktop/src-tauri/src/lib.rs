@@ -176,6 +176,11 @@ pub fn run() {
             commands::xt_models,
             commands::xt_pull_alarms,
             commands::xt_delete_model,
+            commands::xt_login_start,
+            commands::xt_login_poll,
+            commands::xt_account,
+            commands::xt_logout,
+            commands::open_url,
             feedback::submit_feedback,
         ])
         .build(tauri::generate_context!())

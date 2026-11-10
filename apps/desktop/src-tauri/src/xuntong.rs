@@ -297,3 +297,131 @@ pub fn pull_alarms(
         folder: format!("{IMAGES_DIR}/{folder}"),
     })
 }
+
+// ---------- 在 Wulabel 里登录巡瞳账号（设备授权：浏览器里登录、点允许，平台发一个 Key 给这台电脑） ----------
+
+fn base_url(rt: &Runtime) -> String {
+    rt.settings()
+        .ai_url
+        .filter(|u| !u.trim().is_empty())
+        .unwrap_or_else(|| ai::DEFAULT_URL.to_string())
+        .trim()
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn device_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "Wulabel".into())
+}
+
+/// 用系统默认浏览器打开网址
+pub fn open_url(url: &str) -> AppResult<()> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(msg("地址不对"));
+    }
+    #[cfg(target_os = "windows")]
+    let r = crate::runtime::command("rundll32").args(["url.dll,FileProtocolHandler", url]).spawn();
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(url).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let r = std::process::Command::new("xdg-open").arg(url).spawn();
+    r.map(|_| ()).map_err(|e| msg(format!("打不开浏览器：{e}")))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceCode {
+    pub device_code: String,
+    pub user_code: String,
+    pub verify_url: String,
+    pub expires_in: u64,
+    pub interval: u64,
+}
+
+/// 申请登录码，并在浏览器里打开巡瞳的确认页
+pub fn login_start(rt: &Runtime) -> AppResult<DeviceCode> {
+    let base = base_url(rt);
+    let body = serde_json::json!({ "client": "wulabel", "deviceName": device_name(), "clientVersion": env!("CARGO_PKG_VERSION") });
+    let resp = ureq::post(&format!("{base}/v1/device/code"))
+        .set("Content-Type", "application/json; charset=utf-8")
+        .timeout(Duration::from_secs(30))
+        .send_string(&body.to_string())
+        .map_err(|e| match e {
+            ureq::Error::Status(404, _) => msg("巡瞳平台还不支持在 Wulabel 里登录（平台升级后就能用）。现在请先到巡瞳控制台创建 API Key，在下面的「手动填 API Key」里填"),
+            e => ai::err_of(e),
+        })?;
+    let v = ai::parse(resp)?;
+    let s = |k: &str| v[k].as_str().map(String::from).ok_or_else(|| msg(format!("巡瞳平台返回的登录信息缺少 {k}")));
+    let code = DeviceCode {
+        device_code: s("deviceCode")?,
+        user_code: s("userCode")?,
+        verify_url: s("verifyUrl")?,
+        expires_in: v["expiresIn"].as_u64().unwrap_or(600),
+        interval: v["interval"].as_u64().unwrap_or(3).max(1),
+    };
+    // 打不开浏览器也没关系，界面上会显示地址让用户自己打开
+    let _ = open_url(&code.verify_url);
+    Ok(code)
+}
+
+/// 问一次用户确认了没有。确认了就把发下来的 Key 存到设置里。
+/// 返回 {status: pending / slow_down / expired / denied / ok, account?, keyName?}
+pub fn login_poll(rt: &Runtime, device_code: &str) -> AppResult<serde_json::Value> {
+    let base = base_url(rt);
+    let r = ureq::post(&format!("{base}/v1/device/token"))
+        .set("Content-Type", "application/json; charset=utf-8")
+        .timeout(Duration::from_secs(30))
+        .send_string(&serde_json::json!({ "deviceCode": device_code }).to_string());
+    match r {
+        Ok(resp) => {
+            let v = ai::parse(resp)?;
+            let key = v["apiKey"].as_str().filter(|k| !k.is_empty()).ok_or_else(|| msg("巡瞳平台没有返回 API Key"))?;
+            let mut s = rt.settings();
+            s.ai_key = Some(key.to_string());
+            rt.save_settings(&s)?;
+            Ok(serde_json::json!({ "status": "ok", "account": v["account"], "keyName": v["keyName"] }))
+        }
+        Err(ureq::Error::Status(400, resp)) => {
+            let body: serde_json::Value = serde_json::from_str(&resp.into_string().unwrap_or_default()).unwrap_or_default();
+            let code = body["code"].as_str().unwrap_or("");
+            let status = match code {
+                "authorization_pending" => "pending",
+                "slow_down" => "slow_down",
+                "expired_token" => "expired",
+                "access_denied" => "denied",
+                _ => return Err(msg(format!("登录失败：{}", body["message"].as_str().unwrap_or(code)))),
+            };
+            Ok(serde_json::json!({ "status": status }))
+        }
+        Err(e) => Err(ai::err_of(e)),
+    }
+}
+
+/// 当前账号和额度（平台不支持时返回 null，界面只显示「已连接」）
+pub fn account(rt: &Runtime) -> AppResult<serde_json::Value> {
+    let (base, key) = ai::config(rt)?;
+    match ureq::get(&format!("{base}/v1/account"))
+        .set("Authorization", &format!("Bearer {key}"))
+        .timeout(Duration::from_secs(20))
+        .call()
+    {
+        Ok(resp) => ai::parse(resp),
+        Err(ureq::Error::Status(404, _)) => Ok(serde_json::Value::Null),
+        Err(e) => Err(ai::err_of(e)),
+    }
+}
+
+/// 退出登录：让平台吊销这个 Key（失败也没关系），本机清掉
+pub fn logout(rt: &Runtime) -> AppResult<()> {
+    if let Ok((base, key)) = ai::config(rt) {
+        let _ = ureq::delete(&format!("{base}/v1/device/token"))
+            .set("Authorization", &format!("Bearer {key}"))
+            .timeout(Duration::from_secs(15))
+            .call();
+    }
+    let mut s = rt.settings();
+    s.ai_key = None;
+    rt.save_settings(&s)
+}

@@ -308,6 +308,10 @@ pub fn prelabel_all(
     log: &(dyn Fn(String) + Sync),
 ) -> AppResult<PrelabelResult> {
     let (base, key) = config(rt)?;
+    // 专用模型（含自己上传的模型）走批量接口，并发发送，快很多
+    if model != CLASSES && model != LLM {
+        return prelabel_special(p, rt, pr, &base, &key, model, conf, progress, log);
+    }
     let rules = rules(p)?;
     let items = training::prelabel_targets(p)?;
     let total = items.len();
@@ -328,6 +332,144 @@ pub fn prelabel_all(
         }
         progress(n + 1, total);
     }
+    Ok(result)
+}
+
+/// 一批几张、同时几批：平台每个 Key 每秒最多 20 次识别，批内逐张识别，2 批并发不会超；
+/// 超了整批会失败（前面识别过的也白算），所以宁可保守
+const BATCH: usize = 8;
+const WORKERS: usize = 2;
+
+/// 发一批到 /v1/detect/batch，429（太频繁）时退避重试
+fn detect_batch(base: &str, key: &str, reqs: &[serde_json::Value]) -> AppResult<Vec<serde_json::Value>> {
+    let body = serde_json::Value::Array(reqs.to_vec()).to_string();
+    let mut wait = 2;
+    for attempt in 0..5 {
+        let r = ureq::post(&format!("{base}/v1/detect/batch"))
+            .set("Authorization", &format!("Bearer {key}"))
+            .set("Content-Type", "application/json; charset=utf-8")
+            .timeout(Duration::from_secs(300))
+            .send_string(&body);
+        match r {
+            Ok(resp) => {
+                let v = parse(resp)?;
+                return v.as_array().cloned().ok_or_else(|| msg("巡瞳 AI 批量识别返回的格式不对"));
+            }
+            Err(ureq::Error::Status(429, _)) if attempt < 4 => {
+                std::thread::sleep(Duration::from_secs(wait));
+                wait *= 2;
+            }
+            Err(e) => return Err(err_of(e)),
+        }
+    }
+    Err(msg("巡瞳 AI 一直提示调用太频繁，请稍后再试"))
+}
+
+/// 专用模型批量预标注：每批 8 张走批量接口，2 批并发；图片编码在后台线程里做。
+/// 结果回到当前线程统一保存（数据库、进度都在这里）
+#[allow(clippy::too_many_arguments)]
+fn prelabel_special(
+    p: &Project,
+    rt: &Runtime,
+    pr: &Predictor,
+    base: &str,
+    key: &str,
+    model: &str,
+    conf: f64,
+    progress: &dyn Fn(usize, usize),
+    log: &(dyn Fn(String) + Sync),
+) -> AppResult<PrelabelResult> {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let items = training::prelabel_targets(p)?;
+    let total = items.len();
+    let mut result = PrelabelResult { images: 0, boxes: 0 };
+    progress(0, total);
+    if total == 0 {
+        return Ok(result);
+    }
+    let chunks: Vec<&[(i64, std::path::PathBuf)]> = items.chunks(BATCH).collect();
+    let next = AtomicUsize::new(0);
+    let stop = AtomicBool::new(false);
+    // 每批的结果：(图片 id, 原图宽, 高, detections)
+    type Batch = AppResult<Vec<(i64, f64, f64, serde_json::Value)>>;
+    let (tx, rx) = std::sync::mpsc::channel::<Batch>();
+    let mut first_err: Option<String> = None;
+    let mut done = 0;
+    std::thread::scope(|s| {
+        for _ in 0..WORKERS.min(chunks.len()) {
+            let tx = tx.clone();
+            let (chunks, next, stop) = (&chunks, &next, &stop);
+            s.spawn(move || loop {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                let Some(chunk) = chunks.get(i) else { break };
+                let r = (|| -> Batch {
+                    let mut meta = Vec::new();
+                    let mut reqs = Vec::new();
+                    for (id, path) in chunk.iter() {
+                        let (image, w, h) = encode_image(path)?;
+                        reqs.push(serde_json::json!({ "image": image, "model": model, "minConfidence": conf }));
+                        meta.push((*id, w, h));
+                    }
+                    let res = detect_batch(base, key, &reqs)?;
+                    Ok(meta.into_iter().zip(res).map(|((id, w, h), v)| (id, w, h, v["detections"].clone())).collect())
+                })();
+                if tx.send(r).is_err() {
+                    break;
+                }
+            });
+        }
+        drop(tx);
+        for r in rx {
+            match r {
+                Ok(list) => {
+                    for (id, w, h, dets) in list {
+                        done += 1;
+                        if first_err.is_some() {
+                            continue;
+                        }
+                        let saved = (|| -> AppResult<usize> {
+                            let found: Vec<_> = parse_detections(&dets, w, h).into_iter().filter(|(_, s, _)| *s >= conf).collect();
+                            if found.is_empty() {
+                                return Ok(0);
+                            }
+                            let pred = to_pred(p, rt, pr, id, found, log)?;
+                            let anns = training::task_annotations(p, &pred, conf, "ai")?;
+                            if !anns.is_empty() {
+                                annotations::save_predictions(p, id, &anns)?;
+                            }
+                            Ok(anns.len())
+                        })();
+                        match saved {
+                            Ok(0) => {}
+                            Ok(n) => {
+                                result.images += 1;
+                                result.boxes += n;
+                            }
+                            Err(e) => {
+                                first_err = Some(e.to_string());
+                                stop.store(true, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    progress(done.min(total), total);
+                }
+                // 额度用完、Key 不对等：停下，已经标好的保留
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e.to_string());
+                    }
+                    stop.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+    });
+    if let Some(e) = first_err {
+        return Err(msg(format!("批量预标注中途停下，已预标注 {} 张：{e}", result.images)));
+    }
+    log(format!("巡瞳 AI 批量预标注完成：{} 张图、{} 个目标", result.images, result.boxes));
     Ok(result)
 }
 

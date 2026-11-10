@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Descriptions, Input, Progress, Radio, Select, Space, Spin, Tag } from "antd";
-import { CheckCircleOutlined, FolderOpenOutlined, ReloadOutlined, ThunderboltOutlined, ToolOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Descriptions, Input, Modal, Progress, Radio, Select, Space, Spin, Tag, Typography } from "antd";
+import { CheckCircleOutlined, FolderOpenOutlined, ReloadOutlined, ThunderboltOutlined, ToolOutlined, UserOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { AiModel, api, EnvStatus, errText, SpeedResult } from "../api";
+import { AiModel, api, EnvStatus, errText, SpeedResult, XtAccount } from "../api";
 
 interface DlProgress {
   file: string;
@@ -137,6 +137,11 @@ export default function Settings() {
     try {
       const ms = await api.aiModels();
       setAiStatus({ state: "ok", models: ms, at: new Date() });
+      // 账号名、套餐、额度（平台不支持时是 null）
+      api
+        .xtAccount()
+        .then(setAccount)
+        .catch(() => setAccount(null));
       return true;
     } catch (e) {
       setAiStatus({ state: "error", text: errText(e), at: new Date() });
@@ -152,6 +157,73 @@ export default function Settings() {
     if (st.settings.aiKey) testAi();
     else setAiStatus({ state: "unset" });
   }, [st, testAi]);
+
+  // ---------- 登录巡瞳账号 ----------
+
+  const [account, setAccount] = useState<XtAccount | null>(null);
+  const [showManual, setShowManual] = useState(false);
+  const [login, setLogin] = useState<{ deviceCode: string; userCode: string; verifyUrl: string } | null>(null);
+  const loginRun = useRef(0);
+
+  const cancelLogin = () => {
+    loginRun.current++;
+    setLogin(null);
+  };
+
+  const startLogin = async () => {
+    if (!st) return;
+    const run = ++loginRun.current;
+    try {
+      // 高级里改了平台地址的，先存下来（登录走这个地址）
+      if ((aiUrl.trim() || null) !== (st.settings.aiUrl ?? null)) {
+        await api.saveSettings({ ...st.settings, aiUrl: aiUrl.trim() || null });
+      }
+      const c = await api.xtLoginStart();
+      if (run !== loginRun.current) return;
+      setLogin({ deviceCode: c.deviceCode, userCode: c.userCode, verifyUrl: c.verifyUrl });
+      let interval = c.interval;
+      const deadline = Date.now() + c.expiresIn * 1000;
+      while (run === loginRun.current) {
+        await new Promise((r) => setTimeout(r, interval * 1000));
+        if (run !== loginRun.current) return;
+        if (Date.now() > deadline) throw "登录码过期了，请重新点「登录巡瞳 AI 账号」";
+        const r = await api.xtLoginPoll(c.deviceCode);
+        if (r.status === "slow_down") interval += 5;
+        else if (r.status === "expired") throw "登录码过期了，请重新点「登录巡瞳 AI 账号」";
+        else if (r.status === "denied") throw "你在网页上选了拒绝";
+        else if (r.status === "ok") {
+          setLogin(null);
+          await load(false);
+          await testAi();
+          message.success(`已登录巡瞳 AI${r.account?.name ? `：${r.account.name}` : ""}`);
+          return;
+        }
+      }
+    } catch (e) {
+      if (run === loginRun.current) {
+        setLogin(null);
+        message.error(errText(e));
+      }
+    }
+  };
+
+  const logoutAi = () =>
+    modal.confirm({
+      title: "退出巡瞳 AI 账号？",
+      content: "这台电脑上的 Key 会被删除（登录时自动创建的 Key 也会在平台上吊销）。巡瞳 AI 相关功能要重新登录才能用。",
+      okText: "退出",
+      cancelText: "取消",
+      onOk: async () => {
+        try {
+          await api.xtLogout();
+          await load(false);
+          setAccount(null);
+          setAiStatus({ state: "unset" });
+        } catch (e) {
+          message.error(errText(e));
+        }
+      },
+    });
 
   /** 保存巡瞳 AI 设置并测试连接 */
   const saveAi = async () => {
@@ -308,61 +380,127 @@ export default function Settings() {
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <h2 style={{ fontSize: 15, marginTop: 0 }}>巡瞳 AI（辅助标注）</h2>
+        <h2 style={{ fontSize: 15, marginTop: 0 }}>巡瞳 AI</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          填上巡瞳 AI 的 API Key 后可以：标注页用巡瞳 AI 预标注（按项目类别识别、专用模型、大模型）、和 AI 聊识别规则；部署页把模型上传到巡瞳平台；数据页拉取平台的告警图片；协作用「巡瞳官方中转」让外网成员连进来。
-          识别、聊天会消耗你账号的额度。平台地址留空就是 https://xuntongai.com。Key 只保存在这台电脑上。
+          登录巡瞳 AI 账号后可以：标注页用巡瞳 AI 自动标注（专用模型批量标注很快，也可以用大模型或按项目类别识别）、和 AI 聊识别规则；部署页把模型上传到巡瞳平台；数据页拉取平台的告警图片；协作用「巡瞳官方中转」让外网成员连进来。识别、聊天会消耗账号的额度。
         </p>
         <Space direction="vertical" style={{ width: "100%" }}>
-          <Input addonBefore="平台地址" value={aiUrl} placeholder="https://xuntongai.com（私有化部署时填自己的地址）" onChange={(e) => setAiUrl(e.target.value)} />
-          <Input.Password addonBefore="API Key" value={aiKey} placeholder="sk-live-…（在巡瞳 AI 控制台的「API Key」页创建）" onChange={(e) => setAiKey(e.target.value)} />
-          <Space>
-            <Button type="primary" loading={aiTesting} onClick={saveAi}>
-              保存并测试连接
-            </Button>
-            {aiStatus && aiStatus.state !== "unset" && aiStatus.state !== "testing" && (
-              <Button onClick={testAi}>重新测试</Button>
-            )}
-          </Space>
-          {aiStatus?.state === "testing" && <Alert type="info" showIcon message="正在连接巡瞳 AI…" />}
-          {aiStatus?.state === "unset" && <Alert type="warning" showIcon message="还没有填 API Key，巡瞳 AI 相关功能用不了" />}
-          {aiStatus?.state === "ok" && (
+          {aiStatus?.state === "ok" ? (
             <Alert
               type="success"
               showIcon
-              message={`已连接，可以使用（${aiStatus.at.toLocaleTimeString()} 测试）`}
+              message={
+                <span>
+                  已登录{account?.name ? <b> {account.name}</b> : "，可以使用"}
+                  {account?.plan && <Tag style={{ marginLeft: 8 }}>{account.plan}</Tag>}
+                  <span className="dim" style={{ fontSize: 12, marginLeft: 8 }}>
+                    {aiStatus.at.toLocaleTimeString()} 检查
+                  </span>
+                </span>
+              }
               description={
                 <div>
+                  {account?.quota && account.quota.length > 0 && (
+                    <div style={{ marginBottom: 6 }}>
+                      {account.quota.map((q) => (
+                        <span key={q.name} style={{ marginRight: 16 }}>
+                          {q.name}：剩 <b>{q.total == null ? "不限" : Math.max(0, q.total - (q.used ?? 0))}</b>
+                          {q.total != null && ` / ${q.total}`} {q.unit ?? ""}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div style={{ marginBottom: 4 }}>
-                    平台上开通的专用模型 {aiStatus.models.filter((m) => m.code !== "classes" && m.code !== "llm").length} 个；另外随时可用「按项目类别识别」和「大模型通用识别」。
+                    可用的识别方式（在标注页「AI 辅助 → 巡瞳 AI」里选）：
                   </div>
                   <Space size={[4, 4]} wrap>
                     {aiStatus.models.map((m) => (
-                      <Tag key={m.code}>{m.name}</Tag>
+                      <Tag key={m.code} color={m.code === "classes" || m.code === "llm" ? "blue" : undefined}>
+                        {m.name}
+                      </Tag>
                     ))}
                   </Space>
-                </div>
-              }
-            />
-          )}
-          {aiStatus?.state === "error" && (
-            <Alert
-              type="error"
-              showIcon
-              message={`连接失败（${aiStatus.at.toLocaleTimeString()} 测试）`}
-              description={
-                <div>
-                  <div>{aiStatus.text}</div>
-                  <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
-                    检查：Key 是否完整复制（以 sk-live- 开头）、在巡瞳控制台里是否已启用；平台地址留空即可；如果巡瞳控制台给 Key 设了 IP 白名单，要把这台电脑的公网 IP 加进去。
+                  <div style={{ marginTop: 8 }}>
+                    <Space>
+                      <Button size="small" onClick={testAi}>
+                        刷新
+                      </Button>
+                      <Button size="small" onClick={logoutAi}>
+                        退出登录
+                      </Button>
+                    </Space>
                   </div>
                 </div>
               }
             />
+          ) : (
+            <>
+              {aiStatus?.state === "testing" && <Alert type="info" showIcon message="正在连接巡瞳 AI…" />}
+              {aiStatus?.state === "error" && (
+                <Alert
+                  type="error"
+                  showIcon
+                  message={`连接失败（${aiStatus.at.toLocaleTimeString()} 检查）`}
+                  description={
+                    <div>
+                      <div>{aiStatus.text}</div>
+                      <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                        可以重新登录；手动填的 Key 请检查是否完整复制（以 sk-live- 开头）、在巡瞳控制台里是否启用、有没有设 IP 白名单。
+                      </div>
+                    </div>
+                  }
+                />
+              )}
+              <Space>
+                <Button type="primary" icon={<UserOutlined />} loading={!!login} onClick={startLogin}>
+                  登录巡瞳 AI 账号
+                </Button>
+                <span className="dim" style={{ fontSize: 12 }}>
+                  在浏览器里登录巡瞳、点「允许」，Key 自动带回来，不用复制粘贴
+                </span>
+              </Space>
+            </>
+          )}
+          <a style={{ fontSize: 12 }} onClick={() => setShowManual((v) => !v)}>
+            {showManual ? "收起" : "高级：手动填 API Key、私有化部署的平台地址"}
+          </a>
+          {showManual && (
+            <Space direction="vertical" style={{ width: "100%" }}>
+              <Input addonBefore="平台地址" value={aiUrl} placeholder="留空就是 https://xuntongai.com（私有化部署时填自己的地址）" onChange={(e) => setAiUrl(e.target.value)} />
+              <Input.Password addonBefore="API Key" value={aiKey} placeholder="sk-live-…（在巡瞳 AI 控制台的「API Key」页创建）" onChange={(e) => setAiKey(e.target.value)} />
+              <Button loading={aiTesting} onClick={saveAi}>
+                保存并测试连接
+              </Button>
+            </Space>
           )}
         </Space>
       </div>
 
+      <Modal
+        title="登录巡瞳 AI 账号"
+        open={!!login}
+        onCancel={cancelLogin}
+        footer={<Button onClick={cancelLogin}>取消</Button>}
+        width={460}
+        destroyOnHidden
+      >
+        {login && (
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            <div style={{ marginBottom: 12 }}>已在浏览器里打开巡瞳 AI，登录后点「允许」，这里会自动完成。</div>
+            <div className="dim" style={{ fontSize: 12 }}>确认码（网页上显示的要和这个一样）</div>
+            <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: 4, margin: "4px 0 12px" }}>{login.userCode}</div>
+            <Spin size="small" /> <span className="muted">等待你在浏览器里确认…</span>
+            <div style={{ marginTop: 14, fontSize: 12 }}>
+              浏览器没打开？
+              <a onClick={() => api.openUrl(login.verifyUrl).catch(() => {})}>重新打开</a>
+              ，或者复制地址：
+              <Typography.Text copyable style={{ fontSize: 12 }}>
+                {login.verifyUrl}
+              </Typography.Text>
+            </div>
+          </div>
+        )}
+      </Modal>
       <div className="card">
         <h2 style={{ fontSize: 15, marginTop: 0 }}>使用已有的 Python 环境（高级）</h2>
         <p className="muted" style={{ marginTop: 0 }}>

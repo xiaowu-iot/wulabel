@@ -1276,3 +1276,38 @@ pub async fn ai_rules_platform_enabled(app: AppHandle, state: State<'_, AppState
         .await
         .map_err(|e| msg(format!("设置异常：{e}")))?
 }
+
+// ---------- 登录巡瞳账号 ----------
+
+#[tauri::command]
+pub async fn xt_login_start(app: AppHandle) -> AppResult<crate::xuntong::DeviceCode> {
+    tauri::async_runtime::spawn_blocking(move || crate::xuntong::login_start(&app.state::<Runtime>()))
+        .await
+        .map_err(|e| msg(format!("登录异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn xt_login_poll(app: AppHandle, device_code: String) -> AppResult<serde_json::Value> {
+    tauri::async_runtime::spawn_blocking(move || crate::xuntong::login_poll(&app.state::<Runtime>(), &device_code))
+        .await
+        .map_err(|e| msg(format!("登录异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn xt_account(app: AppHandle) -> AppResult<serde_json::Value> {
+    tauri::async_runtime::spawn_blocking(move || crate::xuntong::account(&app.state::<Runtime>()))
+        .await
+        .map_err(|e| msg(format!("读取异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn xt_logout(app: AppHandle) -> AppResult<()> {
+    tauri::async_runtime::spawn_blocking(move || crate::xuntong::logout(&app.state::<Runtime>()))
+        .await
+        .map_err(|e| msg(format!("退出异常：{e}")))?
+}
+
+#[tauri::command]
+pub async fn open_url(url: String) -> AppResult<()> {
+    crate::xuntong::open_url(&url)
+}
