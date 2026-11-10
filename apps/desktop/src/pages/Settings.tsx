@@ -503,7 +503,7 @@ export default function Settings() {
               </Typography.Text>
             </div>
             <div className="dim" style={{ marginTop: 8, fontSize: 12 }}>
-              网页上「允许」点不了？可能是账号的 API Key 数量满了，到巡瞳控制台的「API Key」页删掉一个不用的再试。
+              网页上「允许」点不了？可能是 Key 数量满了，去巡瞳控制台「API Key」页停用一个不用的 Key 再试。
             </div>
           </div>
         )}
