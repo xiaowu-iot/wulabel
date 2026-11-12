@@ -1,9 +1,71 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Descriptions, Input, Modal, Progress, Radio, Select, Space, Spin, Tag, Typography } from "antd";
+import { Alert, App, Button, Descriptions, Input, Modal, Progress, Radio, Select, Space, Spin, Switch, Tag, Typography } from "antd";
 import { CheckCircleOutlined, FolderOpenOutlined, ReloadOutlined, ThunderboltOutlined, ToolOutlined, UserOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { AiModel, api, EnvStatus, errText, SpeedResult, XtAccount } from "../api";
+import { AiModel, api, EnvStatus, errText, SpeedResult, UpdateInfo, XtAccount } from "../api";
+import { prefs } from "../store";
+
+/** 关于与更新：当前版本、手动检查更新、自动检查开关 */
+function UpdateCard() {
+  const [auto, setAuto] = useState(prefs.get("updateCheck", "1") === "1");
+  const [checking, setChecking] = useState(false);
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [error, setError] = useState("");
+
+  const check = async () => {
+    setChecking(true);
+    setError("");
+    try {
+      setInfo(await api.checkUpdate());
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <h2 style={{ fontSize: 15, marginTop: 0 }}>关于与更新</h2>
+      <Space wrap>
+        <Button icon={<ReloadOutlined />} loading={checking} onClick={check}>
+          检查更新
+        </Button>
+        {info && !info.newer && <span className="muted">当前 v{info.current}，已经是最新版</span>}
+        {info?.newer && (
+          <>
+            <span>
+              有新版本 <b>v{info.latest}</b>（当前 v{info.current}）
+            </span>
+            {info.url && (
+              <Button type="primary" onClick={() => api.openUrl(info.url).catch(() => {})}>
+                去下载
+              </Button>
+            )}
+          </>
+        )}
+        {error && <span style={{ color: "var(--bad)" }}>{error}</span>}
+      </Space>
+      {info?.newer && info.notes && <div className="muted" style={{ marginTop: 8 }}>{info.notes}</div>}
+      <div className="row" style={{ marginTop: 14, gap: 10, alignItems: "flex-start", flexWrap: "nowrap" }}>
+        <Switch
+          checked={auto}
+          onChange={(v) => {
+            setAuto(v);
+            prefs.set("updateCheck", v ? "1" : "0");
+          }}
+        />
+        <div>
+          <div>启动时自动检查更新</div>
+          <div className="dim" style={{ fontSize: 12 }}>
+            检查时只发送软件版本、系统类型和一个随机的匿名编号，用来统计大概有多少人在用，不含图片、项目和任何个人信息。关掉后就不会再发这个请求。
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface DlProgress {
   file: string;
@@ -530,6 +592,7 @@ export default function Settings() {
           <Alert style={{ marginTop: 10 }} type="info" showIcon message="正在使用你指定的 Python 环境。清空后保存可改回软件自己管理的环境。" />
         )}
       </div>
+      <UpdateCard />
     </div>
   );
 }

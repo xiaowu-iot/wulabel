@@ -534,8 +534,17 @@ export interface FeedbackInput {
   screenshot?: string | null;
 }
 
+export interface UpdateInfo {
+  current: string;
+  latest: string;
+  newer: boolean;
+  url: string;
+  notes: string;
+}
+
 export const api = {
   submitFeedback: (input: FeedbackInput) => invoke<void>("submit_feedback", { input }),
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
   liveStart: (runId: number, source: string, conf: number) => invoke<void>("live_start", { runId, source, conf }),
   liveStop: () => invoke<void>("live_stop"),
   liveConf: (conf: number) => invoke<void>("live_conf", { conf }),

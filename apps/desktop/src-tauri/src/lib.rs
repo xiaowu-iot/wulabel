@@ -24,6 +24,7 @@ mod team;
 mod track;
 mod training;
 mod tunnel;
+mod update;
 mod versions;
 mod video;
 mod xuntong;
@@ -182,6 +183,7 @@ pub fn run() {
             commands::xt_logout,
             commands::open_url,
             feedback::submit_feedback,
+            update::check_update,
         ])
         .build(tauri::generate_context!())
         .expect("程序启动失败")

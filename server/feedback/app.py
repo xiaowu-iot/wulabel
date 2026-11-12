@@ -1,11 +1,15 @@
 """Wulabel 反馈上报服务。
 
-部署在阿里云（公网 IP + 自定义端口），由海外服务器用二级域名反向代理过来。
-职责：验签 → 限流防刷 → 通过 SMTP（QQ 邮箱）把反馈发到作者邮箱。
-收件邮箱只在这里（服务端）出现，不进客户端。
+职责：
+- /feedback：验签 → 限流防刷 → 通过 SMTP（QQ 邮箱）把反馈发到作者邮箱。
+  收件邮箱只在这里（服务端）出现，不进客户端。
+- /update：检查更新。返回最新版本号和下载地址，顺带按匿名设备编号记录使用情况
+  （每台设备每天一条，只记版本和系统，不记 IP），用 stats.py 查看统计。
 """
 
+import json
 import os
+import re
 import sqlite3
 import time
 import hmac
@@ -42,6 +46,8 @@ SMTP_PASS = os.environ.get("SMTP_PASS", "")
 MAIL_FROM = os.environ.get("MAIL_FROM", SMTP_USER)
 FEEDBACK_TO = os.environ.get("FEEDBACK_TO", "")
 DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).with_name("feedback.db")))
+# 最新版本信息：{"latest": "0.2.0", "url": "下载页地址", "notes": "新版本说明"}，发新版时改这个文件即可
+LATEST_FILE = os.environ.get("LATEST_FILE", str(Path(__file__).with_name("latest.json")))
 
 PER_DEVICE_HOUR = int(os.environ.get("PER_DEVICE_HOUR", "5"))
 PER_DEVICE_DAY = int(os.environ.get("PER_DEVICE_DAY", "20"))
@@ -149,6 +155,73 @@ async def feedback(req: Request):
         return err(f"服务端发送失败：{e}", 500)
 
     return {"ok": True}
+
+
+ID_RE = re.compile(r"^[0-9a-f]{8,64}$")
+VER_RE = re.compile(r"^\d{1,4}(\.\d{1,4}){0,3}([-+.][0-9A-Za-z.]{1,20})?$")
+OS_RE = re.compile(r"^[a-z0-9_]{1,16}$")
+
+
+def usage_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS installs ("
+        "device TEXT PRIMARY KEY, first_day TEXT, last_day TEXT, version TEXT, os TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS active ("
+        "day TEXT, device TEXT, version TEXT, os TEXT, PRIMARY KEY (day, device))"
+    )
+    return conn
+
+
+def today() -> str:
+    # 按北京时间算「一天」
+    return time.strftime("%Y-%m-%d", time.gmtime(time.time() + 8 * 3600))
+
+
+def read_latest() -> dict:
+    try:
+        data = json.loads(Path(LATEST_FILE).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+@app.get("/update")
+def update(req: Request):
+    q = req.query_params
+    version = (q.get("v") or "").strip().lstrip("v")[:32]
+    osname = (q.get("os") or "").strip().lower()[:16]
+    arch = (q.get("arch") or "").strip().lower()[:16]
+    device = (q.get("id") or "").strip().lower()[:64]
+
+    # 参数对得上才记，乱填的请求照样返回版本信息但不计数
+    if ID_RE.match(device) and VER_RE.match(version) and OS_RE.match(osname) and (not arch or OS_RE.match(arch)):
+        day = today()
+        os_full = f"{osname} {arch}".strip()
+        conn = usage_db()
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO active (day, device, version, os) VALUES (?,?,?,?)",
+                (day, device, version, os_full),
+            )
+            conn.execute(
+                "INSERT INTO installs (device, first_day, last_day, version, os) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(device) DO UPDATE SET last_day=excluded.last_day, "
+                "version=excluded.version, os=excluded.os",
+                (device, day, day, version, os_full),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    info = read_latest()
+    return {
+        "latest": str(info.get("latest") or version or ""),
+        "url": str(info.get("url") or ""),
+        "notes": str(info.get("notes") or ""),
+    }
 
 
 def send_mail(message, contact, app_version, osname, device_id, ip, screenshot) -> None:

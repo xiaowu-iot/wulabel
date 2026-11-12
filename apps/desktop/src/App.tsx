@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Button, Tooltip } from "antd";
+import { App as AntApp, Button, Space, Tooltip } from "antd";
 import {
   AimOutlined,
   BarChartOutlined,
@@ -15,7 +15,7 @@ import {
 } from "@ant-design/icons";
 import { api, ShareStatus, taskName } from "./api";
 import { listen } from "./transport";
-import { PageKey, useApp } from "./store";
+import { PageKey, prefs, useApp } from "./store";
 import Home from "./pages/Home";
 import Data from "./pages/Data";
 import Annotate from "./pages/Annotate";
@@ -53,6 +53,50 @@ const TITLES: Record<PageKey, string> = {
 
 export default function App() {
   const { project, page, setPage, setProject, setTeam, team } = useApp();
+  const { notification } = AntApp.useApp();
+
+  // 启动时检查更新（设置里可关）。有新版本一天最多提醒一次，用户点了「不再提醒」的版本不再提。
+  useEffect(() => {
+    if (prefs.get("updateCheck", "1") !== "1") return;
+    const timer = setTimeout(() => {
+      api
+        .checkUpdate()
+        .then((u) => {
+          if (!u.newer || prefs.get("updateSkip", "") === u.latest) return;
+          const today = new Date().toDateString();
+          if (prefs.get("updateNotified", "") === today) return;
+          prefs.set("updateNotified", today);
+          const key = "wulabel-update";
+          notification.info({
+            key,
+            message: `Wulabel 有新版本 v${u.latest}`,
+            description: (
+              <div>
+                <div>当前是 v{u.current}。{u.notes}</div>
+                <Space style={{ marginTop: 10 }}>
+                  <Button size="small" type="primary" onClick={() => u.url && api.openUrl(u.url).catch(() => {})}>
+                    去下载
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      prefs.set("updateSkip", u.latest);
+                      notification.destroy(key);
+                    }}
+                  >
+                    这个版本不再提醒
+                  </Button>
+                </Space>
+              </div>
+            ),
+            duration: 0,
+            placement: "bottomRight",
+          });
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [notification]);
 
   const [fbOpen, setFbOpen] = useState(false);
   const [fbShot, setFbShot] = useState<string | null>(null);

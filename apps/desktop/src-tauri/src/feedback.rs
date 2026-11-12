@@ -70,7 +70,7 @@ fn sign(ts: u64, device_id: &str, message: &str, shot_b64: &str) -> String {
 
 /// 读取或生成一个匿名设备标识，持久化到配置目录。只用于服务端按设备限流，
 /// 不含任何真实身份信息。
-fn device_id(app: &tauri::AppHandle) -> String {
+pub(crate) fn device_id(app: &tauri::AppHandle) -> String {
     let Ok(dir) = app.path().app_config_dir() else {
         return "unknown".into();
     };
