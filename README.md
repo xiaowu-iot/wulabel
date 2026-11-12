@@ -16,18 +16,18 @@
 
 ## 下载
 
-最新版 **v0.2.0**，点文件名直接下载：
+最新版 **v0.2.1**，点文件名直接下载：
 
 | 系统 | 官网（国内推荐） | GitHub |
 |---|---|---|
-| Windows 10 / 11（64 位） | [Wulabel_0.2.0_x64-setup.exe](https://wulabel.xiaowuiot.com/download/Wulabel_0.2.0_x64-setup.exe) | [Wulabel_0.2.0_x64-setup.exe](https://github.com/xiaowu-iot/wulabel/releases/download/v0.2.0/Wulabel_0.2.0_x64-setup.exe) |
-| macOS 11 及以上（Apple 芯片和 Intel 通用） | [Wulabel_0.2.0_universal.dmg](https://wulabel.xiaowuiot.com/download/Wulabel_0.2.0_universal.dmg) | [Wulabel_0.2.0_universal.dmg](https://github.com/xiaowu-iot/wulabel/releases/download/v0.2.0/Wulabel_0.2.0_universal.dmg) |
+| Windows 10 / 11（64 位） | [Wulabel_0.2.1_x64-setup.exe](https://wulabel.xiaowuiot.com/download/Wulabel_0.2.1_x64-setup.exe) | [Wulabel_0.2.1_x64-setup.exe](https://github.com/xiaowu-iot/wulabel/releases/download/v0.2.1/Wulabel_0.2.1_x64-setup.exe) |
+| macOS 11 及以上（Apple 芯片和 Intel 通用） | [Wulabel_0.2.1_universal.dmg](https://wulabel.xiaowuiot.com/download/Wulabel_0.2.1_universal.dmg) | [Wulabel_0.2.1_universal.dmg](https://github.com/xiaowu-iot/wulabel/releases/download/v0.2.1/Wulabel_0.2.1_universal.dmg) |
 
 - 历史版本和更新说明：[GitHub Releases](https://github.com/xiaowu-iot/wulabel/releases) ｜ [Gitee 发行版](https://gitee.com/xiaowu-iot/wulabel/releases)
 - Windows 双击安装；Mac 打开 .dmg，把 Wulabel 拖进「应用程序」。
 - Mac 第一次打开会提示「无法验证开发者」（没有苹果开发者签名）：在「应用程序」里右键 Wulabel → 打开；macOS 15 以后到「系统设置 → 隐私与安全性」点「仍要打开」。提示「已损坏」的话，在终端执行 `xattr -cr /Applications/Wulabel.app`。
 
-## 当前功能（v0.2.0）
+## 当前功能（v0.2.1）
 
 | 模块 | 功能 |
 |---|---|
