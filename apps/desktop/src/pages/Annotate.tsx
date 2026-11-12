@@ -64,6 +64,9 @@ const STATUS_TEXT: Record<ImageStatus, { text: string; color?: string }> = {
 };
 const SOURCE_TEXT: Record<string, string> = { manual: "手工", model: "模型", sam: "SAM", ai: "巡瞳", text: "文本", interp: "插值", track: "跟踪" };
 const HISTORY_MAX = 200;
+// 底部缩略图条高度（像素）
+const STRIP_H_DEFAULT = 86;
+const clampStrip = (h: number) => (Number.isFinite(h) ? Math.min(320, Math.max(60, Math.round(h))) : STRIP_H_DEFAULT);
 
 /** COCO 人体 17 点（和后端 keypoints.rs 的默认模板一致） */
 const COCO_PERSON: KeypointTemplate = {
@@ -227,6 +230,8 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const [histLen, setHistLen] = useState({ past: 0, future: 0 });
   // 图像分类：选完类别自动下一张
   const [autoNext, setAutoNext] = useState(prefs.get("clsAutoNext", "1") === "1");
+  // 底部缩略图条的高度，拖它上边缘调整，双击恢复默认
+  const [stripH, setStripH] = useState(() => clampStrip(Number(prefs.get("stripH", String(STRIP_H_DEFAULT)))));
   const [tagHints, setTagHints] = useState<PredTag[]>([]);
   // 关键点
   const [template, setTemplate] = useState<KeypointTemplate | null>(null);
@@ -1274,8 +1279,28 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   ];
   const canPredict = aiSrc === "model" ? modelId != null : aiSrc === "ai" ? !!aiModel && !aiError : labels.length > 0;
 
+  const startStripResize = (e: { clientY: number; preventDefault: () => void }) => {
+    e.preventDefault();
+    const y0 = e.clientY;
+    const h0 = stripH;
+    let h = h0;
+    const move = (ev: MouseEvent) => {
+      h = clampStrip(h0 - (ev.clientY - y0));
+      setStripH(h);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.style.cursor = "";
+      prefs.set("stripH", String(h));
+    };
+    document.body.style.cursor = "row-resize";
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
   return (
-    <div className="annot">
+    <div className="annot" style={{ gridTemplateRows: `42px minmax(0, 1fr) ${stripH}px` }}>
       <div className="annot-top">
         <Button size="small" icon={<LeftOutlined />} disabled={idx === 0} onClick={() => go(idx - 1)} />
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -1851,9 +1876,18 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
         </section>
       </aside>
 
+      <div
+        className="annot-strip-grip"
+        title="拖动调整缩略图大小，双击恢复默认"
+        onMouseDown={startStripResize}
+        onDoubleClick={() => {
+          setStripH(STRIP_H_DEFAULT);
+          prefs.set("stripH", String(STRIP_H_DEFAULT));
+        }}
+      />
       <div className="annot-strip">
         {strip.map((id, i) => (
-          <div key={id} className={id === imageId ? "t on" : "t"} onClick={() => go(stripStart + i)}>
+          <div key={id} className={id === imageId ? "t on" : "t"} style={{ height: stripH - 26 }} onClick={() => go(stripStart + i)}>
             <img src={thumbUrl(project.path, id)} alt="" draggable={false} />
           </div>
         ))}
