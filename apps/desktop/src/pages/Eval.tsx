@@ -3,8 +3,8 @@ import { Alert, App, Button, Empty, Progress, Segmented, Select, Space, Table, T
 import { FileTextOutlined, ReloadOutlined } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
-import { api, ClassEval, errText, EvalProgress, ProjectInfo, RunDetail, RunInfo, thumbUrl } from "../api";
-import { useApp } from "../store";
+import { api, ClassEval, errText, EvalProgress, ProjectInfo, RunDetail, RunInfo, SplitEval, thumbUrl } from "../api";
+import { Mark, useApp } from "../store";
 import { fmtTime, metricNames, modelName, rateMetric } from "./Train";
 import { FpTestPanel, ThresholdPanel } from "../components/EvalTools";
 import { t } from "../i18n";
@@ -124,6 +124,31 @@ export default function Eval({ project }: { project: ProjectInfo }) {
     [ev, errKind],
   );
 
+  /** 带着错例去标注页：只在这批图里翻，检测项目把对不上的框叠在图上 */
+  const openErrors = (list: SplitEval["errors"], focus?: number) => {
+    const name = (c: number | null) => (c == null ? "" : (classes[c] ?? String(c)));
+    const marks: Record<number, Mark[]> = {};
+    if (!isCls) {
+      for (const e of list) {
+        marks[e.imageId] = (e.boxes ?? []).map((b) =>
+          b.k === "missed"
+            ? { bbox: b.box, text: t("漏：{name}", { name: name(b.gt) }), color: "#e5534b" }
+            : b.k === "extra"
+              ? { bbox: b.box, text: t("误：{name} {score}", { name: name(b.pred), score: (b.score ?? 0).toFixed(2) }), color: "#e8590c" }
+              : { bbox: b.box, text: t("错：标「{gt}」→ 判「{pred}」", { gt: name(b.gt), pred: name(b.pred) }), color: "#ae3ec9" },
+        );
+      }
+    }
+    annotateQueue(
+      list.map((e) => e.imageId),
+      t("评估错例"),
+      { focus, marks: isCls ? undefined : marks },
+    );
+  };
+  const filtered = (ev?.errors ?? []).filter((e) => errKind === "all" || e[errKind] > 0);
+  // 以前的评估结果没有记下具体的框，要重新评估一次
+  const noBoxes = !isCls && !!ev?.errors.length && !ev.errors.some((e) => e.boxes);
+
   // 只有正在训练的记录时也当成还没有模型
   if (!runs.some((r) => r.status !== "running")) {
     return (
@@ -237,7 +262,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
                     </Button>
                   )}
                   {ev.errors.length > 0 && (
-                    <Button size="small" onClick={() => annotateQueue(ev.errors.map((e) => e.imageId), t("评估错例"))}>
+                    <Button size="small" onClick={() => openErrors(ev.errors)}>
                       {t("把错例拿去标注")}
                     </Button>
                   )}
@@ -346,6 +371,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
                 {!isCls && (
                   <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
                     {t("漏：标了框但模型没找到 · 误：模型多报、你没标 · 错：位置对上了但类别不一样")}
+                    {noBoxes && <div style={{ color: "var(--warn)" }}>{t("点右上角「用当前数据评估」重新评估一次，点进错例就能在图上看到具体是哪个框")}</div>}
                   </div>
                 )}
               </div>
@@ -370,7 +396,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
             ) : (
               <div className="thumbs">
                 {errors.map((e) => (
-                  <div key={e.imageId} className="thumb" onClick={() => annotateQueue(errors.map((x) => x.imageId), t("评估错例"), { focus: e.imageId })}>
+                  <div key={e.imageId} className="thumb" onClick={() => openErrors(filtered, e.imageId)}>
                     <img src={thumbUrl(project.path, e.imageId)} loading="lazy" alt="" draggable={false} />
                     <span className="nm">
                       {isCls && e.gt != null && e.pred != null ? (

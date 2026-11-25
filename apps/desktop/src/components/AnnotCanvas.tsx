@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type Konva from "konva";
 import { Circle, Group, Image as KImage, Label as KLabel, Layer, Line, Rect, Stage, Tag, Text, Transformer } from "react-konva";
-import { t } from "../i18n";
+import type { Mark } from "../store";
 
 export interface Box {
   key: string;
@@ -49,8 +49,8 @@ interface Props {
   /** 多边形是否正在绘制中（供外层让出键盘快捷键） */
   onDrawing?: (drawing: boolean) => void;
   onScale?: (scale: number) => void;
-  /** 体检跳过来时高亮的问题框 */
-  highlight?: { bbox: [number, number, number, number]; text: string } | null;
+  /** 叠在图上的提示框（体检的问题位置、评估错例对不上的框），只看不改 */
+  marks?: Mark[];
   /** 关键点目标的点（目标框本身放在 boxes 里一起显示和调整） */
   kpts?: KptSet[];
   /** 骨架连线（点序号从 0 开始） */
@@ -620,24 +620,24 @@ export default function AnnotCanvas(p: Props) {
             />
           </Layer>
           <Layer listening={false}>
-            {p.highlight && (
-              <>
+            {p.marks?.map((m, i) => (
+              <Group key={i}>
                 <Rect
-                  x={p.highlight.bbox[0] - 3 / s}
-                  y={p.highlight.bbox[1] - 3 / s}
-                  width={p.highlight.bbox[2] + 6 / s}
-                  height={p.highlight.bbox[3] + 6 / s}
-                  stroke="#ffd43b"
+                  x={m.bbox[0] - 3 / s}
+                  y={m.bbox[1] - 3 / s}
+                  width={m.bbox[2] + 6 / s}
+                  height={m.bbox[3] + 6 / s}
+                  stroke={m.color}
                   strokeWidth={2.5}
                   strokeScaleEnabled={false}
                   dash={[8, 5]}
                 />
-                <KLabel x={p.highlight.bbox[0] - 3 / s} y={p.highlight.bbox[1] + p.highlight.bbox[3] + 5 / s}>
-                  <Tag fill="#ffd43b" />
-                  <Text text={t("体检：{text}", { text: p.highlight.text })} fontSize={fontSize} padding={fontSize * 0.25} fill="#1b1e23" />
+                <KLabel x={m.bbox[0] - 3 / s} y={m.bbox[1] + m.bbox[3] + 5 / s}>
+                  <Tag fill={m.color} />
+                  <Text text={m.text} fontSize={fontSize} padding={fontSize * 0.25} fill={m.fg ?? "#fff"} />
                 </KLabel>
-              </>
-            )}
+              </Group>
+            ))}
             <Rect
               ref={draftRef}
               visible={false}

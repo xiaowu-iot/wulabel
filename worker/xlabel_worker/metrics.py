@@ -213,6 +213,17 @@ def evaluate(preds: list[ImagePred], gts: list[ImageGt], num_classes: int, conf:
     )
 
 
+def _err_box(kind: str, b, gt, pred, score) -> dict:
+    x0, y0, x1, y1 = (float(v) for v in b)
+    return {
+        "k": kind,
+        "box": [round(x0, 1), round(y0, 1), round(x1 - x0, 1), round(y1 - y0, 1)],
+        "gt": gt,
+        "pred": pred,
+        "score": None if score is None else round(float(score), 3),
+    }
+
+
 def confusion_and_errors(preds, gts, num_classes: int, conf: float, iou: float = 0.5):
     """混淆矩阵（最后一行/列是背景）和每张图的错误统计。行是真实类别，列是预测类别。"""
     n = num_classes
@@ -229,7 +240,10 @@ def confusion_and_errors(preds, gts, num_classes: int, conf: float, iou: float =
             ((ious[i, j], i, j) for i in range(len(g.boxes)) for j in range(len(pb)) if ious[i, j] >= iou),
             reverse=True,
         )
+        ps = p.scores[keep]
         matched_g = set()
+        # 每个对不上的框：k 是 missed / extra / wrong，box 是 xywh 像素坐标，标注页叠在图上
+        boxes = []
         for _, i, j in pairs:
             if i in matched_g or j in matched_p:
                 continue
@@ -238,17 +252,20 @@ def confusion_and_errors(preds, gts, num_classes: int, conf: float, iou: float =
             cm[int(g.labels[i]), int(pl[j])] += 1
             if int(g.labels[i]) != int(pl[j]):
                 wrong += 1
+                boxes.append(_err_box("wrong", pb[j], int(g.labels[i]), int(pl[j]), ps[j]))
         for i in range(len(g.boxes)):
             if i not in matched_g:
                 cm[int(g.labels[i]), n] += 1
                 missed += 1
+                boxes.append(_err_box("missed", g.boxes[i], int(g.labels[i]), None, None))
         extra = 0
         for j in range(len(pb)):
             if j not in matched_p:
                 cm[n, int(pl[j])] += 1
                 extra += 1
+                boxes.append(_err_box("extra", pb[j], None, int(pl[j]), ps[j]))
         if missed or extra or wrong:
-            errors.append({"imageId": int(g.image_id), "missed": missed, "extra": extra, "wrong": wrong})
+            errors.append({"imageId": int(g.image_id), "missed": missed, "extra": extra, "wrong": wrong, "boxes": boxes})
     errors.sort(key=lambda e: -(e["missed"] + e["extra"] + e["wrong"]))
     return cm.tolist(), errors
 

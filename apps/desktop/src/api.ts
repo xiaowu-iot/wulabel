@@ -465,7 +465,16 @@ export interface SplitEval {
   perClass: ClassEval[];
   confusion: number[][];
   /** 分类模型的错例另有 gt（标的类别序号）、pred（判成的类别序号）、score */
-  errors: { imageId: number; missed: number; extra: number; wrong: number; gt?: number; pred?: number; score?: number | null }[];
+  errors: { imageId: number; missed: number; extra: number; wrong: number; gt?: number; pred?: number; score?: number | null; boxes?: ErrBox[] }[];
+}
+
+/** 检测错例里对不上的框（xywh 原图像素）：missed 标了没找到，extra 多报，wrong 类别判错 */
+export interface ErrBox {
+  k: "missed" | "extra" | "wrong";
+  box: [number, number, number, number];
+  gt: number | null;
+  pred: number | null;
+  score: number | null;
 }
 
 export interface RunDetail {

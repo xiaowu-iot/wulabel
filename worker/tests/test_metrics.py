@@ -36,7 +36,18 @@ class MetricsTest(unittest.TestCase):
         p = [pred([[0, 0, 10, 10]], [0.9], [0])]
         r = evaluate(p, g, 1)
         self.assertAlmostEqual(r.map50, 51 / 101, places=6)
-        self.assertEqual(r.errors, [{"imageId": 7, "missed": 1, "extra": 0, "wrong": 0}])
+        self.assertEqual(
+            r.errors,
+            [
+                {
+                    "imageId": 7,
+                    "missed": 1,
+                    "extra": 0,
+                    "wrong": 0,
+                    "boxes": [{"k": "missed", "box": [50.0, 50.0, 10.0, 10.0], "gt": 0, "pred": None, "score": None}],
+                }
+            ],
+        )
         self.assertAlmostEqual(r.recall, 0.5)
 
     def test_wrong_class_and_false_positive(self):
@@ -47,6 +58,10 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(r.confusion[2][0], 1)  # 背景被认成 0
         self.assertEqual(r.errors[0]["wrong"], 1)
         self.assertEqual(r.errors[0]["extra"], 1)
+        kinds = {b["k"]: b for b in r.errors[0]["boxes"]}
+        self.assertEqual((kinds["wrong"]["gt"], kinds["wrong"]["pred"]), (0, 1))
+        self.assertEqual(kinds["extra"]["box"], [100.0, 100.0, 20.0, 20.0])
+        self.assertAlmostEqual(kinds["extra"]["score"], 0.8)
         self.assertEqual(r.per_class[1]["ap50"], None)  # 类别 1 没有真实框
 
     def test_low_score_ignored_in_confusion(self):

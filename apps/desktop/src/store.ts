@@ -18,6 +18,15 @@ export interface Highlight {
   text: string;
 }
 
+/** 标注页叠在图上的提示框（只看不改）：体检发现的问题、评估错例里对不上的框 */
+export interface Mark {
+  bbox: [number, number, number, number];
+  text: string;
+  color: string;
+  /** 标签文字颜色，默认白色 */
+  fg?: string;
+}
+
 export type PageKey = "home" | "data" | "annotate" | "review" | "health" | "train" | "eval" | "deploy" | "team" | "settings";
 
 interface AppStore {
@@ -29,14 +38,14 @@ interface AppStore {
   highlight: Highlight | null;
   /** 指定顺序的一批图去标注（比如模型挑出来最值得标的），标注页会多一个筛选项 */
   /** 指定的一批图去标注；from 为 review 时标注页显示「返回审核」 */
-  queue: { ids: number[]; name: string; from?: "review"; marks?: Record<number, Highlight> } | null;
+  queue: { ids: number[]; name: string; from?: "review"; marks?: Record<number, Mark[]> } | null;
   /** 训练、评估、部署页打开时要选中的训练记录（比如训练页点「看评估」） */
   focusRunId: number | null;
   setProject: (p: ProjectInfo | null) => void;
   setPage: (p: PageKey) => void;
   annotateImage: (id: number, highlight?: Highlight) => void;
-  /** marks：这批图里每张要高亮的框（比如体检发现的问题位置） */
-  annotateQueue: (ids: number[], name: string, opts?: { from?: "review"; focus?: number; marks?: Record<number, Highlight> }) => void;
+  /** marks：这批图里每张要叠在图上的提示框（体检的问题位置、评估错例对不上的框） */
+  annotateQueue: (ids: number[], name: string, opts?: { from?: "review"; focus?: number; marks?: Record<number, Mark[]> }) => void;
   clearQueue: () => void;
   takeFocusImage: () => number | null;
   /** 带着训练记录去训练 / 评估 / 部署页 */
