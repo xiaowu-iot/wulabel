@@ -102,7 +102,7 @@ class Detector:
             x = (rgb.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]
             with self.lock:
                 probs = self.sess.run(None, {self.input: x})[0][0]
-            order = np.argsort(-probs) if self.multi else np.argsort(-probs)[:5]
+            order = np.argsort(-probs) if getattr(self, "multi", False) else np.argsort(-probs)[:5]
             return [{"label": self.name_of(int(i)), "score": round(float(probs[i]), 4)} for i in order if probs[i] >= min_score]
         h, w = bgr.shape[:2]
         scale = min(1.0, self.max_side / max(h, w))

@@ -121,6 +121,12 @@ class DeployTasksTest(unittest.TestCase):
         self.assertTrue(svc.in_region(dets[0].get("box"), [[0, 0], [0.1, 0], [0.1, 0.1]], 320, 240))
         self.assertEqual(svc.draw(bgr, dets).shape, bgr.shape)
 
+        # 多标签分类：分数够的类别都返回
+        det.multi = True
+        det.sess = Fake([np.array([[0.6, 0.7]], np.float32)])
+        self.assertEqual([d["label"] for d in det.detect(bgr, 0.5)], ["乙", "甲"])
+        det.multi = False
+
 
 if __name__ == "__main__":
     unittest.main()
