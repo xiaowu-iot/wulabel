@@ -18,6 +18,7 @@ mod keypoints;
 mod project;
 mod protocol;
 mod quality;
+mod review;
 mod report;
 mod runtime;
 mod share;
@@ -189,6 +190,11 @@ pub fn run() {
             commands::share_lock,
             commands::share_unlock,
             commands::share_review,
+            commands::review_query,
+            commands::review_ids,
+            commands::review_members,
+            commands::review_many,
+            commands::review_undo,
             commands::team_members,
             commands::team_add_member,
             commands::team_update_member,

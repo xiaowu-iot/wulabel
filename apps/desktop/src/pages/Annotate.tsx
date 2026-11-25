@@ -663,6 +663,23 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
         return;
       }
       const cur = metaRef.current?.id;
+      // 审核页批量通过 / 打回 / 撤销：刷新缩略图上的状态；正在看的这张也重新读
+      if (ev.kind === "status-batch") {
+        loadStatuses().catch(() => {});
+        if (cur != null && ev.ids?.includes(cur) && ev.memberId !== myId) {
+          if (readOnlyRef.current || !dirty.current) {
+            api
+              .loadAnnotations(cur)
+              .then((m) => {
+                if (metaRef.current?.id === cur) applyLoaded(m);
+              })
+              .catch(() => {});
+          }
+          relock(cur, false);
+          if (ev.action === "reject") message.warning(t("「{name}」打回了这张图", { name: ev.by }));
+        }
+        return;
+      }
       if (cur == null || ev.imageId !== cur) return;
       if ((ev.kind === "ann" || ev.kind === "status") && ev.memberId !== myId) {
         if (readOnlyRef.current || !dirty.current) {
@@ -1630,6 +1647,11 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
           options={queue ? [...filterOpts, { label: `${queue.name} ${queue.ids.length}`, value: "queue" }] : filterOpts}
           onChange={(v) => setFilter(v as string)}
         />
+        {queue?.from === "review" && (
+          <Button size="small" onClick={() => setPage("review")}>
+            {t("返回审核")}
+          </Button>
+        )}
         {queue && (
           <Tooltip title={t("不再显示这批图")}>
             <Button

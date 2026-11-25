@@ -18,7 +18,7 @@ export interface Highlight {
   text: string;
 }
 
-export type PageKey = "home" | "data" | "annotate" | "health" | "train" | "eval" | "deploy" | "team" | "settings";
+export type PageKey = "home" | "data" | "annotate" | "review" | "health" | "train" | "eval" | "deploy" | "team" | "settings";
 
 interface AppStore {
   project: ProjectInfo | null;
@@ -28,13 +28,14 @@ interface AppStore {
   /** 体检跳过来时要高亮的框（原图像素坐标） */
   highlight: Highlight | null;
   /** 指定顺序的一批图去标注（比如模型挑出来最值得标的），标注页会多一个筛选项 */
-  queue: { ids: number[]; name: string } | null;
+  /** 指定的一批图去标注；from 为 review 时标注页显示「返回审核」 */
+  queue: { ids: number[]; name: string; from?: "review" } | null;
   /** 训练、评估、部署页打开时要选中的训练记录（比如训练页点「看评估」） */
   focusRunId: number | null;
   setProject: (p: ProjectInfo | null) => void;
   setPage: (p: PageKey) => void;
   annotateImage: (id: number, highlight?: Highlight) => void;
-  annotateQueue: (ids: number[], name: string) => void;
+  annotateQueue: (ids: number[], name: string, opts?: { from?: "review"; focus?: number }) => void;
   clearQueue: () => void;
   takeFocusImage: () => number | null;
   /** 带着训练记录去训练 / 评估 / 部署页 */
@@ -60,7 +61,8 @@ export const useApp = create<AppStore>((set, get) => ({
       highlight: highlight ?? null,
       ...(get().queue && !get().queue!.ids.includes(id) ? { queue: null } : {}),
     }),
-  annotateQueue: (ids, name) => set({ queue: { ids, name }, focusImageId: null, highlight: null, page: "annotate" }),
+  annotateQueue: (ids, name, opts) =>
+    set({ queue: { ids, name, from: opts?.from }, focusImageId: opts?.focus ?? null, highlight: null, page: "annotate" }),
   clearQueue: () => set({ queue: null }),
   takeFocusImage: () => {
     const id = get().focusImageId;

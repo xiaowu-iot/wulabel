@@ -182,6 +182,19 @@ fn migrate(conn: &Connection) -> AppResult<()> {
              COMMIT;",
         )?;
     }
+    if version < 7 {
+        // 审核页：记下提交时间（按时间排序）；按标注人、按图查操作记录要快
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE images ADD COLUMN submitted_at INTEGER NOT NULL DEFAULT 0;
+             UPDATE images SET submitted_at = COALESCE(
+                 (SELECT MAX(created_at) FROM activity a WHERE a.image_id = images.id AND a.action IN ('submit', 'save')), 0);
+             CREATE INDEX idx_images_owner ON images(COALESCE(labeled_by, assignee));
+             CREATE INDEX idx_activity_image ON activity(image_id, action);
+             PRAGMA user_version = 7;
+             COMMIT;",
+        )?;
+    }
     Ok(())
 }
 

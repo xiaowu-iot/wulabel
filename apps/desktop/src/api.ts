@@ -728,6 +728,12 @@ export const api = {
   teamExportCsv: (from: number, to: number, path: string) => invoke<number>("team_export_csv", { from, to, path }),
   teamActivity: (limit: number, memberId: number | null, withSaves: boolean) =>
     invoke<ActivityRow[]>("team_activity", { limit, memberId, withSaves }),
+  // 审核页（发起人、审核员）
+  reviewQuery: (query: ReviewQuery, offset: number, limit: number) => invoke<ReviewPage>("review_query", { query, offset, limit }),
+  reviewIds: (query: ReviewQuery) => invoke<number[]>("review_ids", { query }),
+  reviewMembers: (query: ReviewQuery) => invoke<ReviewMember[]>("review_members", { query }),
+  reviewMany: (ids: number[], pass: boolean, reason: string) => invoke<BatchResult>("review_many", { ids, pass, reason }),
+  reviewUndo: (token: string) => invoke<number[]>("review_undo", { token }),
   /** 成员端：我是谁、项目、协作选项 */
   whoami: () => invoke<Whoami>("whoami"),
   myStats: () => invoke<{ member: Member | null; all: MemberStats | null; today: MemberStats | null }>("my_stats"),
@@ -827,6 +833,57 @@ export interface Member {
   rejected: number;
 }
 
+/** 审核页的筛选条件。成员指标注人（标过的按标注人，没标过的按分给谁） */
+export interface ReviewQuery {
+  member: number | null;
+  /** todo / labeled / reviewed / rejected / skipped，空数组表示全部 */
+  statuses: string[];
+  name: string;
+  labelId: number | null;
+  empty: boolean;
+  rejectedBefore: boolean;
+  sort: "time" | "name";
+  /** 只要这几张（逐张审核取单张用） */
+  ids?: number[];
+}
+
+export interface ReviewItem {
+  id: number;
+  name: string;
+  width: number;
+  height: number;
+  status: ImageStatus;
+  rejectReason: string;
+  rejectedBefore: boolean;
+  memberId: number | null;
+  member: string | null;
+  submittedAt: number;
+  annotations: Annotation[];
+}
+
+export interface ReviewPage {
+  total: number;
+  items: ReviewItem[];
+}
+
+export interface ReviewMember {
+  memberId: number;
+  name: string;
+  role: Role;
+  count: number;
+  pending: number;
+  passed: number;
+  rejected: number;
+}
+
+export interface BatchResult {
+  done: number;
+  skippedLocked: number;
+  skippedNotPending: number;
+  token: string;
+  ids: number[];
+}
+
 export interface MemberPatch {
   name?: string;
   role?: Role;
@@ -921,8 +978,10 @@ export interface Whoami {
 
 /** 实时事件（事件名 share-event） */
 export interface ShareEvent {
-  kind: "presence" | "ann" | "status" | "lock" | "labels" | "assign" | "kick" | "options" | "closed";
+  kind: "presence" | "ann" | "status" | "status-batch" | "lock" | "labels" | "assign" | "kick" | "options" | "closed";
   imageId?: number;
+  /** status-batch：审核页批量通过 / 打回 / 撤销涉及的图 */
+  ids?: number[];
   memberId?: number;
   by?: string;
   status?: ImageStatus;
