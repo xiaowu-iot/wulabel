@@ -1720,5 +1720,10 @@
   "都看过了": "Đã xem hết",
   "每个类别用自己的推荐阈值": "Mỗi lớp dùng ngưỡng đề xuất riêng",
   "评估时按类别算出：{list}。其余类别用置信度阈值。": "Tính theo từng lớp khi đánh giá: {list}. Các lớp khác dùng ngưỡng tin cậy.",
-  "所有类别用同一个置信度阈值。": "Tất cả các lớp dùng chung một ngưỡng tin cậy."
+  "所有类别用同一个置信度阈值。": "Tất cả các lớp dùng chung một ngưỡng tin cậy.",
+  "新增多标签分类：一张图可以同时打好几个类别（比如退货商品既有划痕又缺配件），标注、训练、评估、部署都支持，部署时每个类别用自己的推荐阈值；检测、分割、关键点项目可以在数据页一键转成多标签项目。": "Thêm phân loại đa nhãn: một ảnh có thể gắn nhiều lớp cùng lúc (ví dụ hàng trả lại vừa bị trầy vừa thiếu phụ kiện), hỗ trợ từ gán nhãn, huấn luyện, đánh giá đến triển khai; khi triển khai mỗi lớp dùng ngưỡng đề xuất riêng. Dự án phát hiện, phân đoạn, điểm khóa có thể chuyển thành dự án đa nhãn chỉ bằng một cú nhấp ở trang Dữ liệu.",
+  "部署页新增「批量识别」：把一个文件夹的图片都识别一遍，导出 Excel 能直接打开的表格，可以按类别把图片复制到各自的文件夹；拿不准的图一键加进项目去标。": "Trang Triển khai có thêm \"Nhận diện hàng loạt\": nhận diện toàn bộ ảnh trong một thư mục, xuất bảng mở thẳng bằng Excel, và có thể sao chép ảnh vào thư mục theo từng lớp. Ảnh chưa chắc chắn có thể thêm vào dự án để gán nhãn chỉ bằng một cú nhấp.",
+  "评估错例和体检跳到标注页后，只在这批图里翻；图上直接标出漏检、误报、标错类别的具体框。": "Khi mở các lỗi đánh giá hoặc vấn đề kiểm tra dữ liệu ở trang Gán nhãn, giờ chỉ duyệt trong đúng lô ảnh đó, và các khung bị sót, thừa hay sai lớp được vẽ ngay trên ảnh.",
+  "训练前提醒标得太少的类别，以及预标注没人改过的图，可以一键去看这批。": "Trước khi huấn luyện, ứng dụng nhắc các lớp có quá ít nhãn và các ảnh có nhãn gán trước chưa ai sửa, kèm nút xem lại lô đó.",
+  "教程新增「怎么选任务类型」，按常见场景说明该用检测、分割、分类还是多标签。": "Hướng dẫn có thêm mục \"Chọn loại tác vụ\", giải thích theo từng tình huống khi nào dùng phát hiện, phân đoạn, phân loại hay đa nhãn."
 }

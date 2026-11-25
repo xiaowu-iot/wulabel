@@ -1720,5 +1720,10 @@
   "都看过了": "Tout vérifié",
   "每个类别用自己的推荐阈值": "Utiliser le seuil recommandé de chaque classe",
   "评估时按类别算出：{list}。其余类别用置信度阈值。": "Calculé par classe lors de l'évaluation : {list}. Les autres classes utilisent le seuil de confiance.",
-  "所有类别用同一个置信度阈值。": "Toutes les classes utilisent le même seuil de confiance."
+  "所有类别用同一个置信度阈值。": "Toutes les classes utilisent le même seuil de confiance.",
+  "新增多标签分类：一张图可以同时打好几个类别（比如退货商品既有划痕又缺配件），标注、训练、评估、部署都支持，部署时每个类别用自己的推荐阈值；检测、分割、关键点项目可以在数据页一键转成多标签项目。": "Nouvelle classification multi-étiquette : une image peut porter plusieurs classes à la fois (par exemple un produit retourné à la fois rayé et incomplet), prise en charge de l'annotation à l'entraînement, à l'évaluation et au déploiement, où chaque classe utilise son propre seuil recommandé. Les projets de détection, segmentation et points clés peuvent être convertis en projet multi-étiquette en un clic depuis la page Données.",
+  "部署页新增「批量识别」：把一个文件夹的图片都识别一遍，导出 Excel 能直接打开的表格，可以按类别把图片复制到各自的文件夹；拿不准的图一键加进项目去标。": "Nouvelle « Reconnaissance par lot » sur la page Déploiement : reconnaît toutes les images d'un dossier, exporte un tableau qui s'ouvre directement dans Excel et peut copier les images dans un dossier par classe. Les images incertaines s'ajoutent au projet pour annotation en un clic.",
+  "评估错例和体检跳到标注页后，只在这批图里翻；图上直接标出漏检、误报、标错类别的具体框。": "Quand vous ouvrez sur la page Annotation les erreurs de l'évaluation ou les problèmes du bilan de santé, vous ne parcourez plus que ces images, et les boîtes manquées, en trop ou de mauvaise classe sont dessinées sur l'image.",
+  "训练前提醒标得太少的类别，以及预标注没人改过的图，可以一键去看这批。": "Avant l'entraînement, un avertissement signale les classes trop peu annotées et les images dont les pré-annotations n'ont jamais été modifiées, avec un clic pour les revoir.",
+  "教程新增「怎么选任务类型」，按常见场景说明该用检测、分割、分类还是多标签。": "Le tutoriel comporte une nouvelle section « Choisir le type de tâche » qui explique, scénario par scénario, quand utiliser la détection, la segmentation, la classification ou le multi-étiquette."
 }

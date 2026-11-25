@@ -1720,5 +1720,10 @@
   "都看过了": "Ya revisadas",
   "每个类别用自己的推荐阈值": "Usar el umbral recomendado de cada clase",
   "评估时按类别算出：{list}。其余类别用置信度阈值。": "Calculado por clase en la evaluación: {list}. Las demás clases usan el umbral de confianza.",
-  "所有类别用同一个置信度阈值。": "Todas las clases usan el mismo umbral de confianza."
+  "所有类别用同一个置信度阈值。": "Todas las clases usan el mismo umbral de confianza.",
+  "新增多标签分类：一张图可以同时打好几个类别（比如退货商品既有划痕又缺配件），标注、训练、评估、部署都支持，部署时每个类别用自己的推荐阈值；检测、分割、关键点项目可以在数据页一键转成多标签项目。": "Nueva clasificación multietiqueta: una imagen puede tener varias clases a la vez (por ejemplo, un producto devuelto rayado y al que le faltan accesorios), con soporte en anotación, entrenamiento, evaluación y despliegue, donde cada clase usa su propio umbral recomendado. Los proyectos de detección, segmentación y puntos clave se pueden convertir en un proyecto multietiqueta con un clic desde la página Datos.",
+  "部署页新增「批量识别」：把一个文件夹的图片都识别一遍，导出 Excel 能直接打开的表格，可以按类别把图片复制到各自的文件夹；拿不准的图一键加进项目去标。": "Nuevo «Reconocimiento por lotes» en la página Desplegar: reconoce todas las imágenes de una carpeta, exporta una tabla que se abre directamente en Excel y, si quieres, copia las imágenes a una carpeta por clase. Las imágenes dudosas se añaden al proyecto para anotarlas con un clic.",
+  "评估错例和体检跳到标注页后，只在这批图里翻；图上直接标出漏检、误报、标错类别的具体框。": "Al abrir en Anotar los errores de la evaluación o los problemas de la revisión de salud, ahora solo recorres esas imágenes, y se dibujan las cajas exactas omitidas, sobrantes o con clase equivocada.",
+  "训练前提醒标得太少的类别，以及预标注没人改过的图，可以一键去看这批。": "Antes de entrenar se avisa de las clases con muy pocas anotaciones y de las imágenes cuyas preanotaciones nadie ha editado, con un clic para revisarlas.",
+  "教程新增「怎么选任务类型」，按常见场景说明该用检测、分割、分类还是多标签。": "El tutorial incluye una nueva sección «Cómo elegir el tipo de tarea» que explica, según el escenario, cuándo usar detección, segmentación, clasificación o multietiqueta."
 }
