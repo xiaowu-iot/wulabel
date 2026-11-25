@@ -223,6 +223,8 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   useEffect(() => {
     if (filter === "queue" && !queue) setFilter("all");
   }, [filter, queue]);
+  // 体检问题、评估错例的提示框，挡着看图时可以先藏起来
+  const [showMarks, setShowMarks] = useState(true);
   const [ids, setIds] = useState<number[] | null>(null);
   const [idx, setIdx] = useState(0);
   /** 每张图的状态（缩略图状态点、跳到下一张未标注用）；拿不到时是空的 */
@@ -1652,6 +1654,11 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             {t("返回审核")}
           </Button>
         )}
+        {filter === "queue" && queue?.marks && (
+          <Button size="small" type={showMarks ? "default" : "text"} onClick={() => setShowMarks((v) => !v)}>
+            {showMarks ? t("隐藏提示框") : t("显示提示框")}
+          </Button>
+        )}
         {queue && (
           <Tooltip title={t("不再显示这批图")}>
             <Button
@@ -1816,10 +1823,12 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             onUpdatePoly={onUpdatePoly}
             onDrawing={setDrawingPoly}
             onScale={setScale}
-            highlight={
-              highlight && highlight.imageId === imageId
-                ? highlight
-                : (filter === "queue" && imageId != null && queue?.marks?.[imageId]) || null
+            marks={
+              showMarks
+                ? highlight && highlight.imageId === imageId
+                  ? [{ bbox: highlight.bbox, text: t("体检：{text}", { text: highlight.text }), color: "#ffd43b", fg: "#1b1e23" }]
+                  : (filter === "queue" && imageId != null && queue?.marks?.[imageId]) || undefined
+                : undefined
             }
             kpts={poses.map((p) => ({ key: p.key, labelId: p.labelId, kpts: p.kpts }))}
             skeleton={template?.skeleton}

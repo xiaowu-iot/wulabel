@@ -1628,5 +1628,11 @@
   "团队协作新增「审核」页：按成员、状态、文件名筛选，宫格里直接看到每张图标的框，勾选后批量通过或打回，10 秒内可以撤销；也可以逐张看，或者按比例抽检，按合格率把其余的图一起通过或打回。": "Nueva página de Revisión en la colaboración en equipo: filtra por miembro, estado y nombre de archivo, ve los cuadros de cada imagen directamente en la cuadrícula, aprueba o rechaza las seleccionadas de una vez y deshaz en 10 segundos; también puedes revisar una a una, o hacer un muestreo y aprobar o rechazar el resto según la tasa de aciertos.",
   "浏览器里的审核员登录后直接进审核页，可以切到标注；协作页每个标注员后面有「看他的图」，点一下就筛出他的待审核图。": "Los revisores en el navegador entran directamente en la página de Revisión al iniciar sesión y pueden cambiar a Anotar; en la página de Colaboración, cada anotador tiene «Ver sus imágenes», que muestra sus imágenes pendientes de revisión.",
   "团队协作时，没有目标的图也能提交，作为负样本进待审核，由审核员确认。": "En la colaboración en equipo, las imágenes sin objetos también se pueden enviar: pasan a pendiente de revisión como muestras negativas para que un revisor las confirme.",
-  "漏：标了框但模型没找到 · 误：模型多报、你没标 · 错：位置对上了但类别不一样": "No detectados: etiquetados pero el modelo no los encontró · FP: el modelo detectó algo que no etiquetaste · Incorrectas: lugar correcto, clase equivocada"
+  "漏：标了框但模型没找到 · 误：模型多报、你没标 · 错：位置对上了但类别不一样": "No detectados: etiquetados pero el modelo no los encontró · FP: el modelo detectó algo que no etiquetaste · Incorrectas: lugar correcto, clase equivocada",
+  "漏：{name}": "No detectado: {name}",
+  "误：{name} {score}": "FP: {name} {score}",
+  "错：标「{gt}」→ 判「{pred}」": "Incorrecta: anotada «{gt}» → predicha «{pred}»",
+  "隐藏提示框": "Ocultar cuadros de ayuda",
+  "显示提示框": "Mostrar cuadros de ayuda",
+  "点右上角「用当前数据评估」重新评估一次，点进错例就能在图上看到具体是哪个框": "Pulsa «Evaluar con los datos actuales» arriba a la derecha para volver a evaluar; al abrir un error verás en la imagen qué cuadros fallan"
 }
