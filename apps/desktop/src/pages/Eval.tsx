@@ -3,7 +3,7 @@ import { Alert, App, Button, Empty, Progress, Segmented, Select, Space, Table, T
 import { FileTextOutlined, ReloadOutlined } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
-import { api, ClassEval, errText, EvalProgress, ProjectInfo, RunDetail, RunInfo, SplitEval, thumbUrl } from "../api";
+import { api, ClassEval, errText, EvalProgress, isClsTask, ProjectInfo, RunDetail, RunInfo, SplitEval, thumbUrl } from "../api";
 import { Mark, useApp } from "../store";
 import { fmtTime, metricNames, modelName, rateMetric } from "./Train";
 import { FpTestPanel, ThresholdPanel } from "../components/EvalTools";
@@ -13,7 +13,11 @@ const pct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).
 
 export default function Eval({ project }: { project: ProjectInfo }) {
   const { message } = App.useApp();
-  const isCls = project.task === "classify";
+  const isCls = isClsTask(project.task);
+  // 多标签分类：每个类别各自判断，没有混淆矩阵；错例是漏判、多判的标签
+  const multi = project.task === "multilabel";
+  // 单标签分类的主指标（准确率）按百分比显示
+  const pctMain = project.task === "classify";
   const mn = metricNames(project.task);
   const annotateQueue = useApp((s) => s.annotateQueue);
   const setPage = useApp((s) => s.setPage);
@@ -189,7 +193,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
               : split === "val"
                 ? t("用第 {epoch} 轮的最好模型，在验证集上（{n} 张）。", descVars)
                 : t("用第 {epoch} 轮的最好模型，在测试集上（{n} 张）。", descVars)}
-            {isCls ? t("每张图取模型分数最高的类别。") : t("置信度阈值 0.25，IoU 0.5。")}
+            {multi ? t("每个类别分数达到 0.5 算有。") : isCls ? t("每张图取模型分数最高的类别。") : t("置信度阈值 0.25，IoU 0.5。")}
             {(project.task === "segment" || project.task === "pose") && t("分割和关键点模型这里按目标框计算指标。")}
           </p>
         </div>
@@ -249,7 +253,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
               style={{ marginBottom: 12 }}
               message={
                 <span>
-                  {t("结论：{rate}（{metric} {v}）", { rate: rate.word, metric: mn.m50, v: isCls ? pct(ev.map50) : ev.map50.toFixed(3) })}
+                  {t("结论：{rate}（{metric} {v}）", { rate: rate.word, metric: mn.m50, v: pctMain ? pct(ev.map50) : ev.map50.toFixed(3) })}
                   {ev.images < 10 && ` · ${split === "val" ? t("验证集太少，指标波动大") : t("测试集太少，指标波动大")}`}
                   {worst && worst.ap50 != null && ` · ${t("最差的类别「{name}」（{metric} {v}）", { name: worst.name, metric: isCls ? "F1" : "AP50", v: worst.ap50.toFixed(3) })}`}
                 </span>
@@ -258,7 +262,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
                 <Space size={6} wrap>
                   {ev.errors.length > 0 && (
                     <Button size="small" onClick={() => showErrors(!isCls && ev.errors.some((e) => e.missed > 0) ? "missed" : "all")}>
-                      {isCls ? t("看分错的图") : ev.errors.some((e) => e.missed > 0) ? t("看漏检的错例") : t("看错例")}
+                      {multi ? t("看错例") : isCls ? t("看分错的图") : ev.errors.some((e) => e.missed > 0) ? t("看漏检的错例") : t("看错例")}
                     </Button>
                   )}
                   {ev.errors.length > 0 && (
@@ -281,33 +285,62 @@ export default function Eval({ project }: { project: ProjectInfo }) {
               }
             />
           )}
-          <div className="cards" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginBottom: 12 }}>
-            <Tooltip title={isCls ? t("分对的图片占全部图片的比例") : t("IoU 0.5 时各类别平均精度的均值，最常用的检测指标")}>
+          <div className="cards" style={{ gridTemplateColumns: `repeat(${multi ? 5 : 4}, 1fr)`, marginBottom: 12 }}>
+            <Tooltip
+              title={
+                multi
+                  ? t("每个类别按分数排序算平均精度（AP），再对所有类别取平均，和阈值无关")
+                  : isCls
+                    ? t("分对的图片占全部图片的比例")
+                    : t("IoU 0.5 时各类别平均精度的均值，最常用的检测指标")
+              }
+            >
               <div className="card">
                 <div className="muted">{mn.m50}</div>
-                <div className="kpi">{isCls ? pct(ev.map50) : ev.map50.toFixed(3)}</div>
+                <div className="kpi">{pctMain ? pct(ev.map50) : ev.map50.toFixed(3)}</div>
               </div>
             </Tooltip>
             <Tooltip title={isCls ? t("各类别 F1 的平均，类别不均衡时比准确率更能反映效果") : t("IoU 0.5~0.95 的平均，对框的准确度要求更高")}>
               <div className="card"><div className="muted">{mn.m}</div><div className="kpi">{ev.map.toFixed(3)}</div></div>
             </Tooltip>
-            <Tooltip title={isCls ? t("各类别精确率的平均：判成某类的图里，真是这一类的比例") : t("模型报出来的框里，正确的比例。低说明误报多")}>
+            <Tooltip
+              title={
+                multi
+                  ? t("各类别精确率的平均：判出有这个类别的图里，真有这个类别的比例")
+                  : isCls
+                    ? t("各类别精确率的平均：判成某类的图里，真是这一类的比例")
+                    : t("模型报出来的框里，正确的比例。低说明误报多")
+              }
+            >
               <div className="card"><div className="muted">{isCls ? t("平均精确率") : t("精确率")}</div><div className="kpi">{pct(ev.precision)}</div></div>
             </Tooltip>
-            <Tooltip title={isCls ? t("各类别召回率的平均：某类的图里，被判对的比例") : t("真实目标里，被找到的比例。低说明漏检多")}>
+            <Tooltip
+              title={
+                multi
+                  ? t("各类别召回率的平均：有这个类别的图里，被判出来的比例")
+                  : isCls
+                    ? t("各类别召回率的平均：某类的图里，被判对的比例")
+                    : t("真实目标里，被找到的比例。低说明漏检多")
+              }
+            >
               <div className="card"><div className="muted">{isCls ? t("平均召回率") : t("召回率")}</div><div className="kpi">{pct(ev.recall)}</div></div>
             </Tooltip>
+            {multi && (
+              <Tooltip title={t("一张图的标签全部判对（不多也不少）的图片比例")}>
+                <div className="card"><div className="muted">{t("标签全对")}</div><div className="kpi">{pct(ev.exact ?? 0)}</div></div>
+              </Tooltip>
+            )}
           </div>
 
           {ev.thresholds ? (
-            <ThresholdPanel th={ev.thresholds} isCls={isCls} />
+            <ThresholdPanel th={ev.thresholds} isCls={isCls && !multi} />
           ) : (
             <div className="dim" style={{ fontSize: 12, marginBottom: 12 }}>
               {t("这次评估没有阈值曲线（旧版本训练的），点「用当前数据评估」就能算出推荐阈值。")}
             </div>
           )}
 
-          <div className="cards" style={{ gridTemplateColumns: "1fr 1fr", marginBottom: 12 }}>
+          <div className="cards" style={{ gridTemplateColumns: multi ? "1fr" : "1fr 1fr", marginBottom: 12 }}>
             <div className="card">
               <div className="muted" style={{ marginBottom: 8 }}>{t("各类别")}</div>
               <Table<ClassEval>
@@ -329,9 +362,19 @@ export default function Eval({ project }: { project: ProjectInfo }) {
                     dataIndex: "ap50",
                     render: (v: number | null) => <span style={{ color: v != null && v < 0.6 ? "var(--bad)" : undefined }}>{v == null ? "—" : v.toFixed(3)}</span>,
                   },
+                  ...(multi
+                    ? [
+                        {
+                          title: "AP",
+                          dataIndex: "ap",
+                          render: (v: number | null) => (v == null ? "—" : v.toFixed(3)),
+                        },
+                      ]
+                    : []),
                 ]}
               />
             </div>
+            {!multi && (
             <div className="card" style={{ overflow: "auto" }}>
               <div className="muted" style={{ marginBottom: 8 }}>{t("混淆矩阵")} <span className="dim">{t("（行：真实，列：预测）")}</span></div>
               <table className="cm">
@@ -362,12 +405,18 @@ export default function Eval({ project }: { project: ProjectInfo }) {
                 {isCls ? t("对角线是分对的，其他格子是把某类误判成另一类。") : t("最后一列「背景」是漏检，最后一行「背景」是误报。")}
               </div>
             </div>
+            )}
           </div>
 
           <div className="card" ref={errBox}>
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
               <div className="muted">
                 {t("错例")} <span className="dim">· {t("点图片去标注页检查和修改")}</span>
+                {multi && (
+                  <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
+                    {t("漏：标了但模型没判出来 · 多：模型判出来了但没标")}
+                  </div>
+                )}
                 {!isCls && (
                   <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
                     {t("漏：标了框但模型没找到 · 误：模型多报、你没标 · 错：位置对上了但类别不一样")}
@@ -375,7 +424,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
                   </div>
                 )}
               </div>
-              {isCls ? (
+              {isCls && !multi ? (
                 <span className="dim" style={{ fontSize: 12 }}>{t("分错 {n} 张，按模型把握从高到低（越靠前越可能是标错了）", { n: ev.errors.length })}</span>
               ) : (
                 <Segmented
@@ -384,9 +433,15 @@ export default function Eval({ project }: { project: ProjectInfo }) {
                   onChange={(v) => setErrKind(v as typeof errKind)}
                   options={[
                     { value: "all", label: t("全部 {n}", { n: ev.errors.length }) },
-                    { value: "missed", label: t("有漏检 {n}", { n: ev.errors.filter((e) => e.missed).length }) },
-                    { value: "extra", label: t("有误报 {n}", { n: ev.errors.filter((e) => e.extra).length }) },
-                    { value: "wrong", label: t("类别错 {n}", { n: ev.errors.filter((e) => e.wrong).length }) },
+                    {
+                      value: "missed",
+                      label: multi ? t("有漏判 {n}", { n: ev.errors.filter((e) => e.missed).length }) : t("有漏检 {n}", { n: ev.errors.filter((e) => e.missed).length }),
+                    },
+                    {
+                      value: "extra",
+                      label: multi ? t("有多判 {n}", { n: ev.errors.filter((e) => e.extra).length }) : t("有误报 {n}", { n: ev.errors.filter((e) => e.extra).length }),
+                    },
+                    ...(multi ? [] : [{ value: "wrong", label: t("类别错 {n}", { n: ev.errors.filter((e) => e.wrong).length }) }]),
                   ]}
                 />
               )}
@@ -399,7 +454,12 @@ export default function Eval({ project }: { project: ProjectInfo }) {
                   <div key={e.imageId} className="thumb" onClick={() => openErrors(filtered, e.imageId)}>
                     <img src={thumbUrl(project.path, e.imageId)} loading="lazy" alt="" draggable={false} />
                     <span className="nm">
-                      {isCls && e.gt != null && e.pred != null ? (
+                      {multi ? (
+                        [
+                          ...(e.miss ?? []).map((c) => t("漏：{name}", { name: classes[c] ?? c })),
+                          ...(e.add ?? []).map(([c]) => t("多：{name}", { name: classes[c] ?? c })),
+                        ].join(" · ")
+                      ) : isCls && e.gt != null && e.pred != null ? (
                         t("标「{gt}」→ 判「{pred}」", { gt: classes[e.gt] ?? e.gt, pred: classes[e.pred] ?? e.pred })
                       ) : (
                         <>

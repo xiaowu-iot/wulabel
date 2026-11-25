@@ -72,7 +72,7 @@ Các trường của mỗi mục trong `detections` tùy theo mô hình. Trườ
 | Phát hiện đối tượng | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Phân đoạn thực thể | `segment` | Như trên, thêm `polygon` [x1, y1, x2, y2, …] (đường viền đối tượng, pixel ảnh gốc) |
 | Điểm chính | `pose` | Như trên, thêm `keypoints` [x, y, v, …] (v = 2: tìm thấy, 0: không tìm thấy); ảnh chụp cảnh báo vẽ khung xương theo `skeleton` trong `config.json` |
-| Phân loại ảnh | `classify` | `label`, `score`, không có `box`: mỗi lớp có xác suất đạt `min_score` là một mục (tối đa 5). Phân loại xét toàn bộ khung hình, không lọc theo `region` |
+| Phân loại ảnh | `classify` | `label`, `score`, không có `box`: mỗi lớp có xác suất đạt `min_score` là một mục (tối đa 5; mô hình đa nhãn không giới hạn). Phân loại xét toàn bộ khung hình, không lọc theo `region` |
 
 ## API HTTP
 

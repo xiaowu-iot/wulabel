@@ -1,6 +1,6 @@
 //! 导入带标注的数据集：自动识别 YOLO（含分割、关键点）/ COCO（含分割、关键点）/ VOC / 分类文件夹
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -439,7 +439,7 @@ fn read(dir: &Path, task: &str) -> AppResult<(String, Vec<Item>, Option<KptInfo>
     if !dir.is_dir() {
         return Err(msg(t!("请选择数据集所在的文件夹")));
     }
-    if task == "classify" {
+    if crate::project::is_classify(task) {
         let items = read_cls(dir);
         if !items.is_empty() {
             return Ok((t!("分类文件夹"), items, None));
@@ -533,9 +533,23 @@ pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync))
     // 3. 写标注：已经有标注的图不覆盖
     let mut boxes = 0;
     let mut kept_existing = 0;
+    // 多标签分类：同一张图放在好几个类别文件夹里，就是这几个类别都有，合到同一张图上
+    let multi = p.meta.task == "multilabel";
+    let mut written: HashSet<i64> = HashSet::new();
     for it in &items {
         let Some(&id) = ids.get(&it.src) else { continue };
         let current = annotations::load(p, id)?;
+        if multi && written.contains(&id) {
+            if let Some(lid) = it.tag.as_ref().and_then(|n| labels.get(n).copied()) {
+                let mut anns: Vec<Annotation> = current.annotations.clone();
+                if !anns.iter().any(|a| a.label_id == Some(lid)) {
+                    anns.push(Annotation { label_id: Some(lid), kind: "tag".into(), data: serde_json::json!([]), score: None, source: "manual".into() });
+                    boxes += 1;
+                    annotations::save(p, id, &anns)?;
+                }
+            }
+            continue;
+        }
         if !current.annotations.is_empty() {
             kept_existing += 1;
             continue;
@@ -648,6 +662,7 @@ pub fn import(p: &Project, dir: &Path, progress: &(dyn Fn(usize, usize) + Sync))
         if !anns.is_empty() {
             boxes += anns.len();
             annotations::save(p, id, &anns)?;
+            written.insert(id);
         }
         if let Some(s) = &it.split {
             p.conn.lock().execute("UPDATE images SET split = ?2 WHERE id = ?1 AND split = 'unset'", params![id, s])?;

@@ -72,7 +72,7 @@ Les champs de chaque élément de `detections` dépendent du modèle. Le champ `
 | Détection d'objets | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Segmentation d'instances | `segment` | Idem, plus `polygon` [x1, y1, x2, y2, …] (contour de l'objet, pixels de l'image d'origine) |
 | Points clés | `pose` | Idem, plus `keypoints` [x, y, v, …] (v = 2 : trouvé, 0 : non trouvé) ; les captures d'alerte tracent le squelette selon `skeleton` dans `config.json` |
-| Classification d'images | `classify` | `label`, `score`, sans `box` : un élément par classe dont la probabilité atteint `min_score` (5 au plus). La classification porte sur l'image entière et ne filtre pas par `region` |
+| Classification d'images | `classify` | `label`, `score`, sans `box` : un élément par classe dont la probabilité atteint `min_score` (5 au plus ; sans limite pour les modèles multi-étiquettes). La classification porte sur l'image entière et ne filtre pas par `region` |
 
 ## API HTTP
 

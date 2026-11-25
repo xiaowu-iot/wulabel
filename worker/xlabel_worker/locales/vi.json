@@ -126,5 +126,10 @@
   "下载完成：{name}（{size}）": "Đã tải xong: {name} ({size})",
   "这张显卡需要 CUDA 12.8 版的 PyTorch，请改选后重新安装": "GPU này cần PyTorch bản CUDA 12.8, hãy chọn lại rồi cài đặt lại",
   "显卡和装的 PyTorch 版本不匹配，请换一个 CUDA 版本重新安装": "GPU và phiên bản PyTorch đã cài không khớp, hãy cài lại với phiên bản CUDA khác",
-  "从第 {epoch} 轮接着训练（共 {epochs} 轮）": "Huấn luyện tiếp từ epoch {epoch} (tổng {epochs} epoch)"
+  "从第 {epoch} 轮接着训练（共 {epochs} 轮）": "Huấn luyện tiếp từ epoch {epoch} (tổng {epochs} epoch)",
+  "这个模型和项目一个是多标签分类、一个是单标签分类，不能用来评估": "Mô hình và dự án không khớp (một bên đa nhãn, một bên đơn nhãn), không thể đánh giá",
+  "验证集：{n} 张，mAP {map50}": "Tập kiểm định: {n} ảnh, mAP {map50}",
+  "测试集：{n} 张，mAP {map50}": "Tập kiểm tra: {n} ảnh, mAP {map50}",
+  "probs [N, 类别数]，每个类别各自的分数（已 sigmoid，多标签：分数达到阈值的类别都算有），类别顺序见 classes": "probs [N, số lớp], điểm độc lập cho từng lớp (đã sigmoid; đa nhãn: lớp nào đạt ngưỡng đều tính là có), thứ tự lớp xem classes",
+  "第 {epoch} 轮 mAP {map50}、宏平均 F1 {f1}，保存为最好的模型": "Vòng {epoch}: mAP {map50}, F1 vĩ mô {f1}, đã lưu là mô hình tốt nhất"
 }

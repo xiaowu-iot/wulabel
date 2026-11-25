@@ -126,5 +126,10 @@
   "下载完成：{name}（{size}）": "Téléchargé : {name} ({size})",
   "这张显卡需要 CUDA 12.8 版的 PyTorch，请改选后重新安装": "Ce GPU nécessite PyTorch pour CUDA 12.8 ; sélectionnez-le puis réinstallez",
   "显卡和装的 PyTorch 版本不匹配，请换一个 CUDA 版本重新安装": "Le GPU ne correspond pas à la version de PyTorch installée ; réinstallez avec une autre version de CUDA",
-  "从第 {epoch} 轮接着训练（共 {epochs} 轮）": "Reprise à l'époque {epoch} (sur {epochs})"
+  "从第 {epoch} 轮接着训练（共 {epochs} 轮）": "Reprise à l'époque {epoch} (sur {epochs})",
+  "这个模型和项目一个是多标签分类、一个是单标签分类，不能用来评估": "Le modèle et le projet ne correspondent pas (l'un multi-étiquettes, l'autre mono-étiquette) ; évaluation impossible",
+  "验证集：{n} 张，mAP {map50}": "Validation : {n} images, mAP {map50}",
+  "测试集：{n} 张，mAP {map50}": "Test : {n} images, mAP {map50}",
+  "probs [N, 类别数]，每个类别各自的分数（已 sigmoid，多标签：分数达到阈值的类别都算有），类别顺序见 classes": "probs [N, nb de classes], score indépendant par classe (sigmoid appliquée ; multi-étiquettes : toute classe atteignant le seuil est présente), ordre des classes dans classes",
+  "第 {epoch} 轮 mAP {map50}、宏平均 F1 {f1}，保存为最好的模型": "Époque {epoch} : mAP {map50}, F1 macro {f1}, enregistré comme meilleur modèle"
 }

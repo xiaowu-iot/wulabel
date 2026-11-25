@@ -16,19 +16,29 @@ from .protocol import emit, log
 
 
 class _ClsNet(torch.nn.Module):
-    """分类模型导出用：输入 RGB 0~1，模型里做 ImageNet 归一化，输出各类别概率"""
+    """分类模型导出用：输入 RGB 0~1，模型里做 ImageNet 归一化，输出各类别概率（多标签是每个类别各自的 sigmoid 分数）"""
 
-    def __init__(self, m):
+    def __init__(self, m, multi: bool = False):
         super().__init__()
         self.m = m
+        self.multi = multi
         self.register_buffer("mean", torch.tensor(models.IMAGENET_MEAN).view(1, 3, 1, 1))
         self.register_buffer("std", torch.tensor(models.IMAGENET_STD).view(1, 3, 1, 1))
 
     def forward(self, x):
-        return torch.softmax(self.m((x - self.mean) / self.std), dim=1)
+        y = self.m((x - self.mean) / self.std)
+        return torch.sigmoid(y) if self.multi else torch.softmax(y, dim=1)
 
 
 CLS_OUTPUTS = tr("probs [N, 类别数]，各类别概率（已 softmax），类别顺序见 classes")
+ML_OUTPUTS = tr("probs [N, 类别数]，每个类别各自的分数（已 sigmoid，多标签：分数达到阈值的类别都算有），类别顺序见 classes")
+
+
+def _cls_meta(ck: dict) -> dict:
+    """分类模型 model.json 里的输出说明；多标签另加 multiLabel，部署服务按它决定返回几个类别"""
+    if ck.get("multi_label"):
+        return {"outputs": ML_OUTPUTS, "multiLabel": True}
+    return {"outputs": CLS_OUTPUTS}
 DET_OUTPUTS = tr("boxes [N,4] xyxy 像素坐标；labels [N] 类别序号从 1 开始（0 是背景）；scores [N]")
 SEG_OUTPUTS = tr("boxes [N,4] xyxy 像素坐标；labels [N] 类别序号从 1 开始（0 是背景）；scores [N]；masks [N,1,H,W] 每个目标的掩膜概率（0~1，和输入同尺寸，大于 0.5 的是目标）")
 POSE_OUTPUTS = tr("boxes [N,4] xyxy 像素坐标；labels [N] 类别序号从 1 开始（0 是背景）；scores [N]；keypoints [N,K,3] 每个关键点的 x、y（像素）和可见性；keypoints_scores [N,K] 每个点的分数")
@@ -68,9 +78,9 @@ def _export_yolox_native(model, size: int, path: Path) -> None:
     )
 
 
-def _export_cls(model, size: int, path: Path) -> None:
+def _export_cls(model, size: int, path: Path, multi: bool = False) -> None:
     torch.onnx.export(
-        _ClsNet(model).eval(),
+        _ClsNet(model, multi).eval(),
         (torch.rand(1, 3, size, size),),
         str(path),
         opset_version=17,
@@ -89,12 +99,12 @@ def run(weights: str, out: str) -> None:
     cls = models.is_cls(ck["model"])
     log(tr("正在导出 ONNX…"))
     if cls:
-        _export_cls(model, size, out_p)
+        _export_cls(model, size, out_p, bool(ck.get("multi_label")))
         feed = np.random.rand(1, 3, size, size).astype(np.float32)
         meta = {
             "classes": ck["classes"],
             "input": tr("image: float32 [N, 3, {size}, {size}]，RGB，0~1；原图直接缩放到 {size}×{size}（模型内部已做归一化）", size=size),
-            "outputs": CLS_OUTPUTS,
+            **_cls_meta(ck),
             "model": ck["model"],
         }
     else:
@@ -287,7 +297,7 @@ def run_formats(cfg: dict) -> None:
     meta = {
         "classes": ck["classes"],
         "model": ck["model"],
-        "outputs": CLS_OUTPUTS if cls else _det_outputs(ck["model"]),
+        **(_cls_meta(ck) if cls else {"outputs": _det_outputs(ck["model"])}),
     }
     results = []
 
@@ -315,7 +325,7 @@ def run_formats(cfg: dict) -> None:
         log(tr("导出 ONNX（动态尺寸）…"))
         dyn.parent.mkdir(parents=True, exist_ok=True)
         if cls:
-            _export_cls(model, size, dyn)
+            _export_cls(model, size, dyn, bool(ck.get("multi_label")))
         else:
             _export_onnx(model, size, dyn, True, _det_keys(ck["model"]))
         (dyn.parent / "model.json").write_text(
@@ -330,7 +340,7 @@ def run_formats(cfg: dict) -> None:
         static.parent.mkdir(parents=True, exist_ok=True)
         static_meta = dict(meta)
         if cls:
-            _export_cls(model, size, static)
+            _export_cls(model, size, static, bool(ck.get("multi_label")))
         elif yolox:
             _export_yolox_native(model, size, static)
             static_meta.update(outputs=YOLOX_OUTPUTS, format="yolox", inputSize=size)

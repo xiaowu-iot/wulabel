@@ -460,5 +460,7 @@
   "下载 uv 失败：{errors}。可以手动安装 uv 后在设置里指定路径": "No se pudo descargar uv: {errors}. Puedes instalar uv manualmente e indicar su ruta en Ajustes",
   "这次训练没有留下可以接着跑的进度": "Este entrenamiento no guardó un punto desde el que reanudar",
   "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "Falta la copia del conjunto de datos de este entrenamiento, así que no se puede reanudar. Empieza un entrenamiento nuevo.",
-  "已经过了撤销时间": "Ya pasó el tiempo para deshacer"
+  "已经过了撤销时间": "Ya pasó el tiempo para deshacer",
+  "多标签分类": "Clasificación multietiqueta",
+  "拿不准的类别 {n} 个": "{n} clases dudosas"
 }

@@ -72,7 +72,7 @@ Webhook에서 `with_image`를 켜면 `image_base64` 필드(박스를 그린 JPEG
 | 객체 검출 | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | 인스턴스 분할 | `segment` | 위와 같고 `polygon` [x1, y1, x2, y2, …]가 추가됨(대상 윤곽, 원본 이미지 픽셀) |
 | 키포인트 | `pose` | 위와 같고 `keypoints` [x, y, v, …]가 추가됨(v가 2면 찾음, 0이면 못 찾음). 경보 캡처는 `config.json`의 `skeleton`으로 골격을 그림 |
-| 이미지 분류 | `classify` | `label`, `score`, `box` 없음: 확률이 `min_score` 이상인 클래스마다 한 항목(최대 5개). 분류는 화면 전체로 판단하며 `region`으로 거르지 않음 |
+| 이미지 분류 | `classify` | `label`, `score`, `box` 없음: 확률이 `min_score` 이상인 클래스마다 한 항목(최대 5개, 다중 라벨 분류 모델은 제한 없음). 분류는 화면 전체로 판단하며 `region`으로 거르지 않음 |
 
 ## HTTP API
 

@@ -31,6 +31,7 @@ import {
   errText,
   ImageAnnotations,
   ImageStatus,
+  isClsTask,
   ImageTeamInfo,
   ImportProgress,
   imageUrl,
@@ -100,7 +101,7 @@ interface Pose {
   score?: number | null;
 }
 
-/** 图像分类：整图一个类别 */
+/** 图像分类：整图的类别（单标签只有一个，多标签可以有好几个） */
 interface ClsTag {
   labelId: number;
   source: string;
@@ -179,7 +180,7 @@ const iou = (a: RectXYWH, b: RectXYWH) => {
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
 type SaveState = "saved" | "dirty" | "saving" | "error";
-type Snap = { boxes: Box[]; polys: Poly[]; poses: Pose[]; tag: ClsTag | null };
+type Snap = { boxes: Box[]; polys: Poly[]; poses: Pose[]; tags: ClsTag[] };
 type AiSrc = "model" | "text" | "ai";
 
 export default function Annotate({ project }: { project: ProjectInfo }) {
@@ -212,7 +213,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
 
   const task = project.task;
   const isSeg = task === "segment";
-  const isCls = task === "classify";
+  const isCls = isClsTask(task);
+  // 多标签分类：1–9 勾选 / 取消，一张图可以有好几个类别
+  const multi = task === "multilabel";
   const isPose = task === "pose";
   const drawTool: Tool = isSeg ? "polygon" : "rect";
 
@@ -238,7 +241,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [polys, setPolys] = useState<Poly[]>([]);
   const [poses, setPoses] = useState<Pose[]>([]);
-  const [tag, setTag] = useState<ClsTag | null>(null);
+  const [tags, setTags] = useState<ClsTag[]>([]);
+  // 单标签分类只有这一个
+  const tag = tags[0] ?? null;
   const [selected, setSelected] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>(isCls ? "select" : drawTool);
   const [drawingPoly, setDrawingPoly] = useState(false);
@@ -269,7 +274,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const boxesRef = useRef<Box[]>([]);
   const polysRef = useRef<Poly[]>([]);
   const posesRef = useRef<Pose[]>([]);
-  const tagRef = useRef<ClsTag | null>(null);
+  const tagsRef = useRef<ClsTag[]>([]);
   const metaRef = useRef<ImageAnnotations | null>(null);
   const othersRef = useRef<Annotation[]>([]); // 不认识的标注类型原样保留
   const history = useRef<{ past: Snap[]; future: Snap[] }>({ past: [], future: [] });
@@ -300,7 +305,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
         ...boxesRef.current.map(toAnn),
         ...polysRef.current.map(polyToAnn),
         ...posesRef.current.map(poseToAnn),
-        ...(tagRef.current ? [tagToAnn(tagRef.current)] : []),
+        ...tagsRef.current.map(tagToAnn),
         ...othersRef.current,
       ]);
       markStatus(m.id, status);
@@ -337,12 +342,12 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
       posesRef.current = s.poses;
       setPoses(s.poses);
     }
-    if ("tag" in s) {
-      tagRef.current = s.tag ?? null;
-      setTag(s.tag ?? null);
+    if (s.tags) {
+      tagsRef.current = s.tags;
+      setTags(s.tags);
     }
   };
-  const snap = (): Snap => ({ boxes: boxesRef.current, polys: polysRef.current, poses: posesRef.current, tag: tagRef.current });
+  const snap = (): Snap => ({ boxes: boxesRef.current, polys: polysRef.current, poses: posesRef.current, tags: tagsRef.current });
 
   /** 修改标注：记历史、自动保存 */
   const change = (s: Partial<Snap>) => {
@@ -361,7 +366,16 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const commit = (next: Box[]) => change({ boxes: next });
   const commitPoly = (next: Poly[]) => change({ polys: next });
   const commitPose = (next: Pose[]) => change({ poses: next });
-  const commitTag = (t: ClsTag | null) => change({ tag: t });
+  const commitTag = (t: ClsTag | null) => change({ tags: t ? [t] : [] });
+  /** 多标签：有就去掉，没有就加上 */
+  const toggleTag = (id: number) => {
+    const cur = tagsRef.current;
+    change({ tags: cur.some((x) => x.labelId === id) ? cur.filter((x) => x.labelId !== id) : [...cur, { labelId: id, source: "manual" }] });
+  };
+  /** 多标签：加上一个类别（已有就不动） */
+  const addTag = (x: ClsTag) => {
+    if (!tagsRef.current.some((y) => y.labelId === x.labelId)) change({ tags: [...tagsRef.current, x] });
+  };
 
   const undo = () => {
     if (readOnlyRef.current) return;
@@ -503,8 +517,13 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   /** 选类别：分类项目直接给整图打这个类别；其他任务同时把选中的目标改成这个类别 */
   const pickLabel = (id: number) => {
     setCurLabel(id);
+    if (multi) {
+      toggleTag(id);
+      return;
+    }
     if (isCls) {
-      if (tagRef.current?.labelId !== id || tagRef.current.source !== "manual") commitTag({ labelId: id, source: "manual" });
+      const cur = tagsRef.current[0];
+      if (cur?.labelId !== id || cur.source !== "manual") commitTag({ labelId: id, source: "manual" });
       if (autoNext && ids) go(nextIndex());
       return;
     }
@@ -565,12 +584,18 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     setMeta(m);
     const known = ["bbox", "polygon", "keypoints", "tag"];
     othersRef.current = m.annotations.filter((a) => !known.includes(a.type));
-    const t = m.annotations.find((a) => a.type === "tag" && a.labelId != null);
+    // 单标签分类只取第一个；多标签都要（同一个类别只留一个）
+    const tagList: ClsTag[] = [];
+    for (const a of m.annotations) {
+      if (a.type !== "tag" || a.labelId == null || tagList.some((x) => x.labelId === a.labelId)) continue;
+      tagList.push({ labelId: a.labelId, source: a.source, score: a.score });
+      if (!multi) break;
+    }
     setSnap({
       boxes: m.annotations.filter((a) => a.type === "bbox").map(toBox),
       polys: m.annotations.filter((a) => a.type === "polygon").map(toPoly),
       poses: m.annotations.filter((a) => a.type === "keypoints").map(toPose),
-      tag: t ? { labelId: t.labelId as number, source: t.source, score: t.score } : null,
+      tags: tagList,
     });
     history.current = { past: [], future: [] };
     setHistLen({ past: 0, future: 0 });
@@ -590,7 +615,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
     if (imageId === undefined) {
       metaRef.current = null;
       setMeta(null);
-      setSnap({ boxes: [], polys: [], poses: [], tag: null });
+      setSnap({ boxes: [], polys: [], poses: [], tags: [] });
       return;
     }
     let alive = true;
@@ -1063,12 +1088,29 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   /** 把一次预测结果放进当前图（和已有标注重叠很大的不重复添加）。source：model / text / ai */
   const applyPreds = (preds: PredResult, source: string) => {
     const tagWord = source === "model" ? t("模型") : source === "ai" ? t("巡瞳 AI") : t("文本提示");
+    if (multi) {
+      setTagHints(preds.tags.slice(0, 8));
+      const sure = preds.tags.filter((x) => x.score >= conf);
+      const names = sure.map((x) => nameOf(x.labelId)).join("、");
+      const top = preds.tags[0];
+      if (!top) {
+        message.info(t("模型没有给出结果"));
+      } else if (!sure.length) {
+        message.info(t("{src}没有分数达到置信度的类别，最像「{name}」（{score}）", { src: tagWord, name: nameOf(top.labelId), score: top.score.toFixed(2) }));
+      } else if (tagsRef.current.length) {
+        message.info(t("{src}认为有：{names}，已有类别不覆盖，可在下方点选", { src: tagWord, names }));
+      } else {
+        change({ tags: sure.map((x) => ({ labelId: x.labelId, source, score: x.score })) });
+        message.success(t("{src}认为有：{names}，检查后按 Enter 通过", { src: tagWord, names }));
+      }
+      return;
+    }
     if (isCls) {
       setTagHints(preds.tags.slice(0, 3));
       const top = preds.tags[0];
       if (!top) {
         message.info(t("模型没有给出结果"));
-      } else if (tagRef.current) {
+      } else if (tagsRef.current.length) {
         message.info(
           t("{src}认为是「{name}」（{score}），已有类别不覆盖，可在下方点选", { src: tagWord, name: nameOf(top.labelId), score: top.score.toFixed(2) }),
         );
@@ -1194,7 +1236,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             : await api.aiPrelabelAll(aiModel, conf);
       await loadLabels();
       // 预标注只改还没有标注的图：当前图没标、也没有没保存的改动时才重新读，免得冲掉正在改的
-      const empty = !boxesRef.current.length && !polysRef.current.length && !posesRef.current.length && !tagRef.current;
+      const empty = !boxesRef.current.length && !polysRef.current.length && !posesRef.current.length && !tagsRef.current.length;
       if (empty && !dirty.current) await reloadCurrent();
       const v = { images: r.images, n: r.boxes };
       message.success(
@@ -1279,7 +1321,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
 
   const deleteBox = (key: string | null) => {
     if (isCls) {
-      if (tagRef.current) commitTag(null);
+      if (tagsRef.current.length) commitTag(null);
       return;
     }
     if (!key) return;
@@ -1354,6 +1396,19 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
       const { width: W, height: H } = metaRef.current;
       const cx = (v: number) => Math.min(Math.max(v, 0), W);
       const cy = (v: number) => Math.min(Math.max(v, 0), H);
+      if (multi) {
+        const got: ClsTag[] = [];
+        for (const a of prev.annotations) {
+          if (a.type === "tag" && a.labelId != null && !got.some((x) => x.labelId === a.labelId)) got.push({ labelId: a.labelId, source: "manual" });
+        }
+        if (!got.length) {
+          message.info(t("上一张还没有类别"));
+          return;
+        }
+        change({ tags: got });
+        message.success(t("已沿用上一张的类别「{name}」", { name: got.map((x) => nameOf(x.labelId)).join("、") }));
+        return;
+      }
       if (isCls) {
         const tg = prev.annotations.find((a) => a.type === "tag" && a.labelId != null);
         if (!tg) {
@@ -1545,7 +1600,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const placingPose = placing ? poses.find((p) => p.key === placing.key) : null;
   const toolLabel = isSeg ? t("画多边形轮廓 (R)") : isPose ? t("画目标框，再逐个点关键点 (R)") : t("画矩形框 (R)");
   const enterHint = review ? t("Enter 审核通过") : t("Enter 完成并下一张");
-  const hint = isCls
+  const hint = multi
+    ? t("1–9 勾选类别（可以多选） · A/D 翻图 · {enter} · Del 清除类别 · P 模型预测 · Ctrl+D 沿用上一张 · ? 全部快捷键", { enter: enterHint })
+    : isCls
     ? t("1–9 选类别{auto} · A/D 翻图 · {enter} · Del 清除类别 · P 模型预测 · Ctrl+D 沿用上一张 · ? 全部快捷键", {
         auto: autoNext ? t("（选完自动下一张）") : "",
         enter: enterHint,
@@ -1839,7 +1896,14 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             onSamClick={onSamClick}
             onSamBox={onSamBox}
             badge={
-              isCls
+              multi
+                ? tags.length
+                  ? {
+                      text: tags.map((x) => nameOf(x.labelId) + (x.source !== "manual" && x.score != null ? ` ${x.score.toFixed(2)}` : "")).join(" · "),
+                      color: colorOf(tags[0].labelId),
+                    }
+                  : { text: t("未分类 · 按 1–9 勾选类别（可以多选）"), color: "rgba(60,64,72,.9)" }
+                : isCls
                 ? tag
                   ? {
                       text: nameOf(tag.labelId) + (tag.source !== "manual" && tag.score != null ? ` · ${tag.score.toFixed(2)}` : ""),
@@ -1888,7 +1952,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
                 ["Ctrl + D", t("沿用上一张的标注")],
               ],
             ],
-            isCls
+            multi
+              ? [t("分类"), [["1–9", t("勾选 / 取消类别（可以多选）")], ["Del", t("清除这张图的全部类别")]]]
+              : isCls
               ? [t("分类"), [["1–9", autoNext ? t("选类别（选完自动下一张）") : t("选类别")], ["Del", t("清除这张图的类别")]]]
               : [
                   t("画框和编辑"),
@@ -1959,7 +2025,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
               onChange={setModelId}
               options={models.map((r) => ({
                 value: r.id,
-                label: `${r.name} · ${isCls ? t("准确率") : "mAP50"} ${r.bestMap50?.toFixed(3) ?? "—"}`,
+                label: `${r.name} · ${multi ? "mAP" : isCls ? t("准确率") : "mAP50"} ${r.bestMap50?.toFixed(3) ?? "—"}`,
               }))}
             />
           )}
@@ -2059,7 +2125,11 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             <div style={{ marginTop: 8 }}>
               <div className="dim" style={{ fontSize: 12, marginBottom: 4 }}>{t("模型的候选（点选采用）")}</div>
               {tagHints.map((h) => (
-                <div key={h.labelId} className="lbl" onClick={() => commitTag({ labelId: h.labelId, source: "model", score: h.score })}>
+                <div
+                  key={h.labelId}
+                  className={multi && tags.some((x) => x.labelId === h.labelId) ? "lbl on" : "lbl"}
+                  onClick={() => (multi ? addTag : commitTag)({ labelId: h.labelId, source: "model", score: h.score })}
+                >
                   <span className="sw" style={{ background: colorOf(h.labelId) }} />
                   <span className="n">{nameOf(h.labelId)}</span>
                   <span className="dim" style={{ fontSize: 11 }}>{h.score.toFixed(2)}</span>
@@ -2073,7 +2143,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
         <section>
           <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
             <h3 style={{ margin: 0 }}>{t("类别")}</h3>
-            {isCls && (
+            {isCls && !multi && (
               <span className="row" style={{ gap: 6, fontSize: 12 }}>
                 <span className="dim">{t("选完下一张")}</span>
                 <Switch
@@ -2089,7 +2159,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
           </div>
           {labels.length === 0 && <div className="dim" style={{ marginBottom: 8 }}>{isCls ? t("先添加要区分的类别") : t("先添加要标注的类别")}</div>}
           {labels.map((l, i) => {
-            const on = isCls ? tag?.labelId === l.id : l.id === curLabel;
+            const on = multi ? tags.some((x) => x.labelId === l.id) : isCls ? tag?.labelId === l.id : l.id === curLabel;
             return (
               <div key={l.id} className={on ? "lbl on" : "lbl"} onClick={() => pickLabel(l.id)}>
                 <span className="sw" style={{ background: l.color }} />
@@ -2153,7 +2223,30 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
           </section>
         )}
 
-        {isCls ? (
+        {multi ? (
+          <section>
+            <h3>
+              {t("本图类别")} <span className="dim">{tags.length}</span>
+            </h3>
+            {tags.length ? (
+              tags.map((x) => (
+                <div key={x.labelId} className="obj on">
+                  <span className="sw" style={{ background: colorOf(x.labelId) }} />
+                  <span className="n">{nameOf(x.labelId)}</span>
+                  {x.source !== "manual" && (
+                    <Tag style={{ marginInlineEnd: 0 }}>
+                      {SOURCE_TEXT[x.source] ?? x.source}
+                      {x.score != null && ` ${x.score.toFixed(2)}`}
+                    </Tag>
+                  )}
+                  <DeleteOutlined className="del" onClick={() => change({ tags: tagsRef.current.filter((y) => y.labelId !== x.labelId) })} />
+                </div>
+              ))
+            ) : (
+              <div className="dim">{t("还没有类别，点上面的类别或按 1–9，可以选好几个")}</div>
+            )}
+          </section>
+        ) : isCls ? (
           <section>
             <h3>{t("本图类别")}</h3>
             {tag ? (

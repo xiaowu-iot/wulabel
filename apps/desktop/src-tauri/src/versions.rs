@@ -252,7 +252,7 @@ pub fn collect(p: &Project, vid: i64, only_reviewed: bool) -> AppResult<(Vec<Str
                 split,
                 boxes: Vec::new(),
                 polys: Vec::new(),
-                tag: None,
+                tags: Vec::new(),
                 kpts: Vec::new(),
             });
         }

@@ -71,7 +71,13 @@ class Predictor:
 
     def _classify(self, img) -> list:
         x = cls_preprocess(img, int(self.ck["img_size"])).unsqueeze(0).to(self.device)
-        prob = torch.softmax(self.model(x).float(), dim=1)[0].cpu()
+        logits = self.model(x).float()
+        if self.ck.get("multi_label"):
+            # 多标签：每个类别各自的分数，按分数从高到低都返回（太低的不要），由桌面端按阈值决定采用哪些
+            prob = torch.sigmoid(logits)[0].cpu()
+            order = torch.argsort(prob, descending=True)
+            return [[int(i), round(float(prob[i]), 4)] for i in order[:20] if float(prob[i]) >= 0.01]
+        prob = torch.softmax(logits, dim=1)[0].cpu()
         k = min(5, prob.numel())
         top = torch.topk(prob, k)
         return [[int(i), round(float(s), 4)] for s, i in zip(top.values, top.indices)]
@@ -94,7 +100,7 @@ class Predictor:
                     n += 1
                     continue
                 if self.task == "classify":
-                    # 分类：前 5 个类别都返回，由桌面端按置信度决定要不要采用
+                    # 分类：前 5 个类别（多标签是分数够的全部类别）都返回，由桌面端按置信度决定要不要采用
                     emit("pred", id=it["id"], boxes=[], polys=[], poses=[], tags=self._classify(img))
                     n += 1
                     continue

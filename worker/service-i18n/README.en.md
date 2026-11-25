@@ -72,7 +72,7 @@ The fields of each item in `detections` depend on the model. The `task` returned
 | Object detection | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Instance segmentation | `segment` | Same, plus `polygon` [x1, y1, x2, y2, …] (object outline, original image pixels) |
 | Keypoints | `pose` | Same, plus `keypoints` [x, y, v, …] (v = 2: found, 0: not found); alert snapshots draw the skeleton from `skeleton` in `config.json` |
-| Image classification | `classify` | `label`, `score`, no `box`: one item per class whose probability reaches `min_score` (up to 5). Classification looks at the whole frame and ignores `region` |
+| Image classification | `classify` | `label`, `score`, no `box`: one item per class whose probability reaches `min_score` (up to 5; no limit for multi-label models). Classification looks at the whole frame and ignores `region` |
 
 ## HTTP API
 

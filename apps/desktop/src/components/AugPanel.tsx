@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { App, Button, Checkbox, Collapse, Image, Modal, Segmented, Slider, Spin } from "antd";
-import { api, AugConfig, errText, Task } from "../api";
+import { api, AugConfig, errText, isClsTask, Task } from "../api";
 import { t } from "../i18n";
 
 const BASE: AugConfig = { hflip: true, vflip: false, brightness: 0, contrast: 0, saturation: 0, hue: 0, blur: 0, noise: 0, scale: 0, rotate: 0, crop: 1 };
@@ -43,7 +43,7 @@ export default function AugPanel({
   onChange: (v: AugConfig) => void;
 }) {
   const { message } = App.useApp();
-  const cls = task === "classify";
+  const cls = isClsTask(task);
   const pick = (k: string) => (cls ? AUG_PRESETS[k].cls : AUG_PRESETS[k].det);
   const a: AugConfig = { ...pick("default"), ...(value ?? {}) };
   const preset = Object.keys(AUG_PRESETS).find((k) => JSON.stringify(pick(k)) === JSON.stringify(a)) ?? "custom";

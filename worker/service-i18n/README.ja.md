@@ -72,7 +72,7 @@ Webhook で `with_image` を有効にすると、`image_base64` フィールド�
 | 物体検出 | `detect` | `label`、`score`、`box` [x, y, w, h] |
 | インスタンスセグメンテーション | `segment` | 同上に加えて `polygon` [x1, y1, x2, y2, …]（対象の輪郭、元画像のピクセル座標） |
 | キーポイント | `pose` | 同上に加えて `keypoints` [x, y, v, …]（v が 2 なら検出、0 なら未検出）。アラート画像は `config.json` の `skeleton` で骨格を描画 |
-| 画像分類 | `classify` | `label`、`score`（`box` なし）：確率が `min_score` 以上のクラスごとに 1 要素（最大 5 個）。分類は画面全体で判定し、`region` では絞り込みません |
+| 画像分類 | `classify` | `label`、`score`（`box` なし）：確率が `min_score` 以上のクラスごとに 1 要素（最大 5 個。マルチラベル分類モデルは上限なし）。分類は画面全体で判定し、`region` では絞り込みません |
 
 ## HTTP API
 

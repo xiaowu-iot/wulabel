@@ -460,5 +460,7 @@
   "下载 uv 失败：{errors}。可以手动安装 uv 后在设置里指定路径": "Failed to download uv: {errors}. You can install uv manually and set its path in Settings",
   "这次训练没有留下可以接着跑的进度": "This run has no saved progress to resume from",
   "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "The dataset copy used by this run is missing, so it can't be resumed. Please start a new training run.",
-  "已经过了撤销时间": "Too late to undo"
+  "已经过了撤销时间": "Too late to undo",
+  "多标签分类": "Multi-label classification",
+  "拿不准的类别 {n} 个": "{n} uncertain classes"
 }

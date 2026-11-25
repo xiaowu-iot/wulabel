@@ -8,7 +8,7 @@ import {
   StopOutlined,
 } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { api, EnvStatus, errText, ImportProgress, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, Task, TrainConfig, VersionInfo } from "../api";
+import { api, EnvStatus, errText, ImportProgress, isClsTask, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, Task, TrainConfig, VersionInfo } from "../api";
 import { prefs, useApp, useReview } from "../store";
 import { t } from "../i18n";
 import LineChart from "../components/LineChart";
@@ -54,7 +54,11 @@ const TASK_DEFAULTS: Record<Task, Partial<TrainConfig>> = {
   segment: { model: "maskrcnn_r50", imgSize: 640, batch: 2, epochs: 30, lr: 0.01 },
   pose: { model: "keypointrcnn_r50", imgSize: 640, batch: 2, epochs: 40, lr: 0.01 },
   classify: { model: "cls_mobilenet", imgSize: 224, batch: 32, epochs: 30, lr: 0.01 },
+  multilabel: { model: "cls_mobilenet", imgSize: 224, batch: 32, epochs: 30, lr: 0.01 },
 };
+
+/** 模型列表里的任务：多标签分类用的也是分类模型 */
+const modelTask = (task: Task): Task => (task === "multilabel" ? "classify" : task);
 
 const isMac = navigator.userAgent.includes("Mac");
 
@@ -65,6 +69,7 @@ const recommendModel = (task: Task, gpuMem: number) =>
     segment: gpuMem >= 8000 ? "maskrcnn_r50_v2" : "maskrcnn_r50",
     pose: "keypointrcnn_r50",
     classify: gpuMem >= 6000 ? "cls_efficientnet" : "cls_mobilenet",
+    multilabel: gpuMem >= 6000 ? "cls_efficientnet" : "cls_mobilenet",
   })[task];
 
 /** 训练记录显示的模型名（导入的外部模型显示导入时起的名字） */
@@ -73,19 +78,23 @@ export const modelName = (r: RunInfo) =>
     ? t("{name}（外部）", { name: (r.config as { displayName?: string })?.displayName || t("外部模型") })
     : MODELS.find((m) => m.value === r.config?.model)?.name ?? String(r.config?.model ?? "");
 
-/** 各任务主指标的叫法（分类没有 mAP，worker 把准确率放在 map50、宏 F1 放在 map） */
+/** 各任务主指标的叫法（分类没有 mAP，worker 把准确率放在 map50、宏 F1 放在 map；多标签分类 map50 是各类别 AP 的平均） */
 export const metricNames = (task: Task) =>
-  task === "classify" ? { m50: t("准确率"), m: t("宏平均 F1") } : { m50: "mAP50", m: "mAP50-95" };
+  task === "classify"
+    ? { m50: t("准确率"), m: t("宏平均 F1") }
+    : task === "multilabel"
+      ? { m50: "mAP", m: t("宏平均 F1") }
+      : { m50: "mAP50", m: "mAP50-95" };
 
 /** 主指标给个结论：检测类看 mAP50（<0.3 差、0.3~0.6 一般、>0.6 可用），分类看准确率（<0.6、0.6~0.85、>0.85） */
 export const rateMetric = (task: Task, v: number) => {
-  const [lo, hi] = task === "classify" ? [0.6, 0.85] : [0.3, 0.6];
+  const [lo, hi] = task === "classify" ? [0.6, 0.85] : task === "multilabel" ? [0.5, 0.8] : [0.3, 0.6];
   if (v < lo) return { level: "bad" as const, word: t("差@@评价") };
   return v <= hi ? { level: "fair" as const, word: t("一般@@评价") } : { level: "good" as const, word: t("可用@@评价") };
 };
 
 /** 结果很差，多半什么都没学到（不建议拿去预标注） */
-export const isPoor = (task: Task, v: number | null | undefined) => v == null || v < (task === "classify" ? 0.5 : 0.1);
+export const isPoor = (task: Task, v: number | null | undefined) => v == null || v < (task === "classify" ? 0.5 : task === "multilabel" ? 0.3 : 0.1);
 
 /** 常见的训练错误换成人话。fix：能直接去改的地方（settings 换 PyTorch 版本、cpu 改用 CPU、data 去数据页） */
 export const explainError = (err: string): { hint: string; fix?: "settings" | "cpu" | "data" } | null => {
@@ -143,7 +152,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const task = project.task;
   // 协作时才有审核；一个人标注时不出现「已审核」「只用已审核的图片」
   const review = useReview();
-  const models = MODELS.filter((m) => m.task === task);
+  const models = MODELS.filter((m) => m.task === modelTask(task));
   const mn = metricNames(task);
   const cfgKey = `trainConfig.${task}`;
   const [env, setEnv] = useState<EnvStatus | null>(null);
@@ -279,19 +288,19 @@ export default function Train({ project }: { project: ProjectInfo }) {
 
   // 项目任务和当前选的模型对不上（比如分割项目却选了检测模型）时，自动切到对应任务的模型
   useEffect(() => {
-    if (!MODELS.some((m) => m.value === cfg.model && m.task === task)) {
+    if (!MODELS.some((m) => m.value === cfg.model && m.task === modelTask(task))) {
       update({ ...TASK_DEFAULTS[task] });
     }
   }, [task]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const picked = MODELS.find((m) => m.value === cfg.model);
-  const sizeOptions = task === "classify" ? [128, 160, 224, 256, 320, 384] : [320, 416, 480, 640, 800, 960, 1280];
+  const sizeOptions = isClsTask(task) ? [128, 160, 224, 256, 320, 384] : [320, 416, 480, 640, 800, 960, 1280];
   /** 换模型：YOLOX 有自己的默认输入尺寸，从 YOLOX 换回其他模型时恢复 640 */
   const pickModel = (value: string) => {
     const next = MODELS.find((m) => m.value === value);
     // YOLOX 要的轮数多一些，少于 50 轮时提到 50
     if (next?.defaultSize) update({ model: value, imgSize: next.defaultSize, ...(next.yolox && cfg.epochs < 50 ? { epochs: 50 } : {}) });
-    else if (picked?.defaultSize && task !== "classify") update({ model: value, imgSize: 640 });
+    else if (picked?.defaultSize && !isClsTask(task)) update({ model: value, imgSize: 640 });
     else update({ model: value });
   };
 
@@ -328,7 +337,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const useVersion = cfg.version != null && versions.some((v) => v.id === cfg.version);
   // 可以接着训的：自己训练出来、有模型文件、模型属于这个任务的
   const baseRuns = runs.filter(
-    (r) => r.engine !== "external" && r.hasWeights && r.status !== "running" && MODELS.some((m) => m.value === r.config?.model && m.task === task),
+    (r) => r.engine !== "external" && r.hasWeights && r.status !== "running" && MODELS.some((m) => m.value === r.config?.model && m.task === modelTask(task)),
   );
   const baseRun = baseRuns.find((r) => r.id === cfg.baseRun) ?? null;
   const recommended = recommendModel(task, gpuMem);
@@ -383,15 +392,17 @@ export default function Train({ project }: { project: ProjectInfo }) {
         segment: t("用已标注和已审核的图片训练实例分割模型。"),
         pose: t("用已标注和已审核的图片训练关键点模型。"),
         classify: t("用已标注和已审核的图片训练图像分类模型。"),
+        multilabel: t("用已标注和已审核的图片训练多标签分类模型（每个类别各自判断有没有）。"),
       }
     : {
         detect: t("用已标注的图片训练检测模型。"),
         segment: t("用已标注的图片训练实例分割模型。"),
         pose: t("用已标注的图片训练关键点模型。"),
         classify: t("用已标注的图片训练图像分类模型。"),
+        multilabel: t("用已标注的图片训练多标签分类模型（每个类别各自判断有没有）。"),
       })[task];
   const fewText =
-    task === "classify"
+    isClsTask(task)
       ? t("图片较少，建议每个类别至少标 100 张图再训练。")
       : task === "pose"
         ? t("图片较少，建议每个类别至少标 100 个目标再训练。")
@@ -592,7 +603,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                   tooltip={
                     picked?.fixedSize
                       ? t("这个模型固定用 {size}×{size} 输入", { size: picked.fixedSize })
-                      : task === "classify"
+                      : isClsTask(task)
                         ? t("分类一般用 224；细节多的图可以加大")
                         : t("目标小（远处的人、安全帽）用大尺寸，速度会变慢")
                   }

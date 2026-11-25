@@ -127,6 +127,9 @@ class ClsFolder(torch.utils.data.Dataset):
         doc = json.loads((root / "annotations" / f"{split}.json").read_text(encoding="utf-8"))
         self.root = root
         self.items = doc["images"]
+        # 多标签：每张图 labels 是类别序号列表，返回 0/1 向量
+        self.multi = bool(doc.get("multiLabel"))
+        self.n = len(doc.get("classes", []))
         self.train = train
         self.size = size
         self.aug = augment.config(aug, "classify")
@@ -147,7 +150,21 @@ class ClsFolder(torch.utils.data.Dataset):
         else:
             img = F.resize(img, [s, s], antialias=True)
         t = F.normalize(F.to_tensor(img), models.IMAGENET_MEAN, models.IMAGENET_STD)
+        if self.multi:
+            y = torch.zeros(self.n)
+            for c in it["labels"]:
+                y[int(c)] = 1.0
+            return t, y, int(it["id"])
         return t, int(it["label"]), int(it["id"])
+
+
+def cls_multi_label(root: Path) -> bool:
+    """导出的分类数据集是不是多标签"""
+    for split in ("train", "val", "test"):
+        f = Path(root) / "annotations" / f"{split}.json"
+        if f.exists():
+            return bool(json.loads(f.read_text(encoding="utf-8")).get("multiLabel"))
+    return False
 
 
 def cls_preprocess(img: Image.Image, size: int) -> torch.Tensor:

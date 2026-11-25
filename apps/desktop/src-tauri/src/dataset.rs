@@ -187,8 +187,8 @@ pub struct ExportImage {
     pub boxes: Vec<(usize, f64, f64, f64, f64)>,
     /// 分割多边形：(类别序号, [x1, y1, x2, y2, ...])，原图像素坐标
     pub polys: Vec<(usize, Vec<f64>)>,
-    /// 图像分类：整图的类别序号（单标签，取第一个）
-    pub tag: Option<usize>,
+    /// 图像分类：整图的类别序号（不重复，按标注顺序）；单标签分类只用第一个
+    pub tags: Vec<usize>,
     /// 关键点目标：(类别序号, 外接框 [x, y, w, h], [x1, y1, v1, ...])
     pub kpts: Vec<(usize, [f64; 4], Vec<f64>)>,
 }
@@ -270,7 +270,7 @@ pub fn collect(p: &Project, only_reviewed: bool) -> AppResult<(Vec<String>, Vec<
                 split,
                 boxes: Vec::new(),
                 polys: Vec::new(),
-                tag: None,
+                tags: Vec::new(),
                 kpts: Vec::new(),
             });
         }
@@ -300,8 +300,8 @@ pub fn collect(p: &Project, only_reviewed: bool) -> AppResult<(Vec<String>, Vec<
 pub fn push_annotation(im: &mut ExportImage, cls: usize, kind: &str, data: &str) {
     match kind {
         "tag" => {
-            if im.tag.is_none() {
-                im.tag = Some(cls);
+            if !im.tags.contains(&cls) {
+                im.tags.push(cls);
             }
         }
         "keypoints" => {
@@ -375,7 +375,7 @@ fn yaml_quote(s: &str) -> String {
 }
 
 fn check_format(p: &Project, f: Format) -> AppResult<()> {
-    let classify = p.meta.task == "classify";
+    let classify = crate::project::is_classify(&p.meta.task);
     if classify && f != Format::Cls {
         return Err(msg(t!("图像分类项目请导出为「分类文件夹」格式")));
     }
@@ -408,10 +408,11 @@ fn write(
     mut images: Vec<ExportImage>,
     progress: &dyn Fn(usize, usize),
 ) -> AppResult<ExportResult> {
-    let classify = p.meta.task == "classify";
+    let classify = crate::project::is_classify(&p.meta.task);
+    let multi = p.meta.task == "multilabel";
     if classify {
         // 没打类别标签的图对分类没有用
-        images.retain(|im| im.tag.is_some());
+        images.retain(|im| !im.tags.is_empty());
         if images.is_empty() {
             return Err(msg(t!("还没有给图片打类别标签")));
         }
@@ -424,7 +425,7 @@ fn write(
         images: total,
         boxes: images.iter().map(|i| i.boxes.len()).sum(),
         polys: images.iter().map(|i| i.polys.len()).sum(),
-        tags: images.iter().filter(|i| i.tag.is_some()).count(),
+        tags: images.iter().filter(|i| !i.tags.is_empty()).count(),
         kpts: images.iter().map(|i| i.kpts.len()).sum(),
         train: 0,
         val: 0,
@@ -631,7 +632,8 @@ fn write(
             fs::write(out.join("labels.txt"), classes.join("\n"))?;
         }
         Format::Cls => {
-            // 分类文件夹：{split}/{类别}/{图片}；另附 annotations/{split}.json 清单（带图片 id，训练和评估用）
+            // 分类文件夹：{split}/{类别}/{图片}；另附 annotations/{split}.json 清单（带图片 id，训练和评估用）。
+            // 多标签：一张图有好几个类别，放不进类别文件夹，图片放 {split}/images/，类别写在清单的 labels 里
             let dirs: Vec<String> = {
                 // 类别名做文件夹名，去掉非法字符后撞名的加序号
                 let mut seen = HashSet::new();
@@ -654,17 +656,30 @@ fn write(
             for s in &used {
                 let mut list = Vec::new();
                 for im in images.iter().filter(|im| split_of(im) == *s) {
-                    let Some(c) = im.tag else { continue };
-                    let d = out.join(s).join(&dirs[c]);
-                    fs::create_dir_all(&d)?;
-                    put(&mut result.files, &im.src, d.join(&im.file_name), im.id, opts.copy_files)?;
-                    list.push(serde_json::json!({
-                        "id": im.id, "file": format!("{s}/{}/{}", dirs[c], im.file_name), "label": c
-                    }));
+                    let Some(&c) = im.tags.first() else { continue };
+                    if multi {
+                        let d = out.join(s).join("images");
+                        fs::create_dir_all(&d)?;
+                        put(&mut result.files, &im.src, d.join(&im.file_name), im.id, opts.copy_files)?;
+                        list.push(serde_json::json!({
+                            "id": im.id, "file": format!("{s}/images/{}", im.file_name), "labels": im.tags
+                        }));
+                    } else {
+                        let d = out.join(s).join(&dirs[c]);
+                        fs::create_dir_all(&d)?;
+                        put(&mut result.files, &im.src, d.join(&im.file_name), im.id, opts.copy_files)?;
+                        list.push(serde_json::json!({
+                            "id": im.id, "file": format!("{s}/{}/{}", dirs[c], im.file_name), "label": c
+                        }));
+                    }
                     n += 1;
                     progress(n, total);
                 }
-                let doc = serde_json::json!({ "classes": classes, "images": list });
+                let doc = if multi {
+                    serde_json::json!({ "classes": classes, "images": list, "multiLabel": true })
+                } else {
+                    serde_json::json!({ "classes": classes, "images": list })
+                };
                 fs::write(out.join("annotations").join(format!("{s}.json")), serde_json::to_string(&doc)?)?;
             }
             fs::write(out.join("classes.txt"), classes.join("\n"))?;
@@ -791,6 +806,36 @@ pub mod tests {
             assert!(export(&p, &ExportOptions { format: fmt, out_dir: out, only_reviewed: false, ratios: [1.0, 0.0, 0.0], copy_files: false }, &|_, _| {}).is_err());
         }
         assert!(collect(&p, true).is_err(), "没有已审核的图");
+        drop(p);
+        let _ = fs::remove_dir_all(base);
+    }
+    #[test]
+    fn multilabel_export() {
+        let base = temp("multi");
+        let src = base.join("src");
+        fs::create_dir_all(&src).unwrap();
+        for i in 0..4u8 {
+            RgbImage::from_pixel(20, 20, Rgb([i * 40, 0, 0])).save(src.join(format!("m{i}.jpg"))).unwrap();
+        }
+        let p = Project::create(&base, "p", "multilabel").unwrap();
+        images::import(&p, &images::collect(&[src]), true, &|_, _| {}).unwrap();
+        let a = annotations::add_label(&p, "dust", "#f00").unwrap();
+        let b = annotations::add_label(&p, "scratch", "#0f0").unwrap();
+        let tag = |l: i64| Annotation { label_id: Some(l), kind: "tag".into(), data: serde_json::json!([]), score: None, source: "manual".into() };
+        annotations::save(&p, 1, &[tag(a.id), tag(b.id)]).unwrap();
+        annotations::save(&p, 2, &[tag(b.id)]).unwrap();
+        annotations::save(&p, 3, &[tag(a.id)]).unwrap();
+        let out = base.join("out");
+        let r = export(&p, &ExportOptions { format: Format::Cls, out_dir: out.clone(), only_reviewed: false, ratios: [1.0, 0.0, 0.0], copy_files: false }, &|_, _| {}).unwrap();
+        // 没打标签的第 4 张不导出
+        assert_eq!((r.images, r.tags), (3, 3));
+        let doc: serde_json::Value = serde_json::from_str(&fs::read_to_string(out.join("annotations/train.json")).unwrap()).unwrap();
+        assert_eq!(doc["multiLabel"], true);
+        let im1 = doc["images"].as_array().unwrap().iter().find(|i| i["id"] == 1).unwrap();
+        assert_eq!(im1["labels"], serde_json::json!([0, 1]));
+        assert!(out.join(im1["file"].as_str().unwrap()).exists());
+        assert!(im1["file"].as_str().unwrap().starts_with("train/images/"));
+        assert!(export(&p, &ExportOptions { format: Format::Coco, out_dir: base.join("o2"), only_reviewed: false, ratios: [1.0, 0.0, 0.0], copy_files: false }, &|_, _| {}).is_err());
         drop(p);
         let _ = fs::remove_dir_all(base);
     }
