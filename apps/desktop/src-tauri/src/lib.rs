@@ -1,8 +1,10 @@
 mod ai;
 mod annotations;
 mod assist;
+mod batch;
 mod collab;
 mod commands;
+mod convert;
 mod dataset;
 mod dataset_import;
 mod deploy;
@@ -143,6 +145,8 @@ pub fn run() {
             commands::merge_label,
             commands::stop_prelabel,
             commands::split_summary,
+            commands::unedited_prelabels,
+            commands::confirm_prelabels,
             commands::assign_splits,
             commands::list_split_images,
             commands::set_split,
@@ -150,6 +154,9 @@ pub fn run() {
             commands::interpolate_frames,
             commands::track_frames,
             commands::import_dataset,
+            commands::convert_to_multilabel,
+            commands::batch_predict,
+            commands::batch_predict_stop,
             commands::env_status,
             commands::save_settings,
             commands::env_install,

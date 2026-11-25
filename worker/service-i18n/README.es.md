@@ -32,6 +32,7 @@ Para inferir con una GPU NVIDIA: cambia `onnxruntime` por `onnxruntime-gpu` en `
   "alert": {
     "labels": ["sin_casco"],   // solo alarma para estas clases; vacío = todas las clases
     "min_score": 0.5,          // umbral de confianza
+    "class_scores": {},        // umbral por clase, p. ej. {"rayón": 0.3}; las demás clases usan min_score
     "cooldown": 60,            // como máximo una alarma cada N segundos por transmisión y clase
     "hours": "07:00-19:00",    // horario activo; vacío = todo el día; si cruza la medianoche, escribe "22:00-06:00"
     "save_image": true         // guarda capturas de las alarmas en alerts/
@@ -72,7 +73,7 @@ Los campos de cada elemento de `detections` dependen del modelo. El `task` que d
 | Detección de objetos | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Segmentación de instancias | `segment` | Lo mismo, más `polygon` [x1, y1, x2, y2, …] (contorno del objeto, píxeles de la imagen original) |
 | Puntos clave | `pose` | Lo mismo, más `keypoints` [x, y, v, …] (v = 2: encontrado, 0: no encontrado); las capturas de alarma dibujan el esqueleto según `skeleton` en `config.json` |
-| Clasificación de imágenes | `classify` | `label`, `score`, sin `box`: un elemento por cada clase cuya probabilidad alcance `min_score` (hasta 5). La clasificación evalúa toda la imagen y no filtra por `region` |
+| Clasificación de imágenes | `classify` | `label`, `score`, sin `box`: un elemento por cada clase cuya probabilidad alcance `min_score` (hasta 5; sin límite en modelos multietiqueta). La clasificación evalúa toda la imagen y no filtra por `region` |
 
 ## API HTTP
 

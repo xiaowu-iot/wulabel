@@ -28,7 +28,7 @@ import {
 } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, DeployStep, errText, FormatResult, ImportProgress, Label, lastImportIds, ProjectInfo, RunInfo } from "../api";
+import { api, BatchResult, DeployStep, errText, FormatResult, ImportProgress, isClsTask, Label, lastImportIds, ProjectInfo, RunInfo } from "../api";
 import { prefs, useApp } from "../store";
 import { t } from "../i18n";
 import { xuntongEnabled } from "../features";
@@ -106,9 +106,40 @@ function RecConf({ value, rec, onUse }: { value: number; rec: number | null; onU
   );
 }
 
-function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recConf: number | null }) {
+/** 多标签分类：每个类别用评估时各自算出的推荐阈值（F1 最高）。返回 [开关, 改开关, 正在用的阈值表] */
+function useClassConf(rec: Record<string, number> | null) {
+  const [on, setOn] = useState(prefs.get("useClassConf", "1") === "1");
+  const set = (v: boolean) => {
+    setOn(v);
+    prefs.set("useClassConf", v ? "1" : "0");
+  };
+  return [on, set, on && rec ? rec : null] as const;
+}
+
+function ClassConfToggle({ rec, on, onChange }: { rec: Record<string, number> | null; on: boolean; onChange: (v: boolean) => void }) {
+  if (!rec) return null;
+  const list = Object.entries(rec)
+    .map(([n, c]) => `${n} ${c.toFixed(2)}`)
+    .join(t("、"));
+  return (
+    <div>
+      <Checkbox checked={on} onChange={(e) => onChange(e.target.checked)}>
+        {t("每个类别用自己的推荐阈值")}
+      </Checkbox>
+      <div className="dim" style={{ fontSize: 12 }}>
+        {on ? t("评估时按类别算出：{list}。其余类别用置信度阈值。", { list }) : t("所有类别用同一个置信度阈值。")}
+      </div>
+    </div>
+  );
+}
+
+function LiveTab({ run, labels, recConf, classRec }: { run: RunInfo; labels: Label[]; recConf: number | null; classRec: Record<string, number> | null }) {
   const { message } = App.useApp();
   const refreshStats = useApp((s) => s.refreshStats);
+  // 多标签分类：分数够阈值的类别都算（单标签只看第一名）
+  const multi = useApp((s) => s.project?.task === "multilabel");
+  const multiRef = useRef(multi);
+  multiRef.current = multi;
   const [kind, setKind] = useState(prefs.get("liveKind", "rtsp"));
   const [url, setUrl] = useState(prefs.get("liveUrl", ""));
   const [file, setFile] = useState(prefs.get("liveFile", ""));
@@ -127,6 +158,13 @@ function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recC
   classesRef.current = classes;
   const confRef = useRef(conf);
   confRef.current = conf;
+  const [useCls, setUseCls, cc] = useClassConf(multi ? classRec : null);
+  const ccRef = useRef(cc);
+  ccRef.current = cc;
+  /** 这个类别算不算有：多标签分类按类别阈值 */
+  const thrOf = (name: string) => ccRef.current?.[name] ?? confRef.current;
+  // 推理进程按最低的阈值过滤，各类别的阈值在这边判断
+  const sendConf = (v: number) => (cc ? Math.min(v, ...Object.values(cc)) : v);
   // 默认用这个模型的推荐阈值，用户自己拖过就不再改
   const confTouched = useRef(false);
   useEffect(() => {
@@ -135,8 +173,13 @@ function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recC
   const applyConf = (v: number) => {
     setConf(v);
     prefs.set("liveConf", String(v));
-    if (running) api.liveConf(v).catch(() => {});
+    if (running) api.liveConf(sendConf(v)).catch(() => {});
   };
+  useEffect(() => {
+    if (running) api.liveConf(sendConf(confRef.current)).catch(() => {});
+    // 只在切换「每个类别用自己的推荐阈值」时同步
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cc]);
 
   const colorOf = useCallback(
     (name: string) => labels.find((l) => l.name === name)?.color ?? "#ffd43b",
@@ -227,7 +270,8 @@ function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recC
         const text = `${name} ${p.toFixed(2)}`;
         const tw = ctx.measureText(text).width + 12 * dpr;
         const ty = (8 + i * 28) * dpr;
-        ctx.fillStyle = i === 0 ? colorRef.current(name) : "rgba(0,0,0,0.55)";
+        const on = multiRef.current ? p >= thrOf(name) : i === 0;
+        ctx.fillStyle = on ? colorRef.current(name) : "rgba(0,0,0,0.55)";
         ctx.fillRect(8 * dpr, ty, tw, 24 * dpr);
         ctx.fillStyle = "#fff";
         ctx.fillText(text, 14 * dpr, ty + 17 * dpr);
@@ -257,9 +301,11 @@ function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recC
           const n = classesRef.current[b[4]] ?? String(b[4]);
           counts[n] = (counts[n] ?? 0) + 1;
         }
-        // 分类：只显示概率最高的类别
-        const top = f.tags?.[0];
-        if (top && top[1] >= confRef.current) counts[classesRef.current[top[0]] ?? String(top[0])] = 1;
+        // 分类：只显示概率最高的类别；多标签分类显示分数够的全部类别
+        for (const [c, sc] of (multiRef.current ? f.tags : f.tags?.slice(0, 1)) ?? []) {
+          const name = classesRef.current[c] ?? String(c);
+          if (sc >= (multiRef.current ? thrOf(name) : confRef.current)) counts[name] = 1;
+        }
         setStat({ w: f.w, h: f.h, fps: f.fps, ms: f.ms, counts });
       } else if (k === "log") {
         setStatus(String(data));
@@ -298,7 +344,7 @@ function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recC
     prefs.set("liveUrl", url);
     prefs.set("liveFile", file);
     try {
-      await api.liveStart(run.id, source, conf);
+      await api.liveStart(run.id, source, sendConf(conf));
       setRunning(true);
     } catch (e) {
       setError(errText(e));
@@ -372,6 +418,11 @@ function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recC
         <span className="dim" style={{ fontSize: 12 }}>
           {t("看到漏检、误报的画面就截下来，标注后再训练")}
         </span>
+        {multi && classRec ? (
+          <div style={{ flexBasis: "100%" }}>
+            <ClassConfToggle rec={multi ? classRec : null} on={useCls} onChange={setUseCls} />
+          </div>
+        ) : null}
       </div>
       {error && <Alert type="error" showIcon style={{ marginBottom: 12 }} message={error} closable onClose={() => setError(null)} />}
       <div className="live-box">
@@ -417,6 +468,181 @@ const FORMATS = [
 ];
 
 /** 导出、生成服务包的步骤进度条（deploy-progress）；步数未知时只显示当前在做什么 */
+/** 批量识别一个文件夹：导出表格，可以按识别结果把图片复制到各类别的文件夹 */
+function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: ProjectInfo; recConf: number | null; classRec: Record<string, number> | null }) {
+  const { message } = App.useApp();
+  const refreshStats = useApp((s) => s.refreshStats);
+  const annotateQueue = useApp((s) => s.annotateQueue);
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState<{ text: string; ids: number[] } | null>(null);
+  const [input, setInput] = useState(prefs.get("batchInput", ""));
+  const [output, setOutput] = useState(prefs.get("batchOutput", ""));
+  const [conf, setConf] = useState(recConf ?? 0.5);
+  const [sort, setSort] = useState(prefs.get("batchSort", "1") === "1");
+  const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState<ImportProgress | null>(null);
+  const [res, setRes] = useState<BatchResult | null>(null);
+  const isCls = isClsTask(project.task);
+  const clsRec = project.task === "multilabel" ? classRec : null;
+  const [useCls, setUseCls, cc] = useClassConf(clsRec);
+  useEffect(() => {
+    if (recConf != null) setConf(recConf);
+  }, [recConf]);
+
+  const start = async () => {
+    if (!input || !output) {
+      message.warning(t("先选要识别的文件夹和结果放在哪里"));
+      return;
+    }
+    prefs.set("batchInput", input);
+    prefs.set("batchOutput", output);
+    prefs.set("batchSort", sort ? "1" : "0");
+    setBusy(true);
+    setRes(null);
+    setAdded(null);
+    setProg(null);
+    const un = await listen<ImportProgress>("batch-progress", (e) => setProg(e.payload));
+    try {
+      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {} });
+      setRes(r);
+      if (r.stopped) message.info(t("已停止，识别过的 {n} 张已写进表格", { n: r.images }));
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      un();
+      setBusy(false);
+    }
+  };
+
+  // 拿不准的图加进项目：标好再训练，模型越用越准
+  const addUncertain = async () => {
+    if (!res) return;
+    setAdding(true);
+    setAdded(null);
+    try {
+      const r = await api.importImages(res.uncertain, true);
+      await refreshStats();
+      const text = t("导入 {added} 张，跳过重复 {dup} 张", { added: r.added, dup: r.duplicated });
+      setAdded({ text, ids: r.added > 0 ? await lastImportIds().catch(() => []) : [] });
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ maxWidth: 760 }}>
+      <p className="desc" style={{ marginTop: 0 }}>
+        {isCls
+          ? t("用这个模型把一个文件夹里的图片都识别一遍（包括子文件夹），结果导出成表格，Excel 直接打开；也可以按识别出的类别把图片复制到各自的文件夹。")
+          : t("用这个模型把一个文件夹里的图片都检测一遍（包括子文件夹），每张图找到几个什么目标导出成表格，Excel 直接打开；也可以按找到的类别把图片复制到各自的文件夹。")}
+      </p>
+      <Form layout="vertical" disabled={busy}>
+        <Form.Item label={t("要识别的文件夹")}>
+          <FolderPicker value={input} onChange={setInput} title={t("选择要识别的文件夹")} />
+        </Form.Item>
+        <Form.Item label={t("结果放在")} extra={t("不能放在要识别的文件夹里面。")}>
+          <FolderPicker value={output} onChange={setOutput} title={t("选择结果放在哪个文件夹")} />
+        </Form.Item>
+        <Form.Item
+          label={t("置信度阈值")}
+          extra={
+            project.task === "classify"
+              ? t("最像的类别分数低于阈值时记为「拿不准」，留给人看。")
+              : project.task === "multilabel"
+                ? t("分数达到阈值的类别都算有；一个都没有时记为「拿不准」。")
+                : t("分数低于阈值的目标不算。")
+          }
+        >
+          <Space>
+            <InputNumber min={0.05} max={0.95} step={0.05} value={conf} onChange={(v) => setConf(v ?? 0.5)} />
+            <RecConf value={conf} rec={recConf} onUse={setConf} />
+          </Space>
+          <ClassConfToggle rec={clsRec} on={useCls} onChange={setUseCls} />
+        </Form.Item>
+        <Form.Item>
+          <Checkbox checked={sort} onChange={(e) => setSort(e.target.checked)}>
+            {project.task === "multilabel"
+              ? t("按类别复制到各自的文件夹（一张图有几个类别就复制几份）")
+              : isCls
+                ? t("按类别复制到各自的文件夹")
+                : t("按找到的类别复制到各自的文件夹（找到几种就复制几份）")}
+          </Checkbox>
+        </Form.Item>
+      </Form>
+      <Space>
+        {!busy ? (
+          <Button type="primary" icon={<CaretRightOutlined />} onClick={start}>
+            {t("开始识别")}
+          </Button>
+        ) : (
+          <Button danger icon={<StopOutlined />} onClick={() => api.batchPredictStop().catch(() => {})}>
+            {t("停止")}
+          </Button>
+        )}
+      </Space>
+      {busy && (
+        <div style={{ marginTop: 12 }}>
+          <Progress size="small" percent={prog && prog.total ? Math.floor((prog.done / prog.total) * 100) : 0} status="active" />
+          <div className="dim" style={{ fontSize: 12 }}>
+            {prog ? t("已识别 {done}/{total} 张", { done: prog.done, total: prog.total }) : t("加载模型…")}
+          </div>
+        </div>
+      )}
+      {res && (
+        <Alert
+          style={{ marginTop: 12 }}
+          type={res.failed ? "warning" : "success"}
+          showIcon
+          message={
+            res.failed
+              ? t("识别了 {n} 张，其中 {f} 张读不了或出错（表格里标为「识别出错」）", { n: res.images, f: res.failed })
+              : t("识别了 {n} 张", { n: res.images })
+          }
+          description={
+            <div>
+              <div style={{ margin: "4px 0 8px" }}>
+                {res.counts.map(([name, n]) => (
+                  <Tag key={name}>{t("{name} {n} 张", { name, n })}</Tag>
+                ))}
+              </div>
+              <Space>
+                <Button size="small" icon={<FolderOpenOutlined />} onClick={() => api.revealPath(res.output).catch(() => {})}>
+                  {t("打开结果文件夹")}
+                </Button>
+                <Button size="small" onClick={() => api.revealPath(res.csv).catch(() => {})}>
+                  {t("找到表格")}
+                </Button>
+              </Space>
+              {res.uncertain.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <Space wrap>
+                    <Button size="small" type="primary" icon={<ImportOutlined />} loading={adding} onClick={addUncertain}>
+                      {isCls
+                        ? t("把拿不准的 {n} 张加进项目去标", { n: res.uncertain.length })
+                        : t("把没找到目标的 {n} 张加进项目去标", { n: res.uncertain.length })}
+                    </Button>
+                    {added && <span className="dim">{added.text}</span>}
+                    {added && added.ids.length > 0 && (
+                      <Button size="small" onClick={() => annotateQueue(added.ids, t("批量识别拿不准的图"))}>
+                        {t("去标注这批")}
+                      </Button>
+                    )}
+                  </Space>
+                  <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                    {t("标好后重新训练，模型会越用越准。")}
+                  </div>
+                </div>
+              )}
+            </div>
+          }
+        />
+      )}
+    </div>
+  );
+}
+
 function StepBar({ step }: { step: DeployStep | null }) {
   if (!step) return null;
   const name = FORMATS.find((f) => f.value === step.name)?.name ?? step.name;
@@ -590,7 +816,9 @@ const DEFAULT_FORM: ServiceForm = {
   refluxHigh: 0.5,
 };
 
-function ServiceTab({ run, project, recConf }: { run: RunInfo; project: ProjectInfo; recConf: number | null }) {
+function ServiceTab({ run, project, recConf, classRec }: { run: RunInfo; project: ProjectInfo; recConf: number | null; classRec: Record<string, number> | null }) {
+  const clsRec = project.task === "multilabel" ? classRec : null;
+  const [useCls, setUseCls, cc] = useClassConf(clsRec);
   const { message, modal } = App.useApp();
   const classes = run.config?.classes ?? [];
   const [f, setF] = useState<ServiceForm>(() => {
@@ -634,7 +862,7 @@ function ServiceTab({ run, project, recConf }: { run: RunInfo; project: ProjectI
       port: f.port,
       interval: f.interval,
       streams: f.streams.filter((s) => s.url.trim()).map((s) => ({ name: s.name.trim() || s.url, url: s.url.trim() })),
-      alert: { labels: f.labels, min_score: f.minScore, cooldown: f.cooldown, hours: f.hours.trim(), save_image: f.saveImage },
+      alert: { labels: f.labels, min_score: f.minScore, class_scores: cc ?? {}, cooldown: f.cooldown, hours: f.hours.trim(), save_image: f.saveImage },
       webhook: { url: f.webhookUrl.trim(), with_image: f.webhookImage, headers: {} },
       mqtt: { host: f.mqttHost.trim(), port: f.mqttPort, topic: f.mqttTopic.trim(), username: f.mqttUser, password: f.mqttPass },
       reflux: { enabled: f.reflux, low: f.refluxLow, high: f.refluxHigh, interval: 60 },
@@ -712,6 +940,9 @@ function ServiceTab({ run, project, recConf }: { run: RunInfo; project: ProjectI
               />
               <div>
                 <RecConf value={f.minScore} rec={recConf} onUse={(v) => set({ minScore: v })} />
+              </div>
+              <div style={{ maxWidth: 420 }}>
+                <ClassConfToggle rec={clsRec} on={useCls} onChange={setUseCls} />
               </div>
             </Form.Item>
             <Form.Item label={t("去重间隔（秒）")} tooltip={t("同一路视频同一类别，这段时间内只告警一次")} style={{ marginBottom: 10 }}>
@@ -898,6 +1129,8 @@ export default function Deploy({ project }: { project: ProjectInfo }) {
   const [labels, setLabels] = useState<Label[]>([]);
   const [tab, setTab] = useState(prefs.get("deployTab", "live"));
   const [recConf, setRecConf] = useState<number | null>(null);
+  /** 每个类别的推荐阈值（多标签分类用） */
+  const [classRec, setClassRec] = useState<Record<string, number> | null>(null);
 
   useEffect(() => {
     // 别的页带过来的那次训练优先；训练中的还没训完，不默认选
@@ -915,14 +1148,21 @@ export default function Deploy({ project }: { project: ProjectInfo }) {
   // 评估页算出的推荐阈值（F1 最高），实时验证和推理服务包默认用它
   useEffect(() => {
     setRecConf(null);
+    setClassRec(null);
     if (runId == null) return;
     let alive = true;
     api
       .runDetail(runId)
       .then((d) => {
         const sp = d.eval?.splits;
-        const c = (sp?.val ?? sp?.test)?.thresholds?.best.conf;
+        const th = (sp?.val ?? sp?.test)?.thresholds;
+        const c = th?.best.conf;
         if (alive && c != null) setRecConf(Math.max(0.05, Math.round(c * 100) / 100));
+        const m: Record<string, number> = {};
+        for (const pc of th?.perClass ?? []) {
+          if (pc.conf != null && pc.name) m[pc.name] = Math.min(0.95, Math.max(0.05, Math.round(pc.conf * 100) / 100));
+        }
+        if (alive && Object.keys(m).length) setClassRec(m);
       })
       .catch(() => {});
     return () => {
@@ -969,9 +1209,10 @@ export default function Deploy({ project }: { project: ProjectInfo }) {
             prefs.set("deployTab", k);
           }}
           items={[
-            { key: "live", label: t("实时验证"), children: <LiveTab key={run.id} run={run} labels={labels} recConf={recConf} /> },
+            { key: "live", label: t("实时验证"), children: <LiveTab key={run.id} run={run} labels={labels} recConf={recConf} classRec={classRec} /> },
+            { key: "batch", label: t("批量识别"), children: <BatchTab key={run.id} run={run} project={project} recConf={recConf} classRec={classRec} /> },
             { key: "export", label: t("导出模型"), children: <ExportTab key={run.id} run={run} project={project} /> },
-            { key: "service", label: t("推理服务包"), children: <ServiceTab key={run.id} run={run} project={project} recConf={recConf} /> },
+            { key: "service", label: t("推理服务包"), children: <ServiceTab key={run.id} run={run} project={project} recConf={recConf} classRec={classRec} /> },
             { key: "reflux", label: t("现场回流"), children: <RefluxTab /> },
           ]}
         />

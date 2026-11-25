@@ -32,6 +32,7 @@ Untuk inferensi dengan GPU NVIDIA: ganti `onnxruntime` menjadi `onnxruntime-gpu`
   "alert": {
     "labels": ["tanpa_helm"],  // hanya beri alarm untuk kelas ini; kosong berarti semua kelas
     "min_score": 0.5,          // ambang keyakinan
+    "class_scores": {},        // ambang per kelas, mis. {"goresan": 0.3}; kelas lain memakai min_score
     "cooldown": 60,            // paling banyak satu alarm per N detik untuk stream dan kelas yang sama
     "hours": "07:00-19:00",    // jam aktif; kosong berarti sepanjang hari; melewati tengah malam tulis "22:00-06:00"
     "save_image": true         // simpan tangkapan alarm ke alerts/
@@ -72,7 +73,7 @@ Field setiap item di `detections` bergantung pada model. Field `task` yang dikem
 | Deteksi objek | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Segmentasi instans | `segment` | Sama, ditambah `polygon` [x1, y1, x2, y2, …] (kontur objek, piksel gambar asli) |
 | Keypoint | `pose` | Sama, ditambah `keypoints` [x, y, v, …] (v = 2: ditemukan, 0: tidak ditemukan); gambar alarm menggambar kerangka sesuai `skeleton` di `config.json` |
-| Klasifikasi gambar | `classify` | `label`, `score`, tanpa `box`: satu item untuk setiap kelas yang probabilitasnya mencapai `min_score` (maksimal 5). Klasifikasi menilai seluruh frame dan tidak disaring dengan `region` |
+| Klasifikasi gambar | `classify` | `label`, `score`, tanpa `box`: satu item untuk setiap kelas yang probabilitasnya mencapai `min_score` (maksimal 5; tanpa batas untuk model multi-label). Klasifikasi menilai seluruh frame dan tidak disaring dengan `region` |
 
 ## API HTTP
 

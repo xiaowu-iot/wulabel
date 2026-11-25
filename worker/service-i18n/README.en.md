@@ -32,6 +32,7 @@ To run inference on an NVIDIA GPU: replace `onnxruntime` with `onnxruntime-gpu` 
   "alert": {
     "labels": ["no_helmet"],   // only alert on these classes; empty means all classes
     "min_score": 0.5,          // confidence threshold
+    "class_scores": {},        // per-class thresholds, e.g. {"scratch": 0.3}; other classes use min_score
     "cooldown": 60,            // alert at most once per N seconds for the same stream and class
     "hours": "07:00-19:00",    // active hours; empty means all day; across midnight write "22:00-06:00"
     "save_image": true         // save alert snapshots to alerts/
@@ -72,7 +73,7 @@ The fields of each item in `detections` depend on the model. The `task` returned
 | Object detection | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Instance segmentation | `segment` | Same, plus `polygon` [x1, y1, x2, y2, …] (object outline, original image pixels) |
 | Keypoints | `pose` | Same, plus `keypoints` [x, y, v, …] (v = 2: found, 0: not found); alert snapshots draw the skeleton from `skeleton` in `config.json` |
-| Image classification | `classify` | `label`, `score`, no `box`: one item per class whose probability reaches `min_score` (up to 5). Classification looks at the whole frame and ignores `region` |
+| Image classification | `classify` | `label`, `score`, no `box`: one item per class whose probability reaches `min_score` (up to 5; no limit for multi-label models). Classification looks at the whole frame and ignores `region` |
 
 ## HTTP API
 

@@ -32,6 +32,7 @@
   "alert": {
     "labels": ["未戴安全帽"],  // 只对这些类别告警，空表示全部类别
     "min_score": 0.5,          // 置信度阈值
+    "class_scores": {},        // 每个类别单独的阈值，如 {"划痕": 0.3}，没写的类别用 min_score
     "cooldown": 60,            // 同一路视频同一类别，多少秒内只告警一次
     "hours": "07:00-19:00",    // 生效时段，空表示全天，跨天写 "22:00-06:00"
     "save_image": true         // 保存告警截图到 alerts/
@@ -72,7 +73,7 @@ Webhook 开启 `with_image` 时，会多一个 `image_base64` 字段（带框的
 | 目标检测 | `detect` | `label`、`score`、`box` [x, y, w, h] |
 | 实例分割 | `segment` | 同上，多一个 `polygon` [x1, y1, x2, y2, …]（目标轮廓，原图像素） |
 | 关键点 | `pose` | 同上，多一个 `keypoints` [x, y, v, …]（v 为 2 表示找到了，0 表示没找到）；告警截图按 `config.json` 里的 `skeleton` 画骨架 |
-| 图像分类 | `classify` | `label`、`score`，没有 `box`：概率达到 `min_score` 的类别各一项（最多 5 个）。分类按整张画面判断，不按 `region` 过滤 |
+| 图像分类 | `classify` | `label`、`score`，没有 `box`：概率达到 `min_score` 的类别各一项（最多 5 个；多标签分类模型不限个数）。分类按整张画面判断，不按 `region` 过滤 |
 
 ## HTTP 接口
 

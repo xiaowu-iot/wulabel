@@ -32,6 +32,7 @@
   "alert": {
     "labels": ["未戴安全帽"],  // 只對這些類別發出警報，空白表示全部類別
     "min_score": 0.5,          // 信心值門檻
+    "class_scores": {},        // 每個類別單獨的閾值，如 {"刮痕": 0.3}，沒寫的類別用 min_score
     "cooldown": 60,            // 同一路串流同一類別，多少秒內只警報一次
     "hours": "07:00-19:00",    // 生效時段，空白表示全天，跨日寫 "22:00-06:00"
     "save_image": true         // 儲存警報截圖到 alerts/
@@ -72,7 +73,7 @@ Webhook 開啟 `with_image` 時，會多一個 `image_base64` 欄位（畫好框
 | 物件偵測 | `detect` | `label`、`score`、`box` [x, y, w, h] |
 | 實例分割 | `segment` | 同上，多一個 `polygon` [x1, y1, x2, y2, …]（目標輪廓，原圖像素） |
 | 關鍵點 | `pose` | 同上，多一個 `keypoints` [x, y, v, …]（v 為 2 表示找到了，0 表示沒找到）；警報截圖依 `config.json` 裡的 `skeleton` 畫骨架 |
-| 影像分類 | `classify` | `label`、`score`，沒有 `box`：機率達到 `min_score` 的類別各一項（最多 5 個）。分類依整張畫面判斷，不依 `region` 過濾 |
+| 影像分類 | `classify` | `label`、`score`，沒有 `box`：機率達到 `min_score` 的類別各一項（最多 5 個；多標籤分類模型不限個數）。分類依整張畫面判斷，不依 `region` 過濾 |
 
 ## HTTP API
 

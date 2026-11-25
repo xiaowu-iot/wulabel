@@ -85,6 +85,8 @@ class Detector:
         self.size = inp.shape[-1] if isinstance(inp.shape[-1], int) else 224
         meta = json.loads(model_path.with_name("model.json").read_text(encoding="utf-8"))
         self.classes: list[str] = meta["classes"]
+        # 多标签分类：每个类别各自的分数，够阈值的都算
+        self.multi = bool(meta.get("multiLabel"))
         self.max_side = max_side
         self.lock = threading.Lock()
         log.info(tr("模型已加载：%s，类别 %s，推理设备 %s"), model_path.name, self.classes, self.sess.get_providers()[0])
@@ -94,13 +96,13 @@ class Detector:
 
     def detect(self, bgr: np.ndarray, min_score: float = 0.05) -> list[dict]:
         """检测、分割、关键点：每个目标一项，带 box [x, y, w, h]（分割多 polygon，关键点多 keypoints [x, y, v, ...]）。
-        分类：概率不低于 min_score 的类别各一项（按概率从高到低，最多 5 个），没有 box"""
+        分类：概率不低于 min_score 的类别各一项（按概率从高到低，最多 5 个；多标签分类不限个数），没有 box"""
         if self.task == "classify":
             rgb = cv2.cvtColor(cv2.resize(bgr, (self.size, self.size), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
             x = (rgb.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]
             with self.lock:
                 probs = self.sess.run(None, {self.input: x})[0][0]
-            order = np.argsort(-probs)[:5]
+            order = np.argsort(-probs) if getattr(self, "multi", False) else np.argsort(-probs)[:5]
             return [{"label": self.name_of(int(i)), "score": round(float(probs[i]), 4)} for i in order if probs[i] >= min_score]
         h, w = bgr.shape[:2]
         scale = min(1.0, self.max_side / max(h, w))
@@ -344,11 +346,15 @@ class Stream(threading.Thread):
         dets = self.det.detect(frame, min_score=0.05)
         self.status["last_detect"] = time.time()
         min_score = float(rules.get("min_score", 0.5))
+        # 每个类别单独的阈值（多标签分类用评估时按类别算出的），没写的类别用 min_score
+        class_scores = rules.get("class_scores") or {}
         labels = set(rules.get("labels") or [])
         region = self.s.get("region")
         hits = [
             d for d in dets
-            if d["score"] >= min_score and (not labels or d["label"] in labels) and in_region(d.get("box"), region, w, h)
+            if d["score"] >= float(class_scores.get(d["label"], min_score))
+            and (not labels or d["label"] in labels)
+            and in_region(d.get("box"), region, w, h)
         ]
         # 现场回流：拿不准的画面存下来，回到 xlabel 里标注
         rf = self.cfg.get("reflux", {})

@@ -1089,6 +1089,16 @@ pub async fn append_annotation(state: State<'_, AppState>, image_id: i64, annota
 // ---------- 数据集 ----------
 
 #[tauri::command]
+pub async fn unedited_prelabels(state: State<'_, AppState>) -> AppResult<Vec<i64>> {
+    annotations::unedited_prelabels(&*state.current()?)
+}
+
+#[tauri::command]
+pub async fn confirm_prelabels(state: State<'_, AppState>, ids: Vec<i64>) -> AppResult<usize> {
+    annotations::confirm_prelabels(&*state.current()?, &ids)
+}
+
+#[tauri::command]
 pub async fn split_summary(state: State<'_, AppState>) -> AppResult<SplitSummary> {
     dataset::split_summary(&*state.current()?)
 }
@@ -1191,6 +1201,42 @@ pub async fn import_dataset(app: AppHandle, state: State<'_, AppState>, dir: Str
     })
     .await
     .map_err(|e| msg(t!("导入任务异常：{e}", e = e)))?
+}
+
+/// 用训练好的模型批量识别一个文件夹：导出表格，可以按类别把图片复制到各自的文件夹
+#[tauri::command]
+pub async fn batch_predict(app: AppHandle, state: State<'_, AppState>, opts: crate::batch::BatchOptions) -> AppResult<crate::batch::BatchResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app.clone(), "batch-progress");
+        crate::batch::run(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), &opts, &progress)
+    })
+    .await
+    .map_err(|e| msg(t!("批量识别异常：{e}", e = e)))?
+}
+
+#[tauri::command]
+pub async fn batch_predict_stop() -> AppResult<()> {
+    crate::batch::stop();
+    Ok(())
+}
+
+/// 当前项目（检测、分割、关键点）转成多标签分类项目：新建项目，图片复制过去
+#[tauri::command]
+pub async fn convert_to_multilabel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    parent: String,
+    name: String,
+    empty_label: Option<String>,
+) -> AppResult<crate::convert::ConvertResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app, "import-progress");
+        crate::convert::to_multilabel(&project, &PathBuf::from(parent), &name, empty_label.as_deref(), &progress)
+    })
+    .await
+    .map_err(|e| msg(t!("转换任务异常：{e}", e = e)))?
 }
 
 // ---------- 标注 ----------

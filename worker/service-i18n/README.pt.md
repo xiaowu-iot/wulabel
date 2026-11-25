@@ -32,6 +32,7 @@ Para fazer inferência numa GPU NVIDIA: troque `onnxruntime` por `onnxruntime-gp
   "alert": {
     "labels": ["sem_capacete"],  // só gera alarme para estas classes; vazio = todas as classes
     "min_score": 0.5,          // limiar de confiança
+    "class_scores": {},        // limiar por classe, ex.: {"risco": 0.3}; as outras classes usam min_score
     "cooldown": 60,            // no máximo um alarme a cada N segundos para o mesmo stream e classe
     "hours": "07:00-19:00",    // horário ativo; vazio = o dia todo; passando da meia-noite, escreva "22:00-06:00"
     "save_image": true         // salva capturas dos alarmes em alerts/
@@ -72,7 +73,7 @@ Os campos de cada item em `detections` dependem do modelo. O `task` retornado po
 | Detecção de objetos | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Segmentação de instâncias | `segment` | O mesmo, mais `polygon` [x1, y1, x2, y2, …] (contorno do objeto, pixels da imagem original) |
 | Pontos-chave | `pose` | O mesmo, mais `keypoints` [x, y, v, …] (v = 2: encontrado, 0: não encontrado); as capturas de alarme desenham o esqueleto conforme `skeleton` no `config.json` |
-| Classificação de imagens | `classify` | `label`, `score`, sem `box`: um item para cada classe cuja probabilidade atinge `min_score` (até 5). A classificação avalia o quadro inteiro e não filtra por `region` |
+| Classificação de imagens | `classify` | `label`, `score`, sem `box`: um item para cada classe cuja probabilidade atinge `min_score` (até 5; sem limite em modelos multirrótulo). A classificação avalia o quadro inteiro e não filtra por `region` |
 
 ## API HTTP
 

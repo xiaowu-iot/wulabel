@@ -14,7 +14,12 @@ pub const DB_FILE: &str = "annotations.db";
 pub const IMAGES_DIR: &str = "images";
 pub const THUMBS_DIR: &str = ".cache/thumbs";
 const FORMAT_VERSION: u32 = 1;
-const TASKS: [&str; 4] = ["detect", "segment", "classify", "pose"];
+const TASKS: [&str; 5] = ["detect", "segment", "classify", "multilabel", "pose"];
+
+/// 图像分类（单标签、多标签）：整图打类别，没有框
+pub fn is_classify(task: &str) -> bool {
+    task == "classify" || task == "multilabel"
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

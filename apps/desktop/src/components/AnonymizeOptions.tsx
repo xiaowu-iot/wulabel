@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Checkbox, Radio, Select, Space } from "antd";
-import { AnonymizeConfig, api, Label, Task } from "../api";
+import { AnonymizeConfig, api, isClsTask, Label, Task } from "../api";
 import { t } from "../i18n";
 
 /** 名字像人脸、车牌的类别默认勾上 */
@@ -22,7 +22,7 @@ export default function AnonymizeOptions({
   const [labels, setLabels] = useState<Label[]>([]);
   // 关掉再打开时保留上次的设置
   const [last, setLast] = useState<AnonymizeConfig>({ labels: [], faces: true, plates: true, mode: "mosaic" });
-  const hasBoxes = task !== "classify";
+  const hasBoxes = !isClsTask(task);
 
   useEffect(() => {
     if (!hasBoxes) return;

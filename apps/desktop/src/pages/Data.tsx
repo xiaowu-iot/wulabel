@@ -14,6 +14,7 @@ import {
   FolderAddOutlined,
   LinkOutlined,
   RollbackOutlined,
+  SwapOutlined,
   TeamOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
@@ -27,6 +28,7 @@ import {
   ImageStatus,
   ImportProgress,
   ImportResult,
+  isClsTask,
   LastImport,
   ProjectInfo,
   StreamFrames,
@@ -43,6 +45,7 @@ import ExportModal from "../components/ExportModal";
 import VersionsModal from "../components/VersionsModal";
 import { PickModal, QualityModal } from "../components/DataTools";
 import CollabModal from "../components/CollabModal";
+import ConvertModal from "../components/ConvertModal";
 import { XuntongPullModal } from "../components/Xuntong";
 
 const PAGE_SIZE = 120;
@@ -107,6 +110,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const [showQuality, setShowQuality] = useState(false);
   const [showPick, setShowPick] = useState(false);
   const [showCollab, setShowCollab] = useState(false);
+  const [showConvert, setShowConvert] = useState(false);
   const [videoPaths, setVideoPaths] = useState<string[]>([]);
   const [videoEvery, setVideoEvery] = useState(Number(prefs.get("videoEvery", "1")));
   const [videoMax, setVideoMax] = useState(Number(prefs.get("videoMax", "0")));
@@ -371,7 +375,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const pickDataset = async () => {
     const dir = await open({
       directory: true,
-      title: project.task === "classify" ? t("选择分类数据集文件夹（每个类别一个子文件夹）") : t("选择数据集文件夹（YOLO / COCO / VOC）"),
+      title: isClsTask(project.task) ? t("选择分类数据集文件夹（每个类别一个子文件夹）") : t("选择数据集文件夹（YOLO / COCO / VOC）"),
     });
     if (typeof dir !== "string" || importing.current) return;
     importing.current = true;
@@ -632,13 +636,13 @@ export default function Data({ project }: { project: ProjectInfo }) {
                   key: "dataset",
                   icon: <DatabaseOutlined />,
                   label:
-                    project.task === "classify"
+                    isClsTask(project.task)
                       ? t("导入分类数据集（每个类别一个文件夹）")
                       : project.task === "pose"
                         ? t("导入带标注的数据集（YOLO-pose / COCO 关键点）")
                         : t("导入带标注的数据集（YOLO / COCO / VOC）"),
                 },
-                ...(project.task === "classify" || !xuntongEnabled() ? [] : [{ key: "xuntong", icon: <CloudDownloadOutlined />, label: t("从巡瞳 AI 拉取告警图片") }]),
+                ...(isClsTask(project.task) || !xuntongEnabled() ? [] : [{ key: "xuntong", icon: <CloudDownloadOutlined />, label: t("从巡瞳 AI 拉取告警图片") }]),
               ],
               onClick: ({ key }) => {
                 if (key === "files") pickFiles();
@@ -673,6 +677,8 @@ export default function Data({ project }: { project: ProjectInfo }) {
                 { key: "quality", icon: <EyeInvisibleOutlined />, label: t("图片质量筛查（模糊、过暗、过曝）") },
                 { key: "pick", icon: <AimOutlined />, label: t("挑选最值得标的图（用模型）") },
                 { key: "collab", icon: <TeamOutlined />, label: t("多人协作（分包、合并回来）") },
+                // 检测、分割、关键点项目：按每张图标过的类别生成多标签分类项目
+                ...(isClsTask(project.task) ? [] : [{ key: "convert", icon: <SwapOutlined />, label: t("转成多标签分类项目") }]),
                 { key: "select", icon: <CheckSquareOutlined />, label: t("批量选择") },
                 { type: "divider" },
                 { key: "all", icon: <ClearOutlined />, label: t("清空全部图片（{n} 张）", { n: s.total }), danger: true },
@@ -683,6 +689,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
                 if (key === "quality") setShowQuality(true);
                 if (key === "pick") setShowPick(true);
                 if (key === "collab") setShowCollab(true);
+                if (key === "convert") setShowConvert(true);
                 if (key === "select") {
                   setSelecting(true);
                   setSelected(new Set());
@@ -865,6 +872,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
       />
       <QualityModal project={project} open={showQuality} onClose={() => setShowQuality(false)} onChanged={load} />
       <PickModal project={project} open={showPick} onClose={() => setShowPick(false)} />
+      <ConvertModal project={project} open={showConvert} onClose={() => setShowConvert(false)} />
       <CollabModal
         project={project}
         open={showCollab}

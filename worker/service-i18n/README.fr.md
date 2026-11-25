@@ -32,6 +32,7 @@ Pour l'inférence sur un GPU NVIDIA : remplacez `onnxruntime` par `onnxruntime-g
   "alert": {
     "labels": ["sans_casque"],  // n'alerter que pour ces classes ; vide = toutes les classes
     "min_score": 0.5,          // seuil de confiance
+    "class_scores": {},        // seuil par classe, ex. {"rayure": 0.3} ; les autres classes utilisent min_score
     "cooldown": 60,            // au plus une alerte toutes les N secondes pour un même flux et une même classe
     "hours": "07:00-19:00",    // plage horaire active ; vide = toute la journée ; à cheval sur minuit, écrire "22:00-06:00"
     "save_image": true         // enregistre les captures d'alerte dans alerts/
@@ -72,7 +73,7 @@ Les champs de chaque élément de `detections` dépendent du modèle. Le champ `
 | Détection d'objets | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Segmentation d'instances | `segment` | Idem, plus `polygon` [x1, y1, x2, y2, …] (contour de l'objet, pixels de l'image d'origine) |
 | Points clés | `pose` | Idem, plus `keypoints` [x, y, v, …] (v = 2 : trouvé, 0 : non trouvé) ; les captures d'alerte tracent le squelette selon `skeleton` dans `config.json` |
-| Classification d'images | `classify` | `label`, `score`, sans `box` : un élément par classe dont la probabilité atteint `min_score` (5 au plus). La classification porte sur l'image entière et ne filtre pas par `region` |
+| Classification d'images | `classify` | `label`, `score`, sans `box` : un élément par classe dont la probabilité atteint `min_score` (5 au plus ; sans limite pour les modèles multi-étiquettes). La classification porte sur l'image entière et ne filtre pas par `region` |
 
 ## API HTTP
 

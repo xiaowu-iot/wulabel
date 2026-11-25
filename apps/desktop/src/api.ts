@@ -1,13 +1,17 @@
 import { getToken, invoke, isRemote, postJson } from "./transport";
 import { t } from "./i18n";
 
-export type Task = "detect" | "segment" | "classify" | "pose";
+export type Task = "detect" | "segment" | "classify" | "multilabel" | "pose";
+
+/** 图像分类（单标签、多标签）：整图打类别，没有框 */
+export const isClsTask = (task: string | undefined) => task === "classify" || task === "multilabel";
 
 // 名字用 getter：这个模块会在语言包加载前被 store 引入，取值时再翻译
 export const TASKS: { value: Task; readonly name: string; readonly desc: string }[] = [
   { value: "detect", get name() { return t("目标检测"); }, get desc() { return t("用矩形框标出目标的位置和类别"); } },
   { value: "segment", get name() { return t("实例分割"); }, get desc() { return t("用多边形或画笔描出目标轮廓"); } },
   { value: "classify", get name() { return t("图像分类"); }, get desc() { return t("给整张图片打类别标签"); } },
+  { value: "multilabel", get name() { return t("多标签分类"); }, get desc() { return t("一张图可以同时打好几个类别标签，比如商品的多种损坏"); } },
   { value: "pose", get name() { return t("关键点"); }, get desc() { return t("标出人体或物体的关键点和骨架"); } },
 ];
 
@@ -67,6 +71,36 @@ export interface ImportResult {
   failed: string[];
   /** 中途停止时没导入的张数 */
   stopped?: number;
+}
+
+/** 转成多标签分类项目的结果 */
+export interface ConvertResult {
+  path: string;
+  images: number;
+  negatives: number;
+  labels: number;
+}
+
+/** 批量识别一个文件夹的设置和结果 */
+export interface BatchOptions {
+  runId: number;
+  input: string;
+  output: string;
+  conf: number;
+  sort: boolean;
+  /** 多标签分类：每个类别单独的阈值（类别名 → 阈值） */
+  classConf?: Record<string, number>;
+}
+export interface BatchResult {
+  images: number;
+  failed: number;
+  csv: string;
+  output: string;
+  /** [类别, 图片数]，最后一项可能是「拿不准 / 没有目标」 */
+  counts: [string, number][];
+  /** 拿不准（检测是没有目标）的图的路径 */
+  uncertain: string[];
+  stopped: boolean;
 }
 
 export interface ImportProgress {
@@ -465,7 +499,30 @@ export interface SplitEval {
   perClass: ClassEval[];
   confusion: number[][];
   /** 分类模型的错例另有 gt（标的类别序号）、pred（判成的类别序号）、score */
-  errors: { imageId: number; missed: number; extra: number; wrong: number; gt?: number; pred?: number; score?: number | null }[];
+  /** 多标签分类的错例另有 miss（漏判的类别序号）、add（多判的 [类别序号, 分数]） */
+  errors: {
+    imageId: number;
+    missed: number;
+    extra: number;
+    wrong: number;
+    gt?: number;
+    pred?: number;
+    score?: number | null;
+    boxes?: ErrBox[];
+    miss?: number[];
+    add?: [number, number][];
+  }[];
+  /** 多标签分类：标签全部判对的图片比例 */
+  exact?: number;
+}
+
+/** 检测错例里对不上的框（xywh 原图像素）：missed 标了没找到，extra 多报，wrong 类别判错 */
+export interface ErrBox {
+  k: "missed" | "extra" | "wrong";
+  box: [number, number, number, number];
+  gt: number | null;
+  pred: number | null;
+  score: number | null;
 }
 
 export interface RunDetail {
@@ -622,6 +679,11 @@ export const api = {
     anonymize: AnonymizeConfig | null = null,
   ) => invoke<ExportResult>("export_dataset", { options, anonymize }),
   importDataset: (dir: string) => invoke<DatasetImportResult>("import_dataset", { dir }),
+  batchPredict: (opts: BatchOptions) => invoke<BatchResult>("batch_predict", { opts }),
+  batchPredictStop: () => invoke<void>("batch_predict_stop"),
+  /** 当前项目转成多标签分类项目（新建项目）；emptyLabel：标为「没有目标」的图打上的类别，null 就不要这些图 */
+  convertToMultilabel: (parent: string, name: string, emptyLabel: string | null) =>
+    invoke<ConvertResult>("convert_to_multilabel", { parent, name, emptyLabel }),
   lastImport: () => invoke<LastImport | null>("last_import"),
   deleteImages: (scope: "ids" | "last" | "all", ids?: number[]) => invoke<number>("delete_images", { scope, ids }),
   listImageIds: (status: string | null) => invoke<number[]>("list_image_ids", { status }),
@@ -632,6 +694,9 @@ export const api = {
   /** 批量改状态，返回改了几张；改成 todo 时有人工标注的图会变成已标注 */
   setStatusMany: (ids: number[], status: ImageStatus) => invoke<number>("set_status_many", { ids, status }),
   listLabels: () => invoke<Label[]>("list_labels"),
+  /** 已标注但标注全是预标注、人没改过的图 */
+  uneditedPrelabels: () => invoke<number[]>("unedited_prelabels"),
+  confirmPrelabels: (ids: number[]) => invoke<number>("confirm_prelabels", { ids }),
   interpolateFrames: (imageId: number) => invoke<InterpResult>("interpolate_frames", { imageId }),
   trackFrames: (imageId: number, count: number) => invoke<TrackResult>("track_frames", { imageId, count }),
   addLabel: (name: string, color: string) => invoke<Label>("add_label", { name, color }),

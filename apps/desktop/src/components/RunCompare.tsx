@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { App, Empty, Modal, Spin, Table } from "antd";
-import { api, errText, RunDetail, RunInfo, Task } from "../api";
+import { api, errText, isClsTask, RunDetail, RunInfo, Task } from "../api";
 import LineChart from "./LineChart";
 import { fmtTime, metricNames, modelName } from "../pages/Train";
 import { t } from "../i18n";
@@ -68,7 +68,7 @@ export default function RunCompare({ runs, task, open, onClose }: { runs: RunInf
         { key: "size", name: t("输入尺寸"), values: details.map((d) => String(d.run.config?.imgSize ?? "—")) },
         { key: "batch", name: t("批大小"), values: details.map((d) => String(d.run.config?.batch ?? "—")) },
         { key: "lr", name: t("学习率"), values: details.map((d) => String(d.run.config?.lr ?? "—")) },
-        { key: "best", name: t("最好的{metric}", { metric: mn.m50 }), values: details.map((d) => fmt(d.run.bestMap50, task === "classify")) },
+        { key: "best", name: t("最好的{metric}", { metric: mn.m50 }), values: details.map((d) => fmt(d.run.bestMap50, isClsTask(task))) },
         {
           key: "bestm",
           name: t("对应的{metric}", { metric: mn.m }),
@@ -149,7 +149,7 @@ export default function RunCompare({ runs, task, open, onClose }: { runs: RunInf
             </div>
           </div>
 
-          <div className="muted" style={{ marginBottom: 6 }}>{t("各类别（验证集 {metric}，每行最好的标绿）", { metric: task === "classify" ? "F1" : "AP50" })}</div>
+          <div className="muted" style={{ marginBottom: 6 }}>{t("各类别（验证集 {metric}，每行最好的标绿）", { metric: isClsTask(task) ? "F1" : "AP50" })}</div>
           {perClass.length === 0 ? (
             <Empty description={t("这几次训练还没有评估结果")} />
           ) : (

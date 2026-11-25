@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Progress, Select, Space, Tag, Tooltip } from "antd";
 import { CheckOutlined, EyeInvisibleOutlined, FormOutlined, HeartOutlined, PlusOutlined } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { api, errText, HealthProgress, HealthReport, Issue, IssueKind, ProjectInfo, RunInfo, thumbUrl } from "../api";
-import { useApp, useReview } from "../store";
+import { api, errText, HealthProgress, HealthReport, isClsTask, Issue, IssueKind, ProjectInfo, RunInfo, thumbUrl } from "../api";
+import { Mark, useApp, useReview } from "../store";
 import { statusTag } from "../status";
 import { fmtTime } from "./Train";
 import { t } from "../i18n";
@@ -61,6 +61,7 @@ function IssueThumb({ path, issue, dims, color }: { path: string; issue: Issue; 
 export default function Health({ project }: { project: ProjectInfo }) {
   const { message, modal } = App.useApp();
   const annotateImage = useApp((s) => s.annotateImage);
+  const annotateQueue = useApp((s) => s.annotateQueue);
   const refreshStats = useApp((s) => s.refreshStats);
   const [report, setReport] = useState<HealthReport | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -76,8 +77,20 @@ export default function Health({ project }: { project: ProjectInfo }) {
   const [showChanged, setShowChanged] = useState(false);
   const [busy, setBusy] = useState(false);
   const review = useReview();
-  const cls = project.task === "classify";
-  const kinds = useMemo(() => (cls ? KINDS.filter((k) => k.cls) : KINDS), [cls]);
+  const cls = isClsTask(project.task);
+  // 多标签分类：没有位置可比，只查模型很确定有、但没打上的类别（疑似漏标）和重复图片
+  const multi = project.task === "multilabel";
+  const kinds = useMemo(
+    () =>
+      multi
+        ? KINDS.filter((k) => k.key === "missing" || k.key === "dup_image").map((k) =>
+            k.key === "missing" ? { ...k, tip: t("模型很确定这张图有这个类别，但没有打上") } : k,
+          )
+        : cls
+          ? KINDS.filter((k) => k.cls)
+          : KINDS,
+    [cls, multi],
+  );
 
   useEffect(() => {
     api.healthLoad().then((r) => {
@@ -191,7 +204,9 @@ export default function Health({ project }: { project: ProjectInfo }) {
   };
 
   const addBox = (i: Issue) =>
-    api.appendAnnotation(i.imageId, { labelId: i.predLabelId, type: "bbox", data: i.bbox!, score: null, source: "manual" });
+    multi
+      ? api.appendAnnotation(i.imageId, { labelId: i.predLabelId, type: "tag", data: [], score: null, source: "manual" })
+      : api.appendAnnotation(i.imageId, { labelId: i.predLabelId, type: "bbox", data: i.bbox!, score: null, source: "manual" });
 
   // 加上后这张图的标注变了，下次打开体检页会算「已修改」，不用再记忽略
   const accept = async (i: Issue) => {
@@ -243,9 +258,16 @@ export default function Health({ project }: { project: ProjectInfo }) {
     });
   };
 
+  // 去标注页时带上这一类问题的所有图，翻图只在这些图里翻
   const go = (i: Issue) => {
-    const k = KINDS.find((x) => x.key === i.kind);
-    annotateImage(i.imageId, i.bbox ? { imageId: i.imageId, bbox: i.bbox, text: k?.name ?? "" } : undefined);
+    const name = KINDS.find((x) => x.key === i.kind)?.name ?? "";
+    const marks: Record<number, Mark[]> = {};
+    // 点的这一处先放，同一张图有好几处问题时高亮点的那处
+    for (const x of [i, ...list]) {
+      if (x.bbox && !marks[x.imageId]) marks[x.imageId] = [{ bbox: x.bbox, text: t("体检：{text}", { text: name }), color: "#ffd43b", fg: "#1b1e23" }];
+    }
+    const ids = [...new Set(list.some((x) => x.key === i.key) ? list.map((x) => x.imageId) : [i.imageId])];
+    annotateQueue(ids, name || t("体检"), { focus: i.imageId, marks });
   };
 
   const keepOf = (g: number[]) => {

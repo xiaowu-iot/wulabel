@@ -322,7 +322,7 @@ pub fn evaluate_run(
     let dir = PathBuf::from(&run.dir);
     let ds = dir.join("eval_dataset");
     let _ = fs::remove_dir_all(&ds);
-    let format = if p.meta.task == "classify" { Format::Cls } else { Format::Coco };
+    let format = if crate::project::is_classify(&p.meta.task) { Format::Cls } else { Format::Coco };
     log(t!("导出当前数据…"));
     let opts = ExportOptions { format, out_dir: ds.clone(), only_reviewed: false, ratios: [0.8, 0.2, 0.0], copy_files: false };
     let res = dataset::export(p, &opts, &|done, total| progress("export", done, total))?;

@@ -460,5 +460,22 @@
   "下载 uv 失败：{errors}。可以手动安装 uv 后在设置里指定路径": "No se pudo descargar uv: {errors}. Puedes instalar uv manualmente e indicar su ruta en Ajustes",
   "这次训练没有留下可以接着跑的进度": "Este entrenamiento no guardó un punto desde el que reanudar",
   "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "Falta la copia del conjunto de datos de este entrenamiento, así que no se puede reanudar. Empieza un entrenamiento nuevo.",
-  "已经过了撤销时间": "Ya pasó el tiempo para deshacer"
+  "已经过了撤销时间": "Ya pasó el tiempo para deshacer",
+  "多标签分类": "Clasificación multietiqueta",
+  "拿不准的类别 {n} 个": "{n} clases dudosas",
+  "转换任务异常：{e}": "Error en la conversión: {e}",
+  "已经是分类项目了，不用转换": "Ya es un proyecto de clasificación; no hace falta convertirlo",
+  "还没有标过的图片，先标注一些再转换": "Aún no hay imágenes anotadas. Anota algunas y luego convierte",
+  "拿不准": "Dudosa",
+  "文件": "Archivo",
+  "结果": "Resultado",
+  "最高分": "Puntuación máx.",
+  "识别出错": "Error",
+  "识别结果": "resultados",
+  "请选择要识别的文件夹": "Elige la carpeta que reconocer",
+  "请选择结果放在哪个文件夹": "Elige dónde guardar los resultados",
+  "结果文件夹不能放在要识别的文件夹里面": "La carpeta de resultados no puede estar dentro de la carpeta que se reconoce",
+  "这个文件夹里没有图片": "No hay imágenes en esta carpeta",
+  "批量识别异常：{e}": "Error en el reconocimiento por lotes: {e}",
+  "没有目标": "Sin objetos"
 }

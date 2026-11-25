@@ -32,6 +32,7 @@ Inferenz auf einer NVIDIA-GPU: Ersetzen Sie in `requirements.txt` `onnxruntime` 
   "alert": {
     "labels": ["ohne_helm"],   // nur bei diesen Klassen alarmieren; leer = alle Klassen
     "min_score": 0.5,          // Konfidenzschwelle
+    "class_scores": {},        // Schwelle pro Klasse, z. B. {"Kratzer": 0.3}; andere Klassen nutzen min_score
     "cooldown": 60,            // höchstens ein Alarm pro N Sekunden für denselben Stream und dieselbe Klasse
     "hours": "07:00-19:00",    // aktive Zeit; leer = ganztägig; über Mitternacht "22:00-06:00" schreiben
     "save_image": true         // Alarm-Schnappschüsse in alerts/ speichern
@@ -72,7 +73,7 @@ Die Felder jedes Eintrags in `detections` hängen vom Modell ab. Das Feld `task`
 | Objekterkennung | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Instanzsegmentierung | `segment` | Wie oben, plus `polygon` [x1, y1, x2, y2, …] (Objektumriss, Pixel des Originalbilds) |
 | Keypoints | `pose` | Wie oben, plus `keypoints` [x, y, v, …] (v = 2: gefunden, 0: nicht gefunden); Alarmbilder zeichnen das Skelett nach `skeleton` in `config.json` |
-| Bildklassifizierung | `classify` | `label`, `score`, keine `box`: ein Eintrag je Klasse, deren Wahrscheinlichkeit `min_score` erreicht (höchstens 5). Die Klassifizierung bewertet das ganze Bild und filtert nicht nach `region` |
+| Bildklassifizierung | `classify` | `label`, `score`, keine `box`: ein Eintrag je Klasse, deren Wahrscheinlichkeit `min_score` erreicht (höchstens 5; bei Multi-Label-Modellen ohne Begrenzung). Die Klassifizierung bewertet das ganze Bild und filtert nicht nach `region` |
 
 ## HTTP-API
 

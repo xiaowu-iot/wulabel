@@ -460,5 +460,22 @@
   "下载 uv 失败：{errors}。可以手动安装 uv 后在设置里指定路径": "Tải uv thất bại: {errors}. Có thể tự cài uv rồi chỉ định đường dẫn trong Cài đặt",
   "这次训练没有留下可以接着跑的进度": "Lần huấn luyện này không có điểm lưu để chạy tiếp",
   "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "Bản sao tập dữ liệu của lần huấn luyện này không còn, không thể chạy tiếp. Hãy bắt đầu huấn luyện mới.",
-  "已经过了撤销时间": "Đã quá thời gian hoàn tác"
+  "已经过了撤销时间": "Đã quá thời gian hoàn tác",
+  "多标签分类": "Phân loại đa nhãn",
+  "拿不准的类别 {n} 个": "{n} lớp chưa chắc",
+  "转换任务异常：{e}": "Lỗi khi chuyển đổi: {e}",
+  "已经是分类项目了，不用转换": "Đây đã là dự án phân loại, không cần chuyển",
+  "还没有标过的图片，先标注一些再转换": "Chưa có ảnh nào được gán nhãn. Hãy gán nhãn vài ảnh rồi chuyển",
+  "拿不准": "Chưa chắc",
+  "文件": "Tệp",
+  "结果": "Kết quả",
+  "最高分": "Điểm cao nhất",
+  "识别出错": "Lỗi",
+  "识别结果": "ket-qua",
+  "请选择要识别的文件夹": "Hãy chọn thư mục cần nhận diện",
+  "请选择结果放在哪个文件夹": "Hãy chọn thư mục lưu kết quả",
+  "结果文件夹不能放在要识别的文件夹里面": "Thư mục kết quả không được nằm trong thư mục cần nhận diện",
+  "这个文件夹里没有图片": "Thư mục này không có ảnh",
+  "批量识别异常：{e}": "Lỗi nhận diện hàng loạt: {e}",
+  "没有目标": "Không có đối tượng"
 }
