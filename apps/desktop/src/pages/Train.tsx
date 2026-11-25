@@ -8,7 +8,7 @@ import {
   StopOutlined,
 } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { api, EnvStatus, errText, ImportProgress, isClsTask, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, Task, TrainConfig, VersionInfo } from "../api";
+import { api, EnvStatus, errText, ImportProgress, isClsTask, Label, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, Task, TrainConfig, VersionInfo } from "../api";
 import { prefs, useApp, useReview } from "../store";
 import { t } from "../i18n";
 import LineChart from "../components/LineChart";
@@ -174,6 +174,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
   /** 导出 ONNX 时 worker 报的最新一行 */
   const [onnxMsg, setOnnxMsg] = useState("");
   const [versions, setVersions] = useState<VersionInfo[]>([]);
+  const [labels, setLabels] = useState<Label[]>([]);
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [comparing, setComparing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -240,6 +241,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
       }
       api.envStatus(false).then(setEnv).catch(() => {});
       api.listVersions().then(setVersions).catch(() => {});
+      api.listLabels().then(setLabels).catch(() => {});
     })();
   }, [loadRuns, message]);
 
@@ -353,16 +355,23 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const totalSteps = stepsPerEpoch * cfg.epochs;
   const fewData = trainN > 0 && (trainN < 20 || totalSteps < 300);
   const fewVal = trainN > 0 && valN <= 2;
+  // 某个类别标得太少：分类按张数，检测类按框数（类别里的数是全部标注，所以只是大概）
+  const clsTask = isClsTask(task);
+  const fewCls = trainN > 0 ? labels.filter((l) => l.count < (clsTask ? 20 : 30)) : [];
+  const fewClsText = fewCls
+    .slice(0, 6)
+    .map((l) => (l.count === 0 ? t("「{name}」还没标过", { name: l.name }) : clsTask ? t("「{name}」{n} 张", { name: l.name, n: l.count }) : t("「{name}」{n} 个框", { name: l.name, n: l.count })))
+    .join("、") + (fewCls.length > 6 ? t(" 等 {n} 个类别", { n: fewCls.length }) : "");
 
   const start = () => {
-    if (!fewData && !fewVal) {
+    if (!fewData && !fewVal && !fewCls.length) {
       doStart();
       return;
     }
     // 凑够约 300 步要的轮数
     const needEpochs = Math.min(500, Math.ceil(300 / stepsPerEpoch));
     modal.confirm({
-      title: fewData ? t("数据太少，这样训多半学不到东西") : t("验证集太少"),
+      title: fewData ? t("数据太少，这样训多半学不到东西") : fewCls.length ? t("有的类别标得太少") : t("验证集太少"),
       width: 520,
       content: (
         <div>
@@ -375,6 +384,15 @@ export default function Train({ project }: { project: ProjectInfo }) {
                 <li>{t("多标一些图，每个类别至少几十张")}</li>
                 {needEpochs > cfg.epochs && <li>{t("或者把训练轮数加大到 {x}（凑够约 300 步）", { x: needEpochs })}</li>}
                 {task === "detect" && cfg.model !== "frcnn_mobilenet" && <li>{t("数据很少时可以先用 Faster R-CNN MobileNetV3，小数据上更容易学出来")}</li>}
+              </ul>
+            </>
+          )}
+          {fewCls.length > 0 && (
+            <>
+              <p style={{ marginTop: 0 }}>{t("这些类别标得太少，模型很难学会，识别时容易认不出：{list}", { list: fewClsText })}</p>
+              <ul style={{ paddingLeft: 18, margin: "0 0 8px" }}>
+                <li>{clsTask ? t("每个类别最好 50 张以上，至少 20 张") : t("每个类别最好 100 个框以上，至少 30 个")}</li>
+                <li>{t("实在凑不够的，可以在「标注」页删掉这个类别，删的时候把标注合并到相近的类别")}</li>
               </ul>
             </>
           )}
@@ -651,6 +669,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                   {t("每轮约 {n} 步 · 共约 {m} 步", { n: stepsPerEpoch, m: totalSteps })}
                   {fewData && <span style={{ color: "var(--warn)" }}> · {t("步数太少，多半学不到东西")}</span>}
                   {fewVal && <div style={{ color: "var(--warn)" }}>{t("验证集只有 {n} 张，指标波动会很大、不可信。", { n: valN })}</div>}
+                  {fewCls.length > 0 && <div style={{ color: "var(--warn)" }}>{t("这些类别标得太少，容易认不出：{list}", { list: fewClsText })}</div>}
                 </div>
               )}
               <Button

@@ -46,6 +46,8 @@ pub struct BatchResult {
     pub output: String,
     /// 每个类别的图片数（按图片数从多到少），最后是没有结果的
     pub counts: Vec<(String, usize)>,
+    /// 拿不准（检测是没有目标）的图，可以加进项目去标
+    pub uncertain: Vec<String>,
     pub stopped: bool,
 }
 
@@ -225,6 +227,11 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
     }
     let rows: Vec<(PathBuf, Option<Hits>)> = files.into_iter().zip(results).take(done).collect();
     let failed = rows.iter().filter(|r| r.1.is_none()).count();
+    let uncertain = rows
+        .iter()
+        .filter(|r| r.1.as_ref().is_some_and(|h| h.is_empty()))
+        .map(|r| r.0.to_string_lossy().into_owned())
+        .collect();
     let (csv, counts) = write_outputs(&input, &out, &classes, &rows, opts.sort, !crate::project::is_classify(task))?;
     Ok(BatchResult {
         images: rows.len(),
@@ -232,6 +239,7 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
         csv: csv.to_string_lossy().into_owned(),
         output: out.to_string_lossy().into_owned(),
         counts,
+        uncertain,
         stopped,
     })
 }

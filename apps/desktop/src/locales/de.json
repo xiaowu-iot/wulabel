@@ -1696,5 +1696,19 @@
   "{name} {n} 张": "{name}: {n}",
   "打开结果文件夹": "Ergebnisordner öffnen",
   "找到表格": "Tabelle zeigen",
-  "批量识别": "Stapelerkennung"
+  "批量识别": "Stapelerkennung",
+  "把拿不准的 {n} 张加进项目去标": "Die {n} unsicheren Bilder zum Annotieren ins Projekt aufnehmen",
+  "把没找到目标的 {n} 张加进项目去标": "Die {n} Bilder ohne gefundene Objekte zum Annotieren ins Projekt aufnehmen",
+  "批量识别拿不准的图": "Unsichere Bilder aus der Stapelerkennung",
+  "标好后重新训练，模型会越用越准。": "Annotieren und neu trainieren – das Modell wird mit der Zeit immer genauer.",
+  "「{name}」还没标过": "„{name}“ hat noch keine Annotationen",
+  "「{name}」{n} 张": "„{name}“: {n} Bilder",
+  "「{name}」{n} 个框": "„{name}“: {n} Boxen",
+  " 等 {n} 个类别": " und weitere (insgesamt {n} Klassen)",
+  "有的类别标得太少": "Einige Klassen haben zu wenige Annotationen",
+  "这些类别标得太少，模型很难学会，识别时容易认不出：{list}": "Diese Klassen haben zu wenige Annotationen – das Modell lernt sie schwer und erkennt sie leicht nicht: {list}",
+  "每个类别最好 50 张以上，至少 20 张": "Am besten 50+ Bilder pro Klasse, mindestens 20",
+  "每个类别最好 100 个框以上，至少 30 个": "Am besten 100+ Boxen pro Klasse, mindestens 30",
+  "实在凑不够的，可以在「标注」页删掉这个类别，删的时候把标注合并到相近的类别": "Wenn es nicht reicht: Klasse auf der Seite „Annotieren“ löschen und ihre Annotationen dabei in eine ähnliche Klasse übernehmen",
+  "这些类别标得太少，容易认不出：{list}": "Zu wenige Annotationen, werden leicht übersehen: {list}"
 }
