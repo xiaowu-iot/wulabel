@@ -72,7 +72,7 @@ Webhook 開啟 `with_image` 時，會多一個 `image_base64` 欄位（畫好框
 | 物件偵測 | `detect` | `label`、`score`、`box` [x, y, w, h] |
 | 實例分割 | `segment` | 同上，多一個 `polygon` [x1, y1, x2, y2, …]（目標輪廓，原圖像素） |
 | 關鍵點 | `pose` | 同上，多一個 `keypoints` [x, y, v, …]（v 為 2 表示找到了，0 表示沒找到）；警報截圖依 `config.json` 裡的 `skeleton` 畫骨架 |
-| 影像分類 | `classify` | `label`、`score`，沒有 `box`：機率達到 `min_score` 的類別各一項（最多 5 個）。分類依整張畫面判斷，不依 `region` 過濾 |
+| 影像分類 | `classify` | `label`、`score`，沒有 `box`：機率達到 `min_score` 的類別各一項（最多 5 個；多標籤分類模型不限個數）。分類依整張畫面判斷，不依 `region` 過濾 |
 
 ## HTTP API
 

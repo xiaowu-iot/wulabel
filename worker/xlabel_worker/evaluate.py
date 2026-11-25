@@ -19,7 +19,16 @@ import torch
 
 from . import models
 from .data import ClsFolder, CocoDetection, has_cls_split, has_split, load_image
-from .metrics import ImageGt, ImagePred, classify_eval, classify_threshold_curve, evaluate, threshold_curve
+from .metrics import (
+    ImageGt,
+    ImagePred,
+    classify_eval,
+    classify_threshold_curve,
+    evaluate,
+    multilabel_eval,
+    multilabel_threshold_curve,
+    threshold_curve,
+)
 from .i18n import tr
 from .protocol import emit, log
 from .train import ClsTask, pick_device, split_report
@@ -58,6 +67,35 @@ def _det_splits(root: Path, classes: list[str], predict) -> dict:
     return out
 
 
+@torch.no_grad()
+def _multi_splits(root: Path, classes: list[str], model, ck: dict, cmap: dict[int, int], task, device) -> dict:
+    """多标签分类：每个类别的 sigmoid 分数；模型里没有的项目类别分数记 0"""
+    out = {}
+    model.eval()
+    for split in SPLITS:
+        if not has_cls_split(root, split):
+            continue
+        ds = ClsFolder(root, split, train=False, size=int(ck["img_size"]))
+        ys, ps, ids = [], [], []
+        emit("progress", split=split, done=0, total=len(ds))
+        loader = torch.utils.data.DataLoader(ds, batch_size=16, shuffle=False, collate_fn=task.collate)
+        for imgs, labels, idl in loader:
+            prob = torch.sigmoid(model(imgs.to(device)).float()).cpu().numpy()
+            p = np.zeros((len(idl), len(classes)))
+            for mi, pi in cmap.items():
+                p[:, pi] = prob[:, mi]
+            ps.append(p)
+            ys.append(labels.numpy())
+            ids += idl
+            emit("progress", split=split, done=len(ids), total=len(ds))
+        y = np.concatenate(ys) if ys else np.zeros((0, len(classes)))
+        p = np.concatenate(ps) if ps else np.zeros((0, len(classes)))
+        r = multilabel_eval(y, p, ids, len(classes))
+        r.thresholds = multilabel_threshold_curve(y, p)
+        out[split] = split_report(r, classes, len(ds))
+    return out
+
+
 def run(cfg: dict) -> None:
     root = Path(cfg["dataset"])
     out = Path(cfg["out"])
@@ -92,7 +130,16 @@ def run(cfg: dict) -> None:
         cmap = _remap(ck["classes"], classes)
         if models.is_cls(key):
             task = ClsTask({"img_size": ck["img_size"]}, root, key)
-            for split in SPLITS:
+            if bool(ck.get("multi_label")) != task.multi:
+                raise RuntimeError(tr("这个模型和项目一个是多标签分类、一个是单标签分类，不能用来评估"))
+            if task.multi:
+                report["multiLabel"] = True
+                report["splits"] = _multi_splits(root, classes, model, ck, cmap, task, device)
+                for split in SPLITS:
+                    if split in report["splits"]:
+                        n, v = report["splits"][split]["images"], f"{report['splits'][split]['map50']:.3f}"
+                        log(tr("验证集：{n} 张，mAP {map50}", n=n, map50=v) if split == "val" else tr("测试集：{n} 张，mAP {map50}", n=n, map50=v))
+            for split in SPLITS if not task.multi else ():
                 if not has_cls_split(root, split):
                     continue
                 ds = ClsFolder(root, split, train=False, size=int(ck["img_size"]))

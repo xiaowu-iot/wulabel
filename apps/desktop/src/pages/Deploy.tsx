@@ -109,6 +109,10 @@ function RecConf({ value, rec, onUse }: { value: number; rec: number | null; onU
 function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recConf: number | null }) {
   const { message } = App.useApp();
   const refreshStats = useApp((s) => s.refreshStats);
+  // 多标签分类：分数够阈值的类别都算（单标签只看第一名）
+  const multi = useApp((s) => s.project?.task === "multilabel");
+  const multiRef = useRef(multi);
+  multiRef.current = multi;
   const [kind, setKind] = useState(prefs.get("liveKind", "rtsp"));
   const [url, setUrl] = useState(prefs.get("liveUrl", ""));
   const [file, setFile] = useState(prefs.get("liveFile", ""));
@@ -227,7 +231,8 @@ function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recC
         const text = `${name} ${p.toFixed(2)}`;
         const tw = ctx.measureText(text).width + 12 * dpr;
         const ty = (8 + i * 28) * dpr;
-        ctx.fillStyle = i === 0 ? colorRef.current(name) : "rgba(0,0,0,0.55)";
+        const on = multiRef.current ? p >= confRef.current : i === 0;
+        ctx.fillStyle = on ? colorRef.current(name) : "rgba(0,0,0,0.55)";
         ctx.fillRect(8 * dpr, ty, tw, 24 * dpr);
         ctx.fillStyle = "#fff";
         ctx.fillText(text, 14 * dpr, ty + 17 * dpr);
@@ -257,9 +262,10 @@ function LiveTab({ run, labels, recConf }: { run: RunInfo; labels: Label[]; recC
           const n = classesRef.current[b[4]] ?? String(b[4]);
           counts[n] = (counts[n] ?? 0) + 1;
         }
-        // 分类：只显示概率最高的类别
-        const top = f.tags?.[0];
-        if (top && top[1] >= confRef.current) counts[classesRef.current[top[0]] ?? String(top[0])] = 1;
+        // 分类：只显示概率最高的类别；多标签分类显示分数够的全部类别
+        for (const [c, sc] of (multiRef.current ? f.tags : f.tags?.slice(0, 1)) ?? []) {
+          if (sc >= confRef.current) counts[classesRef.current[c] ?? String(c)] = 1;
+        }
         setStat({ w: f.w, h: f.h, fps: f.fps, ms: f.ms, counts });
       } else if (k === "log") {
         setStatus(String(data));

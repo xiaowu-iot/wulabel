@@ -29,9 +29,18 @@ import numpy as np
 import torch
 
 from . import models
-from .data import ClsFolder, CocoDetection, collate, has_cls_split, has_split
+from .data import ClsFolder, CocoDetection, cls_multi_label, collate, has_cls_split, has_split
 from .i18n import tr
-from .metrics import ImageGt, ImagePred, classify_eval, classify_threshold_curve, evaluate, threshold_curve
+from .metrics import (
+    ImageGt,
+    ImagePred,
+    classify_eval,
+    classify_threshold_curve,
+    evaluate,
+    multilabel_eval,
+    multilabel_threshold_curve,
+    threshold_curve,
+)
 from .protocol import emit, log, warn
 
 
@@ -123,7 +132,9 @@ class ClsTask:
         self.root = root
         self.size = int(cfg.get("img_size", 224))
         self.aug = cfg.get("aug")
-        self.criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+        # 多标签：每个类别各自判断有没有（sigmoid），一张图可以有好几个类别
+        self.multi = cls_multi_label(root)
+        self.criterion = torch.nn.BCEWithLogitsLoss() if self.multi else torch.nn.CrossEntropyLoss(label_smoothing=0.1)
 
     def dataset(self, split: str, train: bool):
         return ClsFolder(self.root, split, train=train, size=self.size, aug=self.aug)
@@ -133,7 +144,7 @@ class ClsTask:
 
     def collate(self, batch):
         imgs, labels, ids = zip(*batch)
-        return torch.stack(imgs), torch.tensor(labels), list(ids)
+        return torch.stack(imgs), torch.stack(labels) if self.multi else torch.tensor(labels), list(ids)
 
     def loss(self, model, batch, device):
         imgs, labels, _ = batch
@@ -143,6 +154,18 @@ class ClsTask:
     def evaluate(self, model, ds, device, batch, n_classes, thresholds: bool = False):
         model.eval()
         loader = torch.utils.data.DataLoader(ds, batch_size=max(batch, 16), shuffle=False, collate_fn=self.collate, num_workers=0)
+        if self.multi:
+            ys, ps, ids = [], [], []
+            for imgs, labels, idl in loader:
+                ps.append(torch.sigmoid(model(imgs.to(device)).float()).cpu().numpy())
+                ys.append(labels.numpy())
+                ids += idl
+            y = np.concatenate(ys) if ys else np.zeros((0, n_classes))
+            p = np.concatenate(ps) if ps else np.zeros((0, n_classes))
+            r = multilabel_eval(y, p, ids, n_classes)
+            if thresholds:
+                r.thresholds = multilabel_threshold_curve(y, p)
+            return r
         y_true, y_pred, ids, scores = [], [], [], []
         for imgs, labels, idl in loader:
             prob = torch.softmax(model(imgs.to(device)).float(), dim=1).cpu()
@@ -157,7 +180,7 @@ class ClsTask:
         return r
 
     def save_extra(self) -> dict:
-        return {}
+        return {"multi_label": True} if self.multi else {}
 
 
 def split_report(r, classes: list[str], images: int) -> dict:
@@ -176,6 +199,7 @@ def split_report(r, classes: list[str], images: int) -> dict:
         "confusion": r.confusion,
         "errors": r.errors[:500],
         "thresholds": r.thresholds,
+        **({"exact": r.exact} if r.exact is not None else {}),
     }
 
 
@@ -437,6 +461,8 @@ def run_once(cfg: dict) -> None:
             if fitness <= 0:
                 # 指标全是 0（多半是刚开始训）：照样存一份，免得没有模型可用，但不说成「最好的模型」
                 log(tr("第 {epoch} 轮指标还是 0，先保存当前模型，之后有更好的会替换", epoch=epoch))
+            elif cls and getattr(task, "multi", False):
+                log(tr("第 {epoch} 轮 mAP {map50}、宏平均 F1 {f1}，保存为最好的模型", epoch=epoch, map50=f"{r.map50:.3f}", f1=f"{r.map:.3f}"))
             elif cls:
                 log(tr("第 {epoch} 轮准确率 {acc}、宏平均 F1 {f1}，保存为最好的模型", epoch=epoch, acc=f"{r.map50:.3f}", f1=f"{r.map:.3f}"))
             else:
@@ -478,6 +504,8 @@ def run_once(cfg: dict) -> None:
     log(tr("用最好的模型做最终评估…"))
     model, _ = models.load(out / "best.pt", device)
     report = {"classes": classes, "bestEpoch": best_epoch, "task": models.task_of(key), "splits": {}}
+    if getattr(task, "multi", False):
+        report["multiLabel"] = True
     for split in ("val", "test"):
         if not task.has_split(split):
             continue

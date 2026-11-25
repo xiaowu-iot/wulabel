@@ -118,6 +118,11 @@ def infer(model, ck: dict, task: str, rgb, device: torch.device, conf: float):
     """一帧推理，按任务返回 (boxes, polys, kpts, tags)，格式见文件开头的说明"""
     if task == "classify":
         x = cls_preprocess(Image.fromarray(rgb), int(ck["img_size"])).unsqueeze(0).to(device)
+        if ck.get("multi_label"):
+            # 多标签：分数够阈值的类别都算，从高到低
+            prob = torch.sigmoid(model(x).float())[0].cpu()
+            order = torch.argsort(prob, descending=True)
+            return [], [], [], [[int(i), round(float(prob[i]), 3)] for i in order if float(prob[i]) >= conf]
         prob = torch.softmax(model(x).float(), dim=1)[0].cpu()
         top = torch.topk(prob, min(3, prob.numel()))
         return [], [], [], [[int(i), round(float(s), 3)] for s, i in zip(top.values, top.indices)]

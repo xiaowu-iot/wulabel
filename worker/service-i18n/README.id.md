@@ -72,7 +72,7 @@ Field setiap item di `detections` bergantung pada model. Field `task` yang dikem
 | Deteksi objek | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Segmentasi instans | `segment` | Sama, ditambah `polygon` [x1, y1, x2, y2, …] (kontur objek, piksel gambar asli) |
 | Keypoint | `pose` | Sama, ditambah `keypoints` [x, y, v, …] (v = 2: ditemukan, 0: tidak ditemukan); gambar alarm menggambar kerangka sesuai `skeleton` di `config.json` |
-| Klasifikasi gambar | `classify` | `label`, `score`, tanpa `box`: satu item untuk setiap kelas yang probabilitasnya mencapai `min_score` (maksimal 5). Klasifikasi menilai seluruh frame dan tidak disaring dengan `region` |
+| Klasifikasi gambar | `classify` | `label`, `score`, tanpa `box`: satu item untuk setiap kelas yang probabilitasnya mencapai `min_score` (maksimal 5; tanpa batas untuk model multi-label). Klasifikasi menilai seluruh frame dan tidak disaring dengan `region` |
 
 ## API HTTP
 

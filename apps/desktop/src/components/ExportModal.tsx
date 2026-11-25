@@ -3,7 +3,7 @@ import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Progress, Radio
 import { FolderOpenOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { AnonymizeConfig, api, DatasetFormat, errText, ExportResult, ImportProgress, ProjectInfo, SplitSummary, Task, VersionInfo } from "../api";
+import { AnonymizeConfig, api, DatasetFormat, errText, ExportResult, isClsTask, ImportProgress, ProjectInfo, SplitSummary, Task, VersionInfo } from "../api";
 import { prefs, useReview } from "../store";
 import { t } from "../i18n";
 import AnonymizeOptions from "./AnonymizeOptions";
@@ -26,10 +26,11 @@ const FORMATS: Record<Task, { value: DatasetFormat; name: string; desc: string }
     { value: "voc", name: "VOC", desc: t("只有目标框（VOC 不支持关键点）") },
   ],
   classify: [{ value: "cls", name: t("分类文件夹"), desc: t("train/类别/图片.jpg，ImageNet、YOLO-cls 通用") }],
+  multilabel: [{ value: "cls", name: t("多标签清单"), desc: t("train/images/图片.jpg + annotations/train.json（每张图的 labels 列表）") }],
 };
 
 const summaryText = (task: Task, r: ExportResult) =>
-  task === "classify"
+  isClsTask(task)
     ? t("{images} 张图片、{classes} 个类别", { images: r.images, classes: r.classes.length })
     : task === "segment"
       ? r.boxes
@@ -187,7 +188,7 @@ export default function ExportModal({
         <Form.Item
           label={t("范围")}
           extra={
-            project.task === "classify"
+            isClsTask(project.task)
               ? t("未标注和已跳过的图片不导出；没打类别的图片不导出。")
               : review
                 ? t("未标注和已跳过的图片不导出；已审核但没有标注的图片会作为负样本导出。")

@@ -72,7 +72,7 @@ Webhook 开启 `with_image` 时，会多一个 `image_base64` 字段（带框的
 | 目标检测 | `detect` | `label`、`score`、`box` [x, y, w, h] |
 | 实例分割 | `segment` | 同上，多一个 `polygon` [x1, y1, x2, y2, …]（目标轮廓，原图像素） |
 | 关键点 | `pose` | 同上，多一个 `keypoints` [x, y, v, …]（v 为 2 表示找到了，0 表示没找到）；告警截图按 `config.json` 里的 `skeleton` 画骨架 |
-| 图像分类 | `classify` | `label`、`score`，没有 `box`：概率达到 `min_score` 的类别各一项（最多 5 个）。分类按整张画面判断，不按 `region` 过滤 |
+| 图像分类 | `classify` | `label`、`score`，没有 `box`：概率达到 `min_score` 的类别各一项（最多 5 个；多标签分类模型不限个数）。分类按整张画面判断，不按 `region` 过滤 |
 
 ## HTTP 接口
 

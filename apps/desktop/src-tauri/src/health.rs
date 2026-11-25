@@ -469,6 +469,29 @@ pub struct Pred {
     pub score: f64,
 }
 
+/// 多标签分类的模型检查：每张图的标签是一组类别（整图框），没有位置可比，
+/// 只看模型很确定有、但没打上的类别（疑似漏标）
+pub fn multilabel_issues(gts: &[Gt], preds: &HashMap<i64, Vec<Pred>>, name_of: &dyn Fn(Option<i64>) -> String) -> Vec<Issue> {
+    const SURE: f64 = 0.5;
+    let mut tags: HashMap<i64, HashSet<i64>> = HashMap::new();
+    for g in gts {
+        if let Some(l) = g.label_id {
+            tags.entry(g.image_id).or_default().insert(l);
+        }
+    }
+    let mut ids: Vec<i64> = preds.keys().copied().collect();
+    ids.sort();
+    let mut issues = Vec::new();
+    for id in ids {
+        // 还没标的图不算漏标
+        let Some(have) = tags.get(&id) else { continue };
+        for pr in preds[&id].iter().filter(|p| p.score >= SURE && !have.contains(&p.label_id)) {
+            issues.push(missing(id, pr, name_of));
+        }
+    }
+    issues
+}
+
 /// 模型检查：用预测结果和标注对比
 pub fn model_issues(gts: &[Gt], preds: &HashMap<i64, Vec<Pred>>, name_of: &dyn Fn(Option<i64>) -> String) -> Vec<Issue> {
     const SURE: f64 = 0.5; // 模型认为「很确定」的分数
@@ -758,7 +781,11 @@ pub fn run_with(
             preds.extend(f(chunk, prog)?);
             base += chunk.len();
         }
-        issues.extend(model_issues(&gts, &preds, &name_of));
+        if p.meta.task == "multilabel" {
+            issues.extend(multilabel_issues(&gts, &preds, &name_of));
+        } else {
+            issues.extend(model_issues(&gts, &preds, &name_of));
+        }
     }
     check()?;
     let mut r = HealthReport {

@@ -359,7 +359,7 @@ pub fn after_save(p: &Project, member_id: i64, image_id: i64) -> AppResult<()> {
 /// 没有目标的图也算提交（负样本，等审核员确认）；分类项目没选类别的不算
 pub fn submit(p: &Project, member_id: i64, image_id: i64) -> AppResult<String> {
     let n = object_count(p, image_id)?;
-    let status = if n > 0 || p.meta.task != "classify" { "labeled" } else { "todo" };
+    let status = if n > 0 || !crate::project::is_classify(&p.meta.task) { "labeled" } else { "todo" };
     p.conn.lock().execute(
         "UPDATE images SET status = CASE WHEN status = 'reviewed' THEN status ELSE ?2 END, reject_reason = '', labeled_by = ?3, submitted_at = ?4
          WHERE id = ?1",

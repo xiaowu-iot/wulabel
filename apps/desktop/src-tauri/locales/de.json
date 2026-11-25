@@ -460,5 +460,7 @@
   "下载 uv 失败：{errors}。可以手动安装 uv 后在设置里指定路径": "uv konnte nicht heruntergeladen werden: {errors}. Sie können uv manuell installieren und den Pfad in den Einstellungen angeben",
   "这次训练没有留下可以接着跑的进度": "Für dieses Training gibt es keinen Zwischenstand zum Fortsetzen",
   "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "Die Datensatzkopie dieses Trainings fehlt, daher kann es nicht fortgesetzt werden. Bitte ein neues Training starten.",
-  "已经过了撤销时间": "Die Zeit zum Rückgängigmachen ist abgelaufen"
+  "已经过了撤销时间": "Die Zeit zum Rückgängigmachen ist abgelaufen",
+  "多标签分类": "Multi-Label-Klassifizierung",
+  "拿不准的类别 {n} 个": "{n} unsichere Klassen"
 }

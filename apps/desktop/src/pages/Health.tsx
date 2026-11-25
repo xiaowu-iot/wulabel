@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Progress, Select, Space, Tag, Tooltip } from "antd";
 import { CheckOutlined, EyeInvisibleOutlined, FormOutlined, HeartOutlined, PlusOutlined } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
-import { api, errText, HealthProgress, HealthReport, Issue, IssueKind, ProjectInfo, RunInfo, thumbUrl } from "../api";
+import { api, errText, HealthProgress, HealthReport, isClsTask, Issue, IssueKind, ProjectInfo, RunInfo, thumbUrl } from "../api";
 import { Mark, useApp, useReview } from "../store";
 import { statusTag } from "../status";
 import { fmtTime } from "./Train";
@@ -77,8 +77,20 @@ export default function Health({ project }: { project: ProjectInfo }) {
   const [showChanged, setShowChanged] = useState(false);
   const [busy, setBusy] = useState(false);
   const review = useReview();
-  const cls = project.task === "classify";
-  const kinds = useMemo(() => (cls ? KINDS.filter((k) => k.cls) : KINDS), [cls]);
+  const cls = isClsTask(project.task);
+  // 多标签分类：没有位置可比，只查模型很确定有、但没打上的类别（疑似漏标）和重复图片
+  const multi = project.task === "multilabel";
+  const kinds = useMemo(
+    () =>
+      multi
+        ? KINDS.filter((k) => k.key === "missing" || k.key === "dup_image").map((k) =>
+            k.key === "missing" ? { ...k, tip: t("模型很确定这张图有这个类别，但没有打上") } : k,
+          )
+        : cls
+          ? KINDS.filter((k) => k.cls)
+          : KINDS,
+    [cls, multi],
+  );
 
   useEffect(() => {
     api.healthLoad().then((r) => {
@@ -192,7 +204,9 @@ export default function Health({ project }: { project: ProjectInfo }) {
   };
 
   const addBox = (i: Issue) =>
-    api.appendAnnotation(i.imageId, { labelId: i.predLabelId, type: "bbox", data: i.bbox!, score: null, source: "manual" });
+    multi
+      ? api.appendAnnotation(i.imageId, { labelId: i.predLabelId, type: "tag", data: [], score: null, source: "manual" })
+      : api.appendAnnotation(i.imageId, { labelId: i.predLabelId, type: "bbox", data: i.bbox!, score: null, source: "manual" });
 
   // 加上后这张图的标注变了，下次打开体检页会算「已修改」，不用再记忽略
   const accept = async (i: Issue) => {

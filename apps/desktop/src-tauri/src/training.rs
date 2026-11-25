@@ -241,7 +241,9 @@ pub fn start(
         }
         n
     };
-    if model_task(&cfg.model) != p.meta.task {
+    // 多标签分类用的也是分类模型（训练时按数据集换成多标签的训练方式）
+    let task = if p.meta.task == "multilabel" { "classify" } else { p.meta.task.as_str() };
+    if model_task(&cfg.model) != task {
         return Err(msg(t!("这个模型和项目的任务类型不匹配，请重新选择模型")));
     }
     // 接着上次训练：上次要有模型文件，模型结构要一样
@@ -265,7 +267,7 @@ pub fn start(
     let dir = run_dir(&p, &name);
     let ds = dir.join("dataset");
     // 分类项目导出分类文件夹，其他任务导出 COCO（框、多边形、关键点都在里面）
-    let format = if p.meta.task == "classify" { Format::Cls } else { Format::Coco };
+    let format = if crate::project::is_classify(&p.meta.task) { Format::Cls } else { Format::Coco };
     let opts = ExportOptions { format, out_dir: ds.clone(), only_reviewed: cfg.only_reviewed, ratios: cfg.ratios, copy_files: false };
     let res = match cfg.version {
         Some(v) => dataset::export_version(&p, v, &opts, prepare),
@@ -275,14 +277,14 @@ pub fn start(
         let _ = fs::remove_dir_all(&dir);
     })?;
     let usable = match p.meta.task.as_str() {
-        "classify" => res.tags,
+        "classify" | "multilabel" => res.tags,
         "pose" => res.kpts,
         _ => res.boxes + res.polys,
     };
     if usable == 0 {
         let _ = fs::remove_dir_all(&dir);
         return Err(msg(match p.meta.task.as_str() {
-            "classify" => t!("还没有给图片打类别标签，先标注一些图片再训练"),
+            "classify" | "multilabel" => t!("还没有给图片打类别标签，先标注一些图片再训练"),
             "pose" => t!("还没有关键点标注，先标注一些目标再训练"),
             _ => t!("没有任何标注，先标注一些图片再训练"),
         }));
@@ -866,6 +868,13 @@ pub fn task_annotations(p: &Project, r: &PredResult, conf: f64, source: &str) ->
                 })
                 .collect()
         }
+        // 多标签分类：分数够的类别都打上
+        "multilabel" => r
+            .tags
+            .iter()
+            .filter(|t| t.score >= conf)
+            .map(|t| ann(t.label_id, "tag", serde_json::json!([]), t.score))
+            .collect(),
         _ => result_to_annotations(r, conf, source),
     })
 }
@@ -1034,6 +1043,7 @@ pub fn predict_many(
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> AppResult<HashMap<i64, Vec<crate::health::Pred>>> {
     let w = weights_of(p, run_id)?;
+    let multi = p.meta.task == "multilabel";
     let mut dims: HashMap<i64, (f64, f64)> = HashMap::new();
     let items: Vec<(i64, PathBuf)> = {
         let conn = p.conn.lock();
@@ -1062,6 +1072,15 @@ pub fn predict_many(
         for (id, raw) in got {
             let r = to_result(raw, map.as_ref().unwrap());
             let preds = match r.tags.first() {
+                // 多标签分类：分数够的类别都当成整图的框
+                Some(_) if multi => {
+                    let (iw, ih) = dims.get(&id).copied().unwrap_or((1.0, 1.0));
+                    r.tags
+                        .iter()
+                        .filter(|t| t.score >= conf)
+                        .map(|t| crate::health::Pred { label_id: t.label_id, bbox: [0.0, 0.0, iw, ih], score: t.score })
+                        .collect()
+                }
                 // 分类模型：最高分的类别当成整图一个框，和体检里分类标签的算法一致
                 Some(t) => {
                     let (iw, ih) = dims.get(&id).copied().unwrap_or((1.0, 1.0));
@@ -1106,6 +1125,7 @@ pub fn uncertain_images(
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> AppResult<Vec<Uncertain>> {
     let w = weights_of(p, run_id)?;
+    let multi = p.meta.task == "multilabel";
     let items: Vec<(i64, PathBuf)> = {
         let conn = p.conn.lock();
         let mut stmt = conn.prepare("SELECT id, path FROM images WHERE status = 'todo' ORDER BY id LIMIT 5000")?;
@@ -1123,7 +1143,11 @@ pub fn uncertain_images(
         let mut got: Vec<(i64, RawPred)> = Vec::new();
         pr.request(rt, &w, chunk, 0.05, &mut |id, r| got.push((id, r)))?;
         for (id, r) in got {
-            let (score, detail) = if r.tags.len() >= 1 {
+            let (score, detail) = if multi && !r.tags.is_empty() {
+                // 多标签：每个类别各自判断，分数越接近 0.5 越拿不准
+                let u: f64 = r.tags.iter().map(|t| 1.0 - (2.0 * t.1 - 1.0).abs()).sum();
+                (u, t!("拿不准的类别 {n} 个", n = r.tags.iter().filter(|t| (0.2..0.8).contains(&t.1)).count()).to_string())
+            } else if r.tags.len() >= 1 {
                 let a = r.tags[0].1;
                 let b = r.tags.get(1).map(|t| t.1).unwrap_or(0.0);
                 (1.0 - (a - b), format!("前两名分数 {a:.2} / {b:.2}"))

@@ -27,6 +27,7 @@ import {
   ImageStatus,
   ImportProgress,
   ImportResult,
+  isClsTask,
   LastImport,
   ProjectInfo,
   StreamFrames,
@@ -371,7 +372,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const pickDataset = async () => {
     const dir = await open({
       directory: true,
-      title: project.task === "classify" ? t("选择分类数据集文件夹（每个类别一个子文件夹）") : t("选择数据集文件夹（YOLO / COCO / VOC）"),
+      title: isClsTask(project.task) ? t("选择分类数据集文件夹（每个类别一个子文件夹）") : t("选择数据集文件夹（YOLO / COCO / VOC）"),
     });
     if (typeof dir !== "string" || importing.current) return;
     importing.current = true;
@@ -632,13 +633,13 @@ export default function Data({ project }: { project: ProjectInfo }) {
                   key: "dataset",
                   icon: <DatabaseOutlined />,
                   label:
-                    project.task === "classify"
+                    isClsTask(project.task)
                       ? t("导入分类数据集（每个类别一个文件夹）")
                       : project.task === "pose"
                         ? t("导入带标注的数据集（YOLO-pose / COCO 关键点）")
                         : t("导入带标注的数据集（YOLO / COCO / VOC）"),
                 },
-                ...(project.task === "classify" || !xuntongEnabled() ? [] : [{ key: "xuntong", icon: <CloudDownloadOutlined />, label: t("从巡瞳 AI 拉取告警图片") }]),
+                ...(isClsTask(project.task) || !xuntongEnabled() ? [] : [{ key: "xuntong", icon: <CloudDownloadOutlined />, label: t("从巡瞳 AI 拉取告警图片") }]),
               ],
               onClick: ({ key }) => {
                 if (key === "files") pickFiles();

@@ -72,7 +72,7 @@ Die Felder jedes Eintrags in `detections` hängen vom Modell ab. Das Feld `task`
 | Objekterkennung | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Instanzsegmentierung | `segment` | Wie oben, plus `polygon` [x1, y1, x2, y2, …] (Objektumriss, Pixel des Originalbilds) |
 | Keypoints | `pose` | Wie oben, plus `keypoints` [x, y, v, …] (v = 2: gefunden, 0: nicht gefunden); Alarmbilder zeichnen das Skelett nach `skeleton` in `config.json` |
-| Bildklassifizierung | `classify` | `label`, `score`, keine `box`: ein Eintrag je Klasse, deren Wahrscheinlichkeit `min_score` erreicht (höchstens 5). Die Klassifizierung bewertet das ganze Bild und filtert nicht nach `region` |
+| Bildklassifizierung | `classify` | `label`, `score`, keine `box`: ein Eintrag je Klasse, deren Wahrscheinlichkeit `min_score` erreicht (höchstens 5; bei Multi-Label-Modellen ohne Begrenzung). Die Klassifizierung bewertet das ganze Bild und filtert nicht nach `region` |
 
 ## HTTP-API
 

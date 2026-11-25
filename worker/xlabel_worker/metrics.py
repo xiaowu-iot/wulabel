@@ -90,6 +90,8 @@ class EvalResult:
     errors: list[dict] = field(default_factory=list)
     # 各置信度阈值下的精确率 / 召回率 / F1，以及推荐阈值（见 threshold_curve）
     thresholds: dict = field(default_factory=dict)
+    # 多标签分类：每张图的标签全部判对（不多不少）的比例
+    exact: float | None = None
 
 
 # 阈值曲线取的置信度：0.05、0.10 … 0.95
@@ -159,6 +161,81 @@ def classify_threshold_curve(y_true, y_pred, scores) -> dict:
     s = np.asarray(scores, dtype=float)
     curve = _curve(s, y_true == y_pred, len(y_true))
     return {"curve": curve, "best": max(curve, key=lambda r: r["f1"]), "perClass": []}
+
+
+def multilabel_threshold_curve(y_true, probs) -> dict:
+    """多标签分类：每张图每个类别的分数各自和阈值比。精确率 = 判出来的标签里对的比例，召回率 = 标了的标签被判出来的比例。
+    格式和检测的 threshold_curve 一样（另给每个类别的推荐阈值）"""
+    y = np.asarray(y_true, dtype=bool)
+    s = np.asarray(probs, dtype=float)
+    if y.size == 0:
+        curve = _curve(np.zeros(0), np.zeros(0, dtype=bool), 0)
+        return {"curve": curve, "best": curve[0], "perClass": []}
+    curve = _curve(s.ravel(), y.ravel(), int(y.sum()))
+    per_class = []
+    for k in range(y.shape[1]):
+        n = int(y[:, k].sum())
+        if n == 0:
+            per_class.append({"index": k, "conf": None, "precision": None, "recall": None, "f1": None})
+            continue
+        best = max(_curve(s[:, k], y[:, k], n), key=lambda r: r["f1"])
+        per_class.append({"index": k, "conf": best["conf"], "precision": best["precision"], "recall": best["recall"], "f1": best["f1"]})
+    return {"curve": curve, "best": max(curve, key=lambda r: r["f1"]), "perClass": per_class}
+
+
+def multilabel_eval(y_true, probs, image_ids, num_classes: int, thr: float = 0.5) -> EvalResult:
+    """多标签分类指标（每个类别各自判断有没有，分数 ≥ thr 算有）。和检测共用界面和存储格式：
+    map50 = mAP（每个类别按分数排序算 AP 再平均），map = 宏平均 F1，precision / recall = 宏平均；
+    perClass 的 ap50 = 该类 F1、ap = 该类 AP；没有混淆矩阵；exact = 标签全对的图的比例；
+    errors 里每张标签没全对的图：missed = 漏判的标签数、extra = 多判的标签数，
+    miss 是漏判的类别，add 是多判的 [类别, 分数]，score 是这张图里最有把握的那个错。"""
+    y = np.asarray(y_true, dtype=bool).reshape(-1, num_classes)
+    s = np.asarray(probs, dtype=float).reshape(-1, num_classes)
+    pred = s >= thr
+    per_class = []
+    aps, ps, rs, fs = [], [], [], []
+    for c in range(num_classes):
+        gt = int(y[:, c].sum())
+        tp = int((y[:, c] & pred[:, c]).sum())
+        npred = int(pred[:, c].sum())
+        prec = tp / npred if npred else 0.0
+        rec = tp / gt if gt else 0.0
+        f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
+        ap = average_precision(y[:, c], s[:, c], gt) if gt else None
+        per_class.append({"index": c, "gt": gt, "precision": float(prec), "recall": float(rec), "ap50": float(f1) if gt else None, "ap": ap})
+        if gt:
+            aps.append(ap)
+            ps.append(prec)
+            rs.append(rec)
+            fs.append(f1)
+    errors = []
+    for k in range(len(y)):
+        miss = np.where(y[k] & ~pred[k])[0]
+        add = np.where(~y[k] & pred[k])[0]
+        if len(miss) or len(add):
+            worst = [1 - s[k, c] for c in miss] + [s[k, c] for c in add]
+            errors.append(
+                {
+                    "imageId": int(image_ids[k]),
+                    "missed": int(len(miss)),
+                    "extra": int(len(add)),
+                    "wrong": 0,
+                    "miss": [int(c) for c in miss],
+                    "add": [[int(c), round(float(s[k, c]), 3)] for c in add],
+                    "score": float(max(worst)),
+                }
+            )
+    errors.sort(key=lambda e: (-(e["missed"] + e["extra"]), -e["score"]))
+    return EvalResult(
+        map50=float(np.mean(aps)) if aps else 0.0,
+        map=float(np.mean(fs)) if fs else 0.0,
+        per_class=per_class,
+        precision=float(np.mean(ps)) if ps else 0.0,
+        recall=float(np.mean(rs)) if rs else 0.0,
+        confusion=[],
+        errors=errors,
+        exact=float((y == pred).all(axis=1).mean()) if len(y) else 0.0,
+    )
 
 
 def evaluate(preds: list[ImagePred], gts: list[ImageGt], num_classes: int, conf: float = 0.25) -> EvalResult:

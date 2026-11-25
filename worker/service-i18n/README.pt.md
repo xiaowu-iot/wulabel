@@ -72,7 +72,7 @@ Os campos de cada item em `detections` dependem do modelo. O `task` retornado po
 | Detecção de objetos | `detect` | `label`, `score`, `box` [x, y, w, h] |
 | Segmentação de instâncias | `segment` | O mesmo, mais `polygon` [x1, y1, x2, y2, …] (contorno do objeto, pixels da imagem original) |
 | Pontos-chave | `pose` | O mesmo, mais `keypoints` [x, y, v, …] (v = 2: encontrado, 0: não encontrado); as capturas de alarme desenham o esqueleto conforme `skeleton` no `config.json` |
-| Classificação de imagens | `classify` | `label`, `score`, sem `box`: um item para cada classe cuja probabilidade atinge `min_score` (até 5). A classificação avalia o quadro inteiro e não filtra por `region` |
+| Classificação de imagens | `classify` | `label`, `score`, sem `box`: um item para cada classe cuja probabilidade atinge `min_score` (até 5; sem limite em modelos multirrótulo). A classificação avalia o quadro inteiro e não filtra por `region` |
 
 ## API HTTP
 

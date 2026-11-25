@@ -88,11 +88,16 @@ pub fn export(p: &Project, run_id: i64, out: &Path) -> AppResult<()> {
     let run = &detail.run;
     let c = &run.config;
     let task = p.meta.task.as_str();
-    let cls = task == "classify";
-    let (m50, m): (String, String) = if cls { (t!("准确率"), t!("宏平均 F1")) } else { ("mAP50".into(), "mAP50-95".into()) };
+    let cls = crate::project::is_classify(task);
+    let (m50, m): (String, String) = match task {
+        "classify" => (t!("准确率"), t!("宏平均 F1")),
+        "multilabel" => ("mAP".into(), t!("宏平均 F1")),
+        _ => ("mAP50".into(), "mAP50-95".into()),
+    };
     let task_name = match task {
         "segment" => t!("实例分割"),
         "classify" => t!("图像分类"),
+        "multilabel" => t!("多标签分类"),
         "pose" => t!("关键点"),
         _ => t!("目标检测"),
     };
@@ -124,7 +129,7 @@ pub fn export(p: &Project, run_id: i64, out: &Path) -> AppResult<()> {
         let which = if split_key == Some("test") { t!("测试集") } else { t!("验证集") };
         h += &format!(
             "<div class=\"kpis\"><div><b>{}</b><span>{m50}</span></div><div><b>{}</b><span>{m}</span></div><div><b>{}</b><span>{}</span></div><div><b>{}</b><span>{}</span></div></div><p class=\"dim\">{}</p>",
-            if cls { pct(&sp["map50"]) } else { num(&sp["map50"], 3) },
+            if task == "classify" { pct(&sp["map50"]) } else { num(&sp["map50"], 3) },
             num(&sp["map"], 3),
             pct(&sp["precision"]),
             t!("精确率"),
@@ -206,7 +211,8 @@ pub fn export(p: &Project, run_id: i64, out: &Path) -> AppResult<()> {
         if !cls {
             names.push(t!("背景"));
         }
-        if let Some(cm) = sp["confusion"].as_array() {
+        // 多标签分类没有混淆矩阵（空的）
+        if let Some(cm) = sp["confusion"].as_array().filter(|c| !c.is_empty()) {
             h += &format!("<h3>{} <span class=\"dim\">{}</span></h3><table class=\"cm\"><tr><th></th>", t!("混淆矩阵"), t!("（行：真实，列：预测）"));
             for n in &names {
                 h += &format!("<th>{}</th>", esc(n));

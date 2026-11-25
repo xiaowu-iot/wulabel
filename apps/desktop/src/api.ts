@@ -1,13 +1,17 @@
 import { getToken, invoke, isRemote, postJson } from "./transport";
 import { t } from "./i18n";
 
-export type Task = "detect" | "segment" | "classify" | "pose";
+export type Task = "detect" | "segment" | "classify" | "multilabel" | "pose";
+
+/** 图像分类（单标签、多标签）：整图打类别，没有框 */
+export const isClsTask = (task: string | undefined) => task === "classify" || task === "multilabel";
 
 // 名字用 getter：这个模块会在语言包加载前被 store 引入，取值时再翻译
 export const TASKS: { value: Task; readonly name: string; readonly desc: string }[] = [
   { value: "detect", get name() { return t("目标检测"); }, get desc() { return t("用矩形框标出目标的位置和类别"); } },
   { value: "segment", get name() { return t("实例分割"); }, get desc() { return t("用多边形或画笔描出目标轮廓"); } },
   { value: "classify", get name() { return t("图像分类"); }, get desc() { return t("给整张图片打类别标签"); } },
+  { value: "multilabel", get name() { return t("多标签分类"); }, get desc() { return t("一张图可以同时打好几个类别标签，比如商品的多种损坏"); } },
   { value: "pose", get name() { return t("关键点"); }, get desc() { return t("标出人体或物体的关键点和骨架"); } },
 ];
 
@@ -465,7 +469,21 @@ export interface SplitEval {
   perClass: ClassEval[];
   confusion: number[][];
   /** 分类模型的错例另有 gt（标的类别序号）、pred（判成的类别序号）、score */
-  errors: { imageId: number; missed: number; extra: number; wrong: number; gt?: number; pred?: number; score?: number | null; boxes?: ErrBox[] }[];
+  /** 多标签分类的错例另有 miss（漏判的类别序号）、add（多判的 [类别序号, 分数]） */
+  errors: {
+    imageId: number;
+    missed: number;
+    extra: number;
+    wrong: number;
+    gt?: number;
+    pred?: number;
+    score?: number | null;
+    boxes?: ErrBox[];
+    miss?: number[];
+    add?: [number, number][];
+  }[];
+  /** 多标签分类：标签全部判对的图片比例 */
+  exact?: number;
 }
 
 /** 检测错例里对不上的框（xywh 原图像素）：missed 标了没找到，extra 多报，wrong 类别判错 */
