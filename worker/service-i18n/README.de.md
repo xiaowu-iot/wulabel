@@ -32,6 +32,7 @@ Inferenz auf einer NVIDIA-GPU: Ersetzen Sie in `requirements.txt` `onnxruntime` 
   "alert": {
     "labels": ["ohne_helm"],   // nur bei diesen Klassen alarmieren; leer = alle Klassen
     "min_score": 0.5,          // Konfidenzschwelle
+    "class_scores": {},        // Schwelle pro Klasse, z. B. {"Kratzer": 0.3}; andere Klassen nutzen min_score
     "cooldown": 60,            // höchstens ein Alarm pro N Sekunden für denselben Stream und dieselbe Klasse
     "hours": "07:00-19:00",    // aktive Zeit; leer = ganztägig; über Mitternacht "22:00-06:00" schreiben
     "save_image": true         // Alarm-Schnappschüsse in alerts/ speichern

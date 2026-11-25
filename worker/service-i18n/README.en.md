@@ -32,6 +32,7 @@ To run inference on an NVIDIA GPU: replace `onnxruntime` with `onnxruntime-gpu` 
   "alert": {
     "labels": ["no_helmet"],   // only alert on these classes; empty means all classes
     "min_score": 0.5,          // confidence threshold
+    "class_scores": {},        // per-class thresholds, e.g. {"scratch": 0.3}; other classes use min_score
     "cooldown": 60,            // alert at most once per N seconds for the same stream and class
     "hours": "07:00-19:00",    // active hours; empty means all day; across midnight write "22:00-06:00"
     "save_image": true         // save alert snapshots to alerts/

@@ -1717,5 +1717,8 @@
   "预标注没人改过的图": "Preanotaciones sin editar",
   "去看这批": "Revisarlas",
   "这 {n} 张都看过、没问题了？之后不再提醒。": "¿Has revisado las {n} imágenes y están bien? No se volverá a avisar.",
-  "都看过了": "Ya revisadas"
+  "都看过了": "Ya revisadas",
+  "每个类别用自己的推荐阈值": "Usar el umbral recomendado de cada clase",
+  "评估时按类别算出：{list}。其余类别用置信度阈值。": "Calculado por clase en la evaluación: {list}. Las demás clases usan el umbral de confianza.",
+  "所有类别用同一个置信度阈值。": "Todas las clases usan el mismo umbral de confianza."
 }

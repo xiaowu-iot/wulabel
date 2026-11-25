@@ -88,6 +88,8 @@ export interface BatchOptions {
   output: string;
   conf: number;
   sort: boolean;
+  /** 多标签分类：每个类别单独的阈值（类别名 → 阈值） */
+  classConf?: Record<string, number>;
 }
 export interface BatchResult {
   images: number;

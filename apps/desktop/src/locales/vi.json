@@ -1717,5 +1717,8 @@
   "预标注没人改过的图": "Nhãn gán trước chưa sửa",
   "去看这批": "Xem lô này",
   "这 {n} 张都看过、没问题了？之后不再提醒。": "Đã xem hết {n} ảnh này và không có vấn đề? Sẽ không nhắc lại nữa.",
-  "都看过了": "Đã xem hết"
+  "都看过了": "Đã xem hết",
+  "每个类别用自己的推荐阈值": "Mỗi lớp dùng ngưỡng đề xuất riêng",
+  "评估时按类别算出：{list}。其余类别用置信度阈值。": "Tính theo từng lớp khi đánh giá: {list}. Các lớp khác dùng ngưỡng tin cậy.",
+  "所有类别用同一个置信度阈值。": "Tất cả các lớp dùng chung một ngưỡng tin cậy."
 }

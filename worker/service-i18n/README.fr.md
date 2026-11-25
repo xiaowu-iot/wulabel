@@ -32,6 +32,7 @@ Pour l'inférence sur un GPU NVIDIA : remplacez `onnxruntime` par `onnxruntime-g
   "alert": {
     "labels": ["sans_casque"],  // n'alerter que pour ces classes ; vide = toutes les classes
     "min_score": 0.5,          // seuil de confiance
+    "class_scores": {},        // seuil par classe, ex. {"rayure": 0.3} ; les autres classes utilisent min_score
     "cooldown": 60,            // au plus une alerte toutes les N secondes pour un même flux et une même classe
     "hours": "07:00-19:00",    // plage horaire active ; vide = toute la journée ; à cheval sur minuit, écrire "22:00-06:00"
     "save_image": true         // enregistre les captures d'alerte dans alerts/

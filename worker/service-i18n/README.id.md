@@ -32,6 +32,7 @@ Untuk inferensi dengan GPU NVIDIA: ganti `onnxruntime` menjadi `onnxruntime-gpu`
   "alert": {
     "labels": ["tanpa_helm"],  // hanya beri alarm untuk kelas ini; kosong berarti semua kelas
     "min_score": 0.5,          // ambang keyakinan
+    "class_scores": {},        // ambang per kelas, mis. {"goresan": 0.3}; kelas lain memakai min_score
     "cooldown": 60,            // paling banyak satu alarm per N detik untuk stream dan kelas yang sama
     "hours": "07:00-19:00",    // jam aktif; kosong berarti sepanjang hari; melewati tengah malam tulis "22:00-06:00"
     "save_image": true         // simpan tangkapan alarm ke alerts/

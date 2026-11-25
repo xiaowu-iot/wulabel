@@ -1717,5 +1717,8 @@
   "预标注没人改过的图": "Pra-anotasi belum diubah",
   "去看这批": "Lihat",
   "这 {n} 张都看过、没问题了？之后不再提醒。": "Sudah memeriksa {n} gambar ini dan semuanya benar? Pengingat tidak akan muncul lagi.",
-  "都看过了": "Sudah dicek"
+  "都看过了": "Sudah dicek",
+  "每个类别用自己的推荐阈值": "Pakai ambang rekomendasi masing-masing kelas",
+  "评估时按类别算出：{list}。其余类别用置信度阈值。": "Dihitung per kelas saat evaluasi: {list}. Kelas lain memakai ambang keyakinan.",
+  "所有类别用同一个置信度阈值。": "Semua kelas memakai ambang keyakinan yang sama."
 }

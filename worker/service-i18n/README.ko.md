@@ -32,6 +32,7 @@ NVIDIA 그래픽카드로 GPU 추론을 하려면: `requirements.txt`의 `onnxru
   "alert": {
     "labels": ["안전모_미착용"],  // 이 클래스만 경보, 비우면 모든 클래스
     "min_score": 0.5,          // 신뢰도 임계값
+    "class_scores": {},        // 클래스별 임계값(예: {"긁힘": 0.3}), 없는 클래스는 min_score 사용
     "cooldown": 60,            // 같은 스트림·같은 클래스는 N초에 한 번만 경보
     "hours": "07:00-19:00",    // 적용 시간대, 비우면 하루 종일, 자정을 넘기면 "22:00-06:00"
     "save_image": true         // 경보 스냅샷을 alerts/에 저장
