@@ -426,6 +426,10 @@ const FORMATS = [
 /** 批量识别一个文件夹：导出表格，可以按识别结果把图片复制到各类别的文件夹 */
 function BatchTab({ run, project, recConf }: { run: RunInfo; project: ProjectInfo; recConf: number | null }) {
   const { message } = App.useApp();
+  const refreshStats = useApp((s) => s.refreshStats);
+  const annotateQueue = useApp((s) => s.annotateQueue);
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState<{ text: string; ids: number[] } | null>(null);
   const [input, setInput] = useState(prefs.get("batchInput", ""));
   const [output, setOutput] = useState(prefs.get("batchOutput", ""));
   const [conf, setConf] = useState(recConf ?? 0.5);
@@ -448,6 +452,7 @@ function BatchTab({ run, project, recConf }: { run: RunInfo; project: ProjectInf
     prefs.set("batchSort", sort ? "1" : "0");
     setBusy(true);
     setRes(null);
+    setAdded(null);
     setProg(null);
     const un = await listen<ImportProgress>("batch-progress", (e) => setProg(e.payload));
     try {
@@ -459,6 +464,23 @@ function BatchTab({ run, project, recConf }: { run: RunInfo; project: ProjectInf
     } finally {
       un();
       setBusy(false);
+    }
+  };
+
+  // 拿不准的图加进项目：标好再训练，模型越用越准
+  const addUncertain = async () => {
+    if (!res) return;
+    setAdding(true);
+    setAdded(null);
+    try {
+      const r = await api.importImages(res.uncertain, true);
+      await refreshStats();
+      const text = t("导入 {added} 张，跳过重复 {dup} 张", { added: r.added, dup: r.duplicated });
+      setAdded({ text, ids: r.added > 0 ? await lastImportIds().catch(() => []) : [] });
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -545,6 +567,26 @@ function BatchTab({ run, project, recConf }: { run: RunInfo; project: ProjectInf
                   {t("找到表格")}
                 </Button>
               </Space>
+              {res.uncertain.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <Space wrap>
+                    <Button size="small" type="primary" icon={<ImportOutlined />} loading={adding} onClick={addUncertain}>
+                      {isCls
+                        ? t("把拿不准的 {n} 张加进项目去标", { n: res.uncertain.length })
+                        : t("把没找到目标的 {n} 张加进项目去标", { n: res.uncertain.length })}
+                    </Button>
+                    {added && <span className="dim">{added.text}</span>}
+                    {added && added.ids.length > 0 && (
+                      <Button size="small" onClick={() => annotateQueue(added.ids, t("批量识别拿不准的图"))}>
+                        {t("去标注这批")}
+                      </Button>
+                    )}
+                  </Space>
+                  <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                    {t("标好后重新训练，模型会越用越准。")}
+                  </div>
+                </div>
+              )}
             </div>
           }
         />

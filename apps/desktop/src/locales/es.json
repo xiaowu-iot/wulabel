@@ -1696,5 +1696,19 @@
   "{name} {n} 张": "{name}: {n}",
   "打开结果文件夹": "Abrir carpeta de resultados",
   "找到表格": "Mostrar la tabla",
-  "批量识别": "Reconocimiento por lotes"
+  "批量识别": "Reconocimiento por lotes",
+  "把拿不准的 {n} 张加进项目去标": "Añadir las {n} imágenes dudosas al proyecto para anotarlas",
+  "把没找到目标的 {n} 张加进项目去标": "Añadir las {n} imágenes sin objetos al proyecto para anotarlas",
+  "批量识别拿不准的图": "Imágenes dudosas del reconocimiento por lotes",
+  "标好后重新训练，模型会越用越准。": "Anótalas y vuelve a entrenar: el modelo mejora cuanto más lo usas.",
+  "「{name}」还没标过": "«{name}» aún no tiene anotaciones",
+  "「{name}」{n} 张": "«{name}»: {n} imágenes",
+  "「{name}」{n} 个框": "«{name}»: {n} cajas",
+  " 等 {n} 个类别": " y más ({n} clases en total)",
+  "有的类别标得太少": "Algunas clases tienen muy pocas anotaciones",
+  "这些类别标得太少，模型很难学会，识别时容易认不出：{list}": "Estas clases tienen muy pocas anotaciones; al modelo le costará aprenderlas y puede no reconocerlas: {list}",
+  "每个类别最好 50 张以上，至少 20 张": "Lo ideal son 50+ imágenes por clase, como mínimo 20",
+  "每个类别最好 100 个框以上，至少 30 个": "Lo ideal son 100+ cajas por clase, como mínimo 30",
+  "实在凑不够的，可以在「标注」页删掉这个类别，删的时候把标注合并到相近的类别": "Si no consigues suficientes, elimina la clase en la página Anotar y combina sus anotaciones con una clase parecida",
+  "这些类别标得太少，容易认不出：{list}": "Pocas anotaciones, pueden no reconocerse: {list}"
 }

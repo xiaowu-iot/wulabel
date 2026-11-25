@@ -1696,5 +1696,19 @@
   "{name} {n} 张": "{name}: {n}",
   "打开结果文件夹": "Open results folder",
   "找到表格": "Show spreadsheet",
-  "批量识别": "Batch recognition"
+  "批量识别": "Batch recognition",
+  "把拿不准的 {n} 张加进项目去标": "Add the {n} unsure images to the project to annotate",
+  "把没找到目标的 {n} 张加进项目去标": "Add the {n} images with no objects found to the project to annotate",
+  "批量识别拿不准的图": "Unsure images from batch recognition",
+  "标好后重新训练，模型会越用越准。": "Annotate them and retrain. The model gets better the more you use it.",
+  "「{name}」还没标过": "\"{name}\" has no annotations yet",
+  "「{name}」{n} 张": "\"{name}\": {n} images",
+  "「{name}」{n} 个框": "\"{name}\": {n} boxes",
+  " 等 {n} 个类别": " and more ({n} classes in total)",
+  "有的类别标得太少": "Some classes have too few annotations",
+  "这些类别标得太少，模型很难学会，识别时容易认不出：{list}": "These classes have too few annotations. The model will struggle to learn them and may miss them: {list}",
+  "每个类别最好 50 张以上，至少 20 张": "Aim for 50+ images per class, at least 20",
+  "每个类别最好 100 个框以上，至少 30 个": "Aim for 100+ boxes per class, at least 30",
+  "实在凑不够的，可以在「标注」页删掉这个类别，删的时候把标注合并到相近的类别": "If you can't get enough, delete the class on the Annotate page and merge its annotations into a similar class",
+  "这些类别标得太少，容易认不出：{list}": "Too few annotations, may be missed: {list}"
 }

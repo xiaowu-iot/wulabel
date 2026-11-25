@@ -96,6 +96,8 @@ export interface BatchResult {
   output: string;
   /** [类别, 图片数]，最后一项可能是「拿不准 / 没有目标」 */
   counts: [string, number][];
+  /** 拿不准（检测是没有目标）的图的路径 */
+  uncertain: string[];
   stopped: boolean;
 }
 
