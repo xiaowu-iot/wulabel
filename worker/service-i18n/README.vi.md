@@ -32,6 +32,7 @@ Muốn suy luận bằng GPU NVIDIA: đổi `onnxruntime` thành `onnxruntime-gp
   "alert": {
     "labels": ["khong_mu_bao_ho"],  // chỉ cảnh báo các lớp này, để trống là tất cả các lớp
     "min_score": 0.5,          // ngưỡng độ tin cậy
+    "class_scores": {},        // ngưỡng riêng cho từng lớp, vd. {"trầy xước": 0.3}; lớp khác dùng min_score
     "cooldown": 60,            // cùng một luồng, cùng một lớp, trong bao nhiêu giây chỉ cảnh báo một lần
     "hours": "07:00-19:00",    // khung giờ áp dụng, để trống là cả ngày, qua nửa đêm thì ghi "22:00-06:00"
     "save_image": true         // lưu ảnh chụp cảnh báo vào alerts/

@@ -32,6 +32,7 @@ NVIDIA の GPU で推論する場合：`requirements.txt` の `onnxruntime` を 
   "alert": {
     "labels": ["ヘルメット未着用"],  // これらのクラスのみアラート。空なら全クラス
     "min_score": 0.5,          // 信頼度のしきい値
+    "class_scores": {},        // クラスごとのしきい値（例 {"傷": 0.3}）。書いていないクラスは min_score
     "cooldown": 60,            // 同じストリーム・同じクラスのアラートは N 秒に 1 回まで
     "hours": "07:00-19:00",    // 有効な時間帯。空なら終日。日をまたぐ場合は "22:00-06:00"
     "save_image": true         // アラートのスナップショットを alerts/ に保存

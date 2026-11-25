@@ -1717,5 +1717,8 @@
   "预标注没人改过的图": "Pré-anotações não editadas",
   "去看这批": "Revisar",
   "这 {n} 张都看过、没问题了？之后不再提醒。": "Você conferiu as {n} imagens e estão certas? Não vamos avisar de novo.",
-  "都看过了": "Já conferi"
+  "都看过了": "Já conferi",
+  "每个类别用自己的推荐阈值": "Usar o limiar recomendado de cada classe",
+  "评估时按类别算出：{list}。其余类别用置信度阈值。": "Calculado por classe na avaliação: {list}. As outras classes usam o limiar de confiança.",
+  "所有类别用同一个置信度阈值。": "Todas as classes usam o mesmo limiar de confiança."
 }

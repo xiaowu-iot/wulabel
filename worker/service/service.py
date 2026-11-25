@@ -346,11 +346,15 @@ class Stream(threading.Thread):
         dets = self.det.detect(frame, min_score=0.05)
         self.status["last_detect"] = time.time()
         min_score = float(rules.get("min_score", 0.5))
+        # 每个类别单独的阈值（多标签分类用评估时按类别算出的），没写的类别用 min_score
+        class_scores = rules.get("class_scores") or {}
         labels = set(rules.get("labels") or [])
         region = self.s.get("region")
         hits = [
             d for d in dets
-            if d["score"] >= min_score and (not labels or d["label"] in labels) and in_region(d.get("box"), region, w, h)
+            if d["score"] >= float(class_scores.get(d["label"], min_score))
+            and (not labels or d["label"] in labels)
+            and in_region(d.get("box"), region, w, h)
         ]
         # 现场回流：拿不准的画面存下来，回到 xlabel 里标注
         rf = self.cfg.get("reflux", {})

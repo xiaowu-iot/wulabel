@@ -1,7 +1,7 @@
 //! 批量识别一个文件夹：用训练好的模型把文件夹里的图片都看一遍，
 //! 结果导出成表格（Excel 能直接打开），也可以按识别出的类别把图片复制到各自的文件夹。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -33,6 +33,9 @@ pub struct BatchOptions {
     pub conf: f64,
     /// 按类别把图片复制到各自的文件夹
     pub sort: bool,
+    /// 多标签分类：每个类别单独的阈值（类别名 → 阈值），没写的类别用 conf
+    #[serde(default)]
+    pub class_conf: HashMap<String, f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,8 +58,9 @@ pub struct BatchResult {
 pub type Hits = Vec<(usize, f64, usize)>;
 
 /// 把一张图的预测结果按任务整理成类别列表（按分数从高到低）。
-/// 单标签分类只取最高的一个；多标签分类取分数够的全部；检测类数每个类别有几个目标
-pub fn summarize(raw: &RawPred, task: &str, conf: f64) -> Hits {
+/// 单标签分类只取最高的一个；多标签分类取分数够的全部（class_conf 是按类别序号的单独阈值，可以为空）；
+/// 检测类数每个类别有几个目标
+pub fn summarize(raw: &RawPred, task: &str, conf: f64, class_conf: &[f64]) -> Hits {
     let mut hits: Hits = Vec::new();
     match task {
         "classify" => {
@@ -67,7 +71,8 @@ pub fn summarize(raw: &RawPred, task: &str, conf: f64) -> Hits {
             }
         }
         "multilabel" => {
-            hits = raw.tags.iter().filter(|t| t.1 >= conf).map(|&(c, s)| (c, s, 1)).collect();
+            let thr = |c: usize| class_conf.get(c).copied().unwrap_or(conf);
+            hits = raw.tags.iter().filter(|t| t.1 >= thr(t.0)).map(|&(c, s)| (c, s, 1)).collect();
         }
         _ => {
             let objs = raw
@@ -217,9 +222,10 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
         }
         let mut got: Vec<(i64, RawPred)> = Vec::new();
         classes = pr.request(rt, &w, chunk, req_conf, &mut |id, r| got.push((id, r)))?;
+        let cc: Vec<f64> = classes.iter().map(|n| opts.class_conf.get(n).copied().unwrap_or(opts.conf)).collect();
         for (id, raw) in got {
             if let Some(slot) = results.get_mut(id as usize) {
-                *slot = Some(summarize(&raw, task, opts.conf));
+                *slot = Some(summarize(&raw, task, opts.conf, &cc));
             }
         }
         done += chunk.len();
@@ -256,11 +262,13 @@ mod tests {
     #[test]
     fn summarize_by_task() {
         let r = raw(vec![(1, 0.7), (0, 0.6), (2, 0.1)], Vec::new());
-        assert_eq!(summarize(&r, "classify", 0.5), vec![(1, 0.7, 1)]);
-        assert_eq!(summarize(&r, "classify", 0.8), vec![]);
-        assert_eq!(summarize(&r, "multilabel", 0.5), vec![(1, 0.7, 1), (0, 0.6, 1)]);
+        assert_eq!(summarize(&r, "classify", 0.5, &[]), vec![(1, 0.7, 1)]);
+        assert_eq!(summarize(&r, "classify", 0.8, &[]), vec![]);
+        assert_eq!(summarize(&r, "multilabel", 0.5, &[]), vec![(1, 0.7, 1), (0, 0.6, 1)]);
+        // 每个类别单独的阈值：类别 0 要 0.65，类别 1 要 0.5
+        assert_eq!(summarize(&r, "multilabel", 0.9, &[0.65, 0.5]), vec![(1, 0.7, 1)]);
         let d = raw(Vec::new(), vec![[0.0, 0.0, 1.0, 1.0, 0.0, 0.9], [0.0, 0.0, 1.0, 1.0, 0.0, 0.6], [0.0, 0.0, 1.0, 1.0, 1.0, 0.3]]);
-        assert_eq!(summarize(&d, "detect", 0.5), vec![(0, 0.9, 2)]);
+        assert_eq!(summarize(&d, "detect", 0.5, &[]), vec![(0, 0.9, 2)]);
     }
 
     #[test]
