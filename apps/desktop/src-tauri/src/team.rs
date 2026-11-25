@@ -355,13 +355,15 @@ pub fn after_save(p: &Project, member_id: i64, image_id: i64) -> AppResult<()> {
     log(p, member_id, Some(image_id), "save", None, n, "")
 }
 
-/// 标注员提交（标注页的「提交并下一张」）：变成已标注，打回原因清掉
+/// 标注员提交（标注页的「提交并下一张」）：变成待审核，打回原因清掉。
+/// 没有目标的图也算提交（负样本，等审核员确认）；分类项目没选类别的不算
 pub fn submit(p: &Project, member_id: i64, image_id: i64) -> AppResult<String> {
     let n = object_count(p, image_id)?;
-    let status = if n > 0 { "labeled" } else { "todo" };
+    let status = if n > 0 || p.meta.task != "classify" { "labeled" } else { "todo" };
     p.conn.lock().execute(
-        "UPDATE images SET status = CASE WHEN status = 'reviewed' THEN status ELSE ?2 END, reject_reason = '', labeled_by = ?3 WHERE id = ?1",
-        params![image_id, status, member_id],
+        "UPDATE images SET status = CASE WHEN status = 'reviewed' THEN status ELSE ?2 END, reject_reason = '', labeled_by = ?3, submitted_at = ?4
+         WHERE id = ?1",
+        params![image_id, status, member_id, db::now()],
     )?;
     log(p, member_id, Some(image_id), "submit", None, n, "")?;
     Ok(p.conn.lock().query_row("SELECT status FROM images WHERE id = ?1", [image_id], |r| r.get(0))?)
@@ -404,7 +406,7 @@ pub struct ImageTeamInfo {
     pub reject_reason: String,
 }
 
-fn names(p: &Project, host_name: &str) -> AppResult<HashMap<i64, String>> {
+pub(crate) fn names(p: &Project, host_name: &str) -> AppResult<HashMap<i64, String>> {
     let conn = p.conn.lock();
     let mut stmt = conn.prepare("SELECT id, name FROM members")?;
     let mut map: HashMap<i64, String> = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?;

@@ -1421,6 +1421,63 @@ pub async fn share_review(state: State<'_, AppState>, share: State<'_, Share>, i
     }
 }
 
+// ---------- 审核页（发起人这边；成员走 share.rs 的同名接口） ----------
+
+#[tauri::command]
+pub async fn review_query(
+    state: State<'_, AppState>,
+    share: State<'_, Share>,
+    query: crate::review::ReviewQuery,
+    offset: u32,
+    limit: u32,
+) -> AppResult<crate::review::ReviewPage> {
+    let project = state.current()?;
+    let name = host_name(&share, &project);
+    crate::review::query(&project, &Member::host(&name), &query, offset, limit, &name)
+}
+
+#[tauri::command]
+pub async fn review_ids(state: State<'_, AppState>, share: State<'_, Share>, query: crate::review::ReviewQuery) -> AppResult<Vec<i64>> {
+    let project = state.current()?;
+    crate::review::ids(&project, &Member::host(&host_name(&share, &project)), &query)
+}
+
+#[tauri::command]
+pub async fn review_members(
+    state: State<'_, AppState>,
+    share: State<'_, Share>,
+    query: crate::review::ReviewQuery,
+) -> AppResult<Vec<crate::review::MemberSummary>> {
+    let project = state.current()?;
+    let name = host_name(&share, &project);
+    crate::review::members(&project, &Member::host(&name), &query, &name)
+}
+
+#[tauri::command]
+pub async fn review_many(
+    state: State<'_, AppState>,
+    share: State<'_, Share>,
+    ids: Vec<i64>,
+    pass: bool,
+    reason: Option<String>,
+) -> AppResult<crate::review::BatchResult> {
+    let project = state.current()?;
+    let reason = reason.unwrap_or_default();
+    match share.hub_for(&project) {
+        Some(h) => h.review_many(&h.host_member(), &ids, pass, &reason),
+        None => crate::review::review_many(&project, &Member::host(&host_name(&share, &project)), &ids, pass, &reason, &|_| false),
+    }
+}
+
+#[tauri::command]
+pub async fn review_undo(state: State<'_, AppState>, share: State<'_, Share>, token: String) -> AppResult<Vec<i64>> {
+    let project = state.current()?;
+    match share.hub_for(&project) {
+        Some(h) => h.review_undo(&h.host_member(), &token),
+        None => crate::review::undo(&project, &Member::host(&host_name(&share, &project)), &token),
+    }
+}
+
 #[tauri::command]
 pub async fn team_members(state: State<'_, AppState>) -> AppResult<Vec<Member>> {
     team::list_members(&*state.current()?)

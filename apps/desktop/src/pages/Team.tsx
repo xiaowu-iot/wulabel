@@ -38,6 +38,7 @@ import {
 } from "../api";
 import { listen } from "../transport";
 import { useApp } from "../store";
+import { reviewMemberNext } from "./Review";
 import { t } from "../i18n";
 import { xuntongEnabled } from "../features";
 
@@ -78,6 +79,7 @@ function copy(text: string, ok: () => void) {
 export default function Team({ project }: { project: ProjectInfo }) {
   const { message, modal } = App.useApp();
   const annotateImage = useApp((s) => s.annotateImage);
+  const setPage = useApp((s) => s.setPage);
   const setTeam = useApp((s) => s.setTeam);
   const [status, setStatus] = useState<ShareStatus | null>(null);
   const [opts, setOpts] = useState<ShareOptions | null>(null);
@@ -547,9 +549,21 @@ export default function Team({ project }: { project: ProjectInfo }) {
             },
             {
               title: "",
-              width: 250,
+              width: 320,
               render: (_, m) => (
                 <Space size={0}>
+                  {m.role === "annotator" && (
+                    <Button
+                      size="small"
+                      type="link"
+                      onClick={() => {
+                        reviewMemberNext(m.id);
+                        setPage("review");
+                      }}
+                    >
+                      {t("看他的图")}
+                    </Button>
+                  )}
                   <Button size="small" type="link" onClick={() => resetPassword(m)}>
                     {t("重设密码")}
                   </Button>

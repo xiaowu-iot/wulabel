@@ -459,5 +459,6 @@
   "下载不完整（{done} / {total} 字节）": "Téléchargement incomplet ({done} / {total} octets)",
   "下载 uv 失败：{errors}。可以手动安装 uv 后在设置里指定路径": "Échec du téléchargement de uv : {errors}. Vous pouvez installer uv vous-même et indiquer son chemin dans les Paramètres",
   "这次训练没有留下可以接着跑的进度": "Cet entraînement n'a pas laissé de point de reprise",
-  "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "La copie du jeu de données de cet entraînement a disparu, il ne peut pas être repris. Lancez un nouvel entraînement."
+  "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "La copie du jeu de données de cet entraînement a disparu, il ne peut pas être repris. Lancez un nouvel entraînement.",
+  "已经过了撤销时间": "Le délai d'annulation est dépassé"
 }

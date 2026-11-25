@@ -1,11 +1,12 @@
 // 协作成员在浏览器里看到的界面：登录 → 标注（只有分给自己的图）
 import { useCallback, useEffect, useState } from "react";
-import { Alert, App, Button, Checkbox, Form, Input, Result, Spin, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Checkbox, Form, Input, Result, Segmented, Spin, Tag, Tooltip } from "antd";
 import { LockOutlined, LogoutOutlined, UserOutlined } from "@ant-design/icons";
 import { api, errText, MemberStats, ROLE_NAMES, ShareEvent, taskName, Whoami } from "./api";
 import { useApp } from "./store";
 import { clearToken, connectLive, disconnectLive, getToken, listen, onAuthLost, setToken } from "./transport";
 import Annotate from "./pages/Annotate";
+import Review from "./pages/Review";
 import { t } from "./i18n";
 
 type Phase = "loading" | "login" | "app" | "closed";
@@ -15,6 +16,7 @@ export default function RemoteApp() {
   const project = useApp((s) => s.project);
   const setProject = useApp((s) => s.setProject);
   const setPage = useApp((s) => s.setPage);
+  const page = useApp((s) => s.page);
   const team = useApp((s) => s.team);
   const setTeam = useApp((s) => s.setTeam);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -28,7 +30,8 @@ export default function RemoteApp() {
       setTeam({ remote: true, me: who.member, options: who.options });
       const p = await api.currentProject();
       if (p) setProject(p);
-      setPage("annotate");
+      // 审核员默认进审核页，标注员只有标注页
+      setPage(who.member.role === "reviewer" ? "review" : "annotate");
       connectLive();
       setPhase("app");
     },
@@ -182,6 +185,8 @@ export default function RemoteApp() {
   }
 
   const me = team.me;
+  const reviewer = me?.role === "reviewer";
+  const showReview = reviewer && page === "review";
   // 数字要加粗，先整句翻译再从 {n} 处分开
   const submittedText = t("今天提交 {n} 张").split("{n}");
   return (
@@ -193,6 +198,18 @@ export default function RemoteApp() {
         <div className="crumb">
           {project?.name} <span className="dim">· {project ? taskName(project.task) : ""}</span>
         </div>
+        {reviewer && (
+          <Segmented
+            size="small"
+            style={{ marginLeft: 16 }}
+            value={showReview ? "review" : "annotate"}
+            onChange={(v) => setPage(v as "review" | "annotate")}
+            options={[
+              { label: t("审核"), value: "review" },
+              { label: t("标注"), value: "annotate" },
+            ]}
+          />
+        )}
         <div className="spacer" />
         {live !== "connected" && (
           <Tag color="warning" style={{ marginRight: 8 }}>
@@ -221,7 +238,11 @@ export default function RemoteApp() {
       </header>
       <main className="remote-main">
         {project ? (
-          <Annotate project={project} />
+          showReview ? (
+            <Review project={project} />
+          ) : (
+            <Annotate project={project} />
+          )
         ) : (
           <Alert type="warning" showIcon message={t("读取项目失败，请刷新页面")} style={{ margin: 24 }} />
         )}

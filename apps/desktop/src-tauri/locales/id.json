@@ -459,5 +459,6 @@
   "下载不完整（{done} / {total} 字节）": "Unduhan tidak lengkap ({done} / {total} byte)",
   "下载 uv 失败：{errors}。可以手动安装 uv 后在设置里指定路径": "Gagal mengunduh uv: {errors}. Anda bisa menginstal uv secara manual lalu menentukan path-nya di Pengaturan",
   "这次训练没有留下可以接着跑的进度": "Pelatihan ini tidak menyimpan titik untuk dilanjutkan",
-  "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "Salinan dataset untuk pelatihan ini hilang, jadi tidak bisa dilanjutkan. Mulai pelatihan baru."
+  "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "Salinan dataset untuk pelatihan ini hilang, jadi tidak bisa dilanjutkan. Mulai pelatihan baru.",
+  "已经过了撤销时间": "Waktu untuk mengurungkan sudah habis"
 }

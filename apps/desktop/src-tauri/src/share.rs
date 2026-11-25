@@ -531,6 +531,29 @@ impl Hub {
         Ok(s)
     }
 
+    /// 审核页的批量通过 / 打回：别人正在改的图跳过；只广播一条，免得刷屏
+    pub fn review_many(&self, m: &Member, ids: &[i64], pass: bool, reason: &str) -> AppResult<crate::review::BatchResult> {
+        let locked = |id: i64| {
+            self.locks.lock().get(&id).is_some_and(|l| l.member_id != m.id && l.at.elapsed() < LOCK_TTL)
+        };
+        let r = crate::review::review_many(&self.project, m, ids, pass, reason, &locked)?;
+        if r.done > 0 {
+            self.broadcast(
+                "status-batch",
+                json!({ "ids": r.ids, "by": m.name, "memberId": m.id, "action": if pass { "pass" } else { "reject" } }),
+            );
+        }
+        Ok(r)
+    }
+
+    pub fn review_undo(&self, m: &Member, token: &str) -> AppResult<Vec<i64>> {
+        let ids = crate::review::undo(&self.project, m, token)?;
+        if !ids.is_empty() {
+            self.broadcast("status-batch", json!({ "ids": ids, "by": m.name, "memberId": m.id, "action": "undo" }));
+        }
+        Ok(ids)
+    }
+
     fn on_client_msg(&self, m: &Member, text: &str) {
         let Ok(v) = serde_json::from_str::<Value>(text) else { return };
         match v["type"].as_str() {
@@ -649,6 +672,19 @@ fn call(hub: &Hub, m: &Member, cmd: &str, args: &Value) -> AppResult<Value> {
             let id: i64 = arg(args, "imageId")?;
             json!(hub.review(m, id, arg(args, "pass")?, &arg::<Option<String>>(args, "reason")?.unwrap_or_default())?)
         }
+        // 审核页（审核员）
+        "review_query" => {
+            let q: crate::review::ReviewQuery = arg(args, "query")?;
+            serde_json::to_value(crate::review::query(p, m, &q, arg(args, "offset")?, arg(args, "limit")?, &host_name)?)?
+        }
+        "review_ids" => serde_json::to_value(crate::review::ids(p, m, &arg(args, "query")?)?)?,
+        "review_members" => serde_json::to_value(crate::review::members(p, m, &arg(args, "query")?, &host_name)?)?,
+        "review_many" => {
+            let ids: Vec<i64> = arg(args, "ids")?;
+            let reason = arg::<Option<String>>(args, "reason")?.unwrap_or_default();
+            serde_json::to_value(hub.review_many(m, &ids, arg(args, "pass")?, &reason)?)?
+        }
+        "review_undo" => json!(hub.review_undo(m, &arg::<String>(args, "token")?)?),
         "lock_image" => {
             let id: i64 = arg(args, "imageId")?;
             team::ensure_access(p, m, id)?;

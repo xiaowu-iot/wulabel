@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { App as AntApp, Button, Space, Tooltip } from "antd";
 import {
   AimOutlined,
+  AuditOutlined,
   BarChartOutlined,
   CloseOutlined,
   CodeSandboxOutlined,
@@ -15,10 +16,11 @@ import {
 } from "@ant-design/icons";
 import { api, appApi, BusyTasks, busyList, OPEN_FEEDBACK_EVENT, ShareStatus, taskName, UpdateInfo } from "./api";
 import { listen } from "./transport";
-import { PageKey, prefs, useApp } from "./store";
+import { PageKey, prefs, useApp, useReview } from "./store";
 import Home from "./pages/Home";
 import Data from "./pages/Data";
 import Annotate from "./pages/Annotate";
+import Review from "./pages/Review";
 import Train, { explainError, isPoor, metricNames, rateMetric } from "./pages/Train";
 import Health from "./pages/Health";
 import Eval from "./pages/Eval";
@@ -36,6 +38,8 @@ const NAV: { key: PageKey; label: string; icon: ReactNode; needProject: boolean 
   { key: "home", label: t("项目"), icon: <HomeOutlined />, needProject: false },
   { key: "data", label: t("数据"), icon: <PictureOutlined />, needProject: true },
   { key: "annotate", label: t("标注"), icon: <FormOutlined />, needProject: true },
+  // 只在团队协作时显示
+  { key: "review", label: t("审核"), icon: <AuditOutlined />, needProject: true },
   { key: "health", label: t("体检"), icon: <HeartOutlined />, needProject: true },
   { key: "train", label: t("训练"), icon: <BarChartOutlined />, needProject: true },
   { key: "eval", label: t("评估"), icon: <AimOutlined />, needProject: true },
@@ -47,6 +51,7 @@ const TITLES: Record<PageKey, string> = {
   home: t("项目"),
   data: t("数据"),
   annotate: t("标注"),
+  review: t("审核"),
   health: t("数据体检"),
   train: t("训练"),
   eval: t("评估"),
@@ -57,6 +62,11 @@ const TITLES: Record<PageKey, string> = {
 
 export default function App() {
   const { project, page, setPage, setProject, setTeam, team, openRun } = useApp();
+  const review = useReview();
+  // 不再协作了（成员都删了、停了共享）就离开审核页
+  useEffect(() => {
+    if (page === "review" && !review) setPage("annotate");
+  }, [page, review, setPage]);
   const { notification, modal } = AntApp.useApp();
   const [upd, setUpd] = useState<UpdateInfo | null>(null);
 
@@ -326,7 +336,7 @@ export default function App() {
       </header>
 
       <nav className="nav">
-        {NAV.map((n) => (
+        {NAV.filter((n) => n.key !== "review" || review).map((n) => (
           <button
             key={n.key}
             className={page === n.key ? "on" : ""}
@@ -336,6 +346,7 @@ export default function App() {
             {n.icon}
             {n.label}
             {n.key === "team" && team.shareRunning && <span className="presence-dot" style={{ position: "absolute", marginLeft: 22 }} />}
+            {n.key === "review" && !!project?.stats.labeled && <span className="nav-badge">{project.stats.labeled > 999 ? "999+" : project.stats.labeled}</span>}
           </button>
         ))}
         <div className="gap" />
@@ -349,6 +360,7 @@ export default function App() {
         {page === "home" && <Home />}
         {page === "data" && project && <Data project={project} />}
         {page === "annotate" && project && <Annotate project={project} />}
+        {page === "review" && project && review && <Review project={project} />}
         {page === "health" && project && <Health project={project} />}
         {page === "train" && project && <Train project={project} />}
         {page === "eval" && project && <Eval project={project} />}
