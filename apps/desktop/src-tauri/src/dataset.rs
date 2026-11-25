@@ -201,7 +201,7 @@ impl ExportResult {
 }
 
 /// 类别名做文件夹名：去掉文件系统不允许的字符
-fn safe_dir(name: &str) -> String {
+pub(crate) fn safe_dir(name: &str) -> String {
     let s: String = name.chars().map(|c| if r#"\/:*?"<>|"#.contains(c) || c.is_control() { '_' } else { c }).collect();
     let s = s.trim().trim_end_matches('.').to_string();
     if s.is_empty() { "_".into() } else { s }

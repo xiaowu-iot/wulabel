@@ -1,6 +1,7 @@
 mod ai;
 mod annotations;
 mod assist;
+mod batch;
 mod collab;
 mod commands;
 mod convert;
@@ -152,6 +153,8 @@ pub fn run() {
             commands::track_frames,
             commands::import_dataset,
             commands::convert_to_multilabel,
+            commands::batch_predict,
+            commands::batch_predict_stop,
             commands::env_status,
             commands::save_settings,
             commands::env_install,

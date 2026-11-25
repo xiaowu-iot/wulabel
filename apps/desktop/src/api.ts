@@ -81,6 +81,24 @@ export interface ConvertResult {
   labels: number;
 }
 
+/** 批量识别一个文件夹的设置和结果 */
+export interface BatchOptions {
+  runId: number;
+  input: string;
+  output: string;
+  conf: number;
+  sort: boolean;
+}
+export interface BatchResult {
+  images: number;
+  failed: number;
+  csv: string;
+  output: string;
+  /** [类别, 图片数]，最后一项可能是「拿不准 / 没有目标」 */
+  counts: [string, number][];
+  stopped: boolean;
+}
+
 export interface ImportProgress {
   done: number;
   total: number;
@@ -657,6 +675,8 @@ export const api = {
     anonymize: AnonymizeConfig | null = null,
   ) => invoke<ExportResult>("export_dataset", { options, anonymize }),
   importDataset: (dir: string) => invoke<DatasetImportResult>("import_dataset", { dir }),
+  batchPredict: (opts: BatchOptions) => invoke<BatchResult>("batch_predict", { opts }),
+  batchPredictStop: () => invoke<void>("batch_predict_stop"),
   /** 当前项目转成多标签分类项目（新建项目）；emptyLabel：标为「没有目标」的图打上的类别，null 就不要这些图 */
   convertToMultilabel: (parent: string, name: string, emptyLabel: string | null) =>
     invoke<ConvertResult>("convert_to_multilabel", { parent, name, emptyLabel }),

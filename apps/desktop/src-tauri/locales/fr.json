@@ -465,5 +465,17 @@
   "拿不准的类别 {n} 个": "{n} classes incertaines",
   "转换任务异常：{e}": "Échec de la conversion : {e}",
   "已经是分类项目了，不用转换": "C'est déjà un projet de classification ; pas besoin de le convertir",
-  "还没有标过的图片，先标注一些再转换": "Aucune image annotée pour l'instant. Annotez-en quelques-unes, puis convertissez"
+  "还没有标过的图片，先标注一些再转换": "Aucune image annotée pour l'instant. Annotez-en quelques-unes, puis convertissez",
+  "拿不准": "Incertaine",
+  "文件": "Fichier",
+  "结果": "Résultat",
+  "最高分": "Score max",
+  "识别出错": "Erreur",
+  "识别结果": "resultats",
+  "请选择要识别的文件夹": "Choisissez le dossier à reconnaître",
+  "请选择结果放在哪个文件夹": "Choisissez où enregistrer les résultats",
+  "结果文件夹不能放在要识别的文件夹里面": "Le dossier des résultats ne peut pas se trouver dans le dossier à reconnaître",
+  "这个文件夹里没有图片": "Ce dossier ne contient aucune image",
+  "批量识别异常：{e}": "Échec de la reconnaissance par lot : {e}",
+  "没有目标": "Sans objet"
 }

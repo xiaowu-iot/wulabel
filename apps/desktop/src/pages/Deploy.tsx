@@ -28,7 +28,7 @@ import {
 } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, DeployStep, errText, FormatResult, ImportProgress, Label, lastImportIds, ProjectInfo, RunInfo } from "../api";
+import { api, BatchResult, DeployStep, errText, FormatResult, ImportProgress, isClsTask, Label, lastImportIds, ProjectInfo, RunInfo } from "../api";
 import { prefs, useApp } from "../store";
 import { t } from "../i18n";
 import { xuntongEnabled } from "../features";
@@ -423,6 +423,136 @@ const FORMATS = [
 ];
 
 /** 导出、生成服务包的步骤进度条（deploy-progress）；步数未知时只显示当前在做什么 */
+/** 批量识别一个文件夹：导出表格，可以按识别结果把图片复制到各类别的文件夹 */
+function BatchTab({ run, project, recConf }: { run: RunInfo; project: ProjectInfo; recConf: number | null }) {
+  const { message } = App.useApp();
+  const [input, setInput] = useState(prefs.get("batchInput", ""));
+  const [output, setOutput] = useState(prefs.get("batchOutput", ""));
+  const [conf, setConf] = useState(recConf ?? 0.5);
+  const [sort, setSort] = useState(prefs.get("batchSort", "1") === "1");
+  const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState<ImportProgress | null>(null);
+  const [res, setRes] = useState<BatchResult | null>(null);
+  const isCls = isClsTask(project.task);
+  useEffect(() => {
+    if (recConf != null) setConf(recConf);
+  }, [recConf]);
+
+  const start = async () => {
+    if (!input || !output) {
+      message.warning(t("先选要识别的文件夹和结果放在哪里"));
+      return;
+    }
+    prefs.set("batchInput", input);
+    prefs.set("batchOutput", output);
+    prefs.set("batchSort", sort ? "1" : "0");
+    setBusy(true);
+    setRes(null);
+    setProg(null);
+    const un = await listen<ImportProgress>("batch-progress", (e) => setProg(e.payload));
+    try {
+      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort });
+      setRes(r);
+      if (r.stopped) message.info(t("已停止，识别过的 {n} 张已写进表格", { n: r.images }));
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      un();
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ maxWidth: 760 }}>
+      <p className="desc" style={{ marginTop: 0 }}>
+        {isCls
+          ? t("用这个模型把一个文件夹里的图片都识别一遍（包括子文件夹），结果导出成表格，Excel 直接打开；也可以按识别出的类别把图片复制到各自的文件夹。")
+          : t("用这个模型把一个文件夹里的图片都检测一遍（包括子文件夹），每张图找到几个什么目标导出成表格，Excel 直接打开；也可以按找到的类别把图片复制到各自的文件夹。")}
+      </p>
+      <Form layout="vertical" disabled={busy}>
+        <Form.Item label={t("要识别的文件夹")}>
+          <FolderPicker value={input} onChange={setInput} title={t("选择要识别的文件夹")} />
+        </Form.Item>
+        <Form.Item label={t("结果放在")} extra={t("不能放在要识别的文件夹里面。")}>
+          <FolderPicker value={output} onChange={setOutput} title={t("选择结果放在哪个文件夹")} />
+        </Form.Item>
+        <Form.Item
+          label={t("置信度阈值")}
+          extra={
+            project.task === "classify"
+              ? t("最像的类别分数低于阈值时记为「拿不准」，留给人看。")
+              : project.task === "multilabel"
+                ? t("分数达到阈值的类别都算有；一个都没有时记为「拿不准」。")
+                : t("分数低于阈值的目标不算。")
+          }
+        >
+          <Space>
+            <InputNumber min={0.05} max={0.95} step={0.05} value={conf} onChange={(v) => setConf(v ?? 0.5)} />
+            <RecConf value={conf} rec={recConf} onUse={setConf} />
+          </Space>
+        </Form.Item>
+        <Form.Item>
+          <Checkbox checked={sort} onChange={(e) => setSort(e.target.checked)}>
+            {project.task === "multilabel"
+              ? t("按类别复制到各自的文件夹（一张图有几个类别就复制几份）")
+              : isCls
+                ? t("按类别复制到各自的文件夹")
+                : t("按找到的类别复制到各自的文件夹（找到几种就复制几份）")}
+          </Checkbox>
+        </Form.Item>
+      </Form>
+      <Space>
+        {!busy ? (
+          <Button type="primary" icon={<CaretRightOutlined />} onClick={start}>
+            {t("开始识别")}
+          </Button>
+        ) : (
+          <Button danger icon={<StopOutlined />} onClick={() => api.batchPredictStop().catch(() => {})}>
+            {t("停止")}
+          </Button>
+        )}
+      </Space>
+      {busy && (
+        <div style={{ marginTop: 12 }}>
+          <Progress size="small" percent={prog && prog.total ? Math.floor((prog.done / prog.total) * 100) : 0} status="active" />
+          <div className="dim" style={{ fontSize: 12 }}>
+            {prog ? t("已识别 {done}/{total} 张", { done: prog.done, total: prog.total }) : t("加载模型…")}
+          </div>
+        </div>
+      )}
+      {res && (
+        <Alert
+          style={{ marginTop: 12 }}
+          type={res.failed ? "warning" : "success"}
+          showIcon
+          message={
+            res.failed
+              ? t("识别了 {n} 张，其中 {f} 张读不了或出错（表格里标为「识别出错」）", { n: res.images, f: res.failed })
+              : t("识别了 {n} 张", { n: res.images })
+          }
+          description={
+            <div>
+              <div style={{ margin: "4px 0 8px" }}>
+                {res.counts.map(([name, n]) => (
+                  <Tag key={name}>{t("{name} {n} 张", { name, n })}</Tag>
+                ))}
+              </div>
+              <Space>
+                <Button size="small" icon={<FolderOpenOutlined />} onClick={() => api.revealPath(res.output).catch(() => {})}>
+                  {t("打开结果文件夹")}
+                </Button>
+                <Button size="small" onClick={() => api.revealPath(res.csv).catch(() => {})}>
+                  {t("找到表格")}
+                </Button>
+              </Space>
+            </div>
+          }
+        />
+      )}
+    </div>
+  );
+}
+
 function StepBar({ step }: { step: DeployStep | null }) {
   if (!step) return null;
   const name = FORMATS.find((f) => f.value === step.name)?.name ?? step.name;
@@ -976,6 +1106,7 @@ export default function Deploy({ project }: { project: ProjectInfo }) {
           }}
           items={[
             { key: "live", label: t("实时验证"), children: <LiveTab key={run.id} run={run} labels={labels} recConf={recConf} /> },
+            { key: "batch", label: t("批量识别"), children: <BatchTab key={run.id} run={run} project={project} recConf={recConf} /> },
             { key: "export", label: t("导出模型"), children: <ExportTab key={run.id} run={run} project={project} /> },
             { key: "service", label: t("推理服务包"), children: <ServiceTab key={run.id} run={run} project={project} recConf={recConf} /> },
             { key: "reflux", label: t("现场回流"), children: <RefluxTab /> },

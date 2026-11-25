@@ -465,5 +465,17 @@
   "拿不准的类别 {n} 个": "{n} kelas belum pasti",
   "转换任务异常：{e}": "Konversi gagal: {e}",
   "已经是分类项目了，不用转换": "Ini sudah proyek klasifikasi; tidak perlu diubah",
-  "还没有标过的图片，先标注一些再转换": "Belum ada gambar yang dianotasi. Anotasi beberapa dulu, lalu ubah"
+  "还没有标过的图片，先标注一些再转换": "Belum ada gambar yang dianotasi. Anotasi beberapa dulu, lalu ubah",
+  "拿不准": "Belum pasti",
+  "文件": "File",
+  "结果": "Hasil",
+  "最高分": "Skor tertinggi",
+  "识别出错": "Galat",
+  "识别结果": "hasil",
+  "请选择要识别的文件夹": "Pilih folder yang akan dikenali",
+  "请选择结果放在哪个文件夹": "Pilih folder untuk menyimpan hasil",
+  "结果文件夹不能放在要识别的文件夹里面": "Folder hasil tidak boleh berada di dalam folder yang dikenali",
+  "这个文件夹里没有图片": "Tidak ada gambar di folder ini",
+  "批量识别异常：{e}": "Pengenalan massal gagal: {e}",
+  "没有目标": "Tanpa objek"
 }
