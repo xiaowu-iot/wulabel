@@ -1659,5 +1659,19 @@
   "多：{name}": "Extra: {name}",
   "模型很确定这张图有这个类别，但没有打上": "The model is confident this image has the class, but it isn't tagged",
   "用已标注和已审核的图片训练多标签分类模型（每个类别各自判断有没有）。": "Train a multi-label classification model on labeled and reviewed images (each class is judged on its own).",
-  "用已标注的图片训练多标签分类模型（每个类别各自判断有没有）。": "Train a multi-label classification model on labeled images (each class is judged on its own)."
+  "用已标注的图片训练多标签分类模型（每个类别各自判断有没有）。": "Train a multi-label classification model on labeled images (each class is judged on its own).",
+  "{name}-多标签": "{name}-multilabel",
+  "正常": "Normal",
+  "已生成多标签分类项目": "Multi-label classification project created",
+  "{images} 张图片、{labels} 个类别，其中 {neg} 张没有目标的图打上了「{empty}」。": "{images} images, {labels} classes; {neg} images with no objects were tagged \"{empty}\".",
+  "{images} 张图片、{labels} 个类别。": "{images} images, {labels} classes.",
+  "打开新项目": "Open the new project",
+  "留在这里": "Stay here",
+  "转成多标签分类项目": "Convert to a multi-label classification project",
+  "开始转换": "Convert",
+  "新建一个多标签分类项目：每张已标注的图，上面标过哪些类别，就打上哪些类别标签。图片复制过去，这个项目不会改动。": "Creates a new multi-label classification project: each annotated image gets a tag for every class annotated on it. Images are copied over; this project stays unchanged.",
+  "新项目名": "New project name",
+  "标为「没有目标」的图也要，打上这个类别：": "Also include images marked \"No objects\", tagged as:",
+  "请输入类别名": "Enter a class name",
+  "多标签分类每张图至少要有一个类别，没问题的图用「正常」「全新」这样的类别。": "In multi-label classification every image needs at least one class; use a class like \"Normal\" or \"Brand new\" for images without problems."
 }

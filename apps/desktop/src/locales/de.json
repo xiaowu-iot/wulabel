@@ -1659,5 +1659,19 @@
   "多：{name}": "Zu viel: {name}",
   "模型很确定这张图有这个类别，但没有打上": "Das Modell ist sicher, dass das Bild diese Klasse hat, aber sie ist nicht vergeben",
   "用已标注和已审核的图片训练多标签分类模型（每个类别各自判断有没有）。": "Trainiert ein Multi-Label-Klassifizierungsmodell mit annotierten und geprüften Bildern (jede Klasse wird einzeln bewertet).",
-  "用已标注的图片训练多标签分类模型（每个类别各自判断有没有）。": "Trainiert ein Multi-Label-Klassifizierungsmodell mit annotierten Bildern (jede Klasse wird einzeln bewertet)."
+  "用已标注的图片训练多标签分类模型（每个类别各自判断有没有）。": "Trainiert ein Multi-Label-Klassifizierungsmodell mit annotierten Bildern (jede Klasse wird einzeln bewertet).",
+  "{name}-多标签": "{name}-Multi-Label",
+  "正常": "Normal",
+  "已生成多标签分类项目": "Multi-Label-Klassifizierungsprojekt erstellt",
+  "{images} 张图片、{labels} 个类别，其中 {neg} 张没有目标的图打上了「{empty}」。": "{images} Bilder, {labels} Klassen; {neg} Bilder ohne Objekte bekamen „{empty}“.",
+  "{images} 张图片、{labels} 个类别。": "{images} Bilder, {labels} Klassen.",
+  "打开新项目": "Neues Projekt öffnen",
+  "留在这里": "Hierbleiben",
+  "转成多标签分类项目": "In Multi-Label-Klassifizierungsprojekt umwandeln",
+  "开始转换": "Umwandeln",
+  "新建一个多标签分类项目：每张已标注的图，上面标过哪些类别，就打上哪些类别标签。图片复制过去，这个项目不会改动。": "Erstellt ein neues Multi-Label-Klassifizierungsprojekt: Jedes annotierte Bild bekommt jede darauf annotierte Klasse als Label. Die Bilder werden kopiert, dieses Projekt bleibt unverändert.",
+  "新项目名": "Name des neuen Projekts",
+  "标为「没有目标」的图也要，打上这个类别：": "Auch Bilder mit „Keine Objekte“ übernehmen, mit der Klasse:",
+  "请输入类别名": "Klassennamen eingeben",
+  "多标签分类每张图至少要有一个类别，没问题的图用「正常」「全新」这样的类别。": "Bei der Multi-Label-Klassifizierung braucht jedes Bild mindestens eine Klasse; für Bilder ohne Probleme eine Klasse wie „Normal“ oder „Neu“ verwenden."
 }

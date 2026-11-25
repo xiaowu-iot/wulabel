@@ -73,6 +73,14 @@ export interface ImportResult {
   stopped?: number;
 }
 
+/** 转成多标签分类项目的结果 */
+export interface ConvertResult {
+  path: string;
+  images: number;
+  negatives: number;
+  labels: number;
+}
+
 export interface ImportProgress {
   done: number;
   total: number;
@@ -649,6 +657,9 @@ export const api = {
     anonymize: AnonymizeConfig | null = null,
   ) => invoke<ExportResult>("export_dataset", { options, anonymize }),
   importDataset: (dir: string) => invoke<DatasetImportResult>("import_dataset", { dir }),
+  /** 当前项目转成多标签分类项目（新建项目）；emptyLabel：标为「没有目标」的图打上的类别，null 就不要这些图 */
+  convertToMultilabel: (parent: string, name: string, emptyLabel: string | null) =>
+    invoke<ConvertResult>("convert_to_multilabel", { parent, name, emptyLabel }),
   lastImport: () => invoke<LastImport | null>("last_import"),
   deleteImages: (scope: "ids" | "last" | "all", ids?: number[]) => invoke<number>("delete_images", { scope, ids }),
   listImageIds: (status: string | null) => invoke<number[]>("list_image_ids", { status }),

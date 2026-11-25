@@ -462,5 +462,8 @@
   "这次训练用的数据集副本不见了，没法接着训，请重新开始训练": "A cópia do conjunto de dados deste treino sumiu, então não dá para retomar. Comece um novo treino.",
   "已经过了撤销时间": "O prazo para desfazer já passou",
   "多标签分类": "Classificação multirrótulo",
-  "拿不准的类别 {n} 个": "{n} classes incertas"
+  "拿不准的类别 {n} 个": "{n} classes incertas",
+  "转换任务异常：{e}": "Erro na conversão: {e}",
+  "已经是分类项目了，不用转换": "Já é um projeto de classificação; não precisa converter",
+  "还没有标过的图片，先标注一些再转换": "Ainda não há imagens anotadas. Anote algumas e depois converta"
 }

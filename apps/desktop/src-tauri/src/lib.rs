@@ -3,6 +3,7 @@ mod annotations;
 mod assist;
 mod collab;
 mod commands;
+mod convert;
 mod dataset;
 mod dataset_import;
 mod deploy;
@@ -150,6 +151,7 @@ pub fn run() {
             commands::interpolate_frames,
             commands::track_frames,
             commands::import_dataset,
+            commands::convert_to_multilabel,
             commands::env_status,
             commands::save_settings,
             commands::env_install,
