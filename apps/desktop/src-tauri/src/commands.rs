@@ -1193,6 +1193,24 @@ pub async fn import_dataset(app: AppHandle, state: State<'_, AppState>, dir: Str
     .map_err(|e| msg(t!("导入任务异常：{e}", e = e)))?
 }
 
+/// 用训练好的模型批量识别一个文件夹：导出表格，可以按类别把图片复制到各自的文件夹
+#[tauri::command]
+pub async fn batch_predict(app: AppHandle, state: State<'_, AppState>, opts: crate::batch::BatchOptions) -> AppResult<crate::batch::BatchResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app.clone(), "batch-progress");
+        crate::batch::run(&project, &app.state::<Runtime>(), &app.state::<Predictor>(), &opts, &progress)
+    })
+    .await
+    .map_err(|e| msg(t!("批量识别异常：{e}", e = e)))?
+}
+
+#[tauri::command]
+pub async fn batch_predict_stop() -> AppResult<()> {
+    crate::batch::stop();
+    Ok(())
+}
+
 /// 当前项目（检测、分割、关键点）转成多标签分类项目：新建项目，图片复制过去
 #[tauri::command]
 pub async fn convert_to_multilabel(

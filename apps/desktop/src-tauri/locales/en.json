@@ -465,5 +465,17 @@
   "拿不准的类别 {n} 个": "{n} uncertain classes",
   "转换任务异常：{e}": "Conversion task failed: {e}",
   "已经是分类项目了，不用转换": "This is already a classification project; no need to convert",
-  "还没有标过的图片，先标注一些再转换": "No annotated images yet. Annotate some first, then convert"
+  "还没有标过的图片，先标注一些再转换": "No annotated images yet. Annotate some first, then convert",
+  "拿不准": "Unsure",
+  "文件": "File",
+  "结果": "Result",
+  "最高分": "Top score",
+  "识别出错": "Error",
+  "识别结果": "results",
+  "请选择要识别的文件夹": "Choose the folder to recognize",
+  "请选择结果放在哪个文件夹": "Choose where to save the results",
+  "结果文件夹不能放在要识别的文件夹里面": "The results folder can't be inside the folder being recognized",
+  "这个文件夹里没有图片": "There are no images in this folder",
+  "批量识别异常：{e}": "Batch recognition failed: {e}",
+  "没有目标": "No objects"
 }

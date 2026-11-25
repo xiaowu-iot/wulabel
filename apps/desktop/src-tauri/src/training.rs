@@ -723,7 +723,7 @@ impl Predictor {
     }
 
     /// 发一次预测请求，每张图的结果回调一次；返回模型的类别名
-    fn request(
+    pub(crate) fn request(
         &self,
         rt: &Runtime,
         weights: &Path,

@@ -465,5 +465,17 @@
   "拿不准的类别 {n} 个": "{n} unsichere Klassen",
   "转换任务异常：{e}": "Fehler bei der Umwandlung: {e}",
   "已经是分类项目了，不用转换": "Das ist bereits ein Klassifizierungsprojekt; keine Umwandlung nötig",
-  "还没有标过的图片，先标注一些再转换": "Noch keine annotierten Bilder. Erst einige annotieren, dann umwandeln"
+  "还没有标过的图片，先标注一些再转换": "Noch keine annotierten Bilder. Erst einige annotieren, dann umwandeln",
+  "拿不准": "Unsicher",
+  "文件": "Datei",
+  "结果": "Ergebnis",
+  "最高分": "Höchster Score",
+  "识别出错": "Fehler",
+  "识别结果": "Ergebnisse",
+  "请选择要识别的文件夹": "Bitte den zu erkennenden Ordner wählen",
+  "请选择结果放在哪个文件夹": "Bitte den Ablageort für die Ergebnisse wählen",
+  "结果文件夹不能放在要识别的文件夹里面": "Der Ergebnisordner darf nicht im zu erkennenden Ordner liegen",
+  "这个文件夹里没有图片": "In diesem Ordner sind keine Bilder",
+  "批量识别异常：{e}": "Fehler bei der Stapelerkennung: {e}",
+  "没有目标": "Keine Objekte"
 }
