@@ -3,7 +3,7 @@ import { Alert, App, Button, Empty, Progress, Select, Space, Tag, Tooltip } from
 import { CheckOutlined, EyeInvisibleOutlined, FormOutlined, HeartOutlined, PlusOutlined } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
 import { api, errText, HealthProgress, HealthReport, Issue, IssueKind, ProjectInfo, RunInfo, thumbUrl } from "../api";
-import { useApp, useReview } from "../store";
+import { Highlight, useApp, useReview } from "../store";
 import { statusTag } from "../status";
 import { fmtTime } from "./Train";
 import { t } from "../i18n";
@@ -61,6 +61,7 @@ function IssueThumb({ path, issue, dims, color }: { path: string; issue: Issue; 
 export default function Health({ project }: { project: ProjectInfo }) {
   const { message, modal } = App.useApp();
   const annotateImage = useApp((s) => s.annotateImage);
+  const annotateQueue = useApp((s) => s.annotateQueue);
   const refreshStats = useApp((s) => s.refreshStats);
   const [report, setReport] = useState<HealthReport | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -243,9 +244,16 @@ export default function Health({ project }: { project: ProjectInfo }) {
     });
   };
 
+  // 去标注页时带上这一类问题的所有图，翻图只在这些图里翻
   const go = (i: Issue) => {
-    const k = KINDS.find((x) => x.key === i.kind);
-    annotateImage(i.imageId, i.bbox ? { imageId: i.imageId, bbox: i.bbox, text: k?.name ?? "" } : undefined);
+    const name = KINDS.find((x) => x.key === i.kind)?.name ?? "";
+    const marks: Record<number, Highlight> = {};
+    // 点的这一处先放，同一张图有好几处问题时高亮点的那处
+    for (const x of [i, ...list]) {
+      if (x.bbox && !marks[x.imageId]) marks[x.imageId] = { imageId: x.imageId, bbox: x.bbox, text: name };
+    }
+    const ids = [...new Set(list.some((x) => x.key === i.key) ? list.map((x) => x.imageId) : [i.imageId])];
+    annotateQueue(ids, name || t("体检"), { focus: i.imageId, marks });
   };
 
   const keepOf = (g: number[]) => {

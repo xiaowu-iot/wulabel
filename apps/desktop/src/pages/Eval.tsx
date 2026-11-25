@@ -15,7 +15,6 @@ export default function Eval({ project }: { project: ProjectInfo }) {
   const { message } = App.useApp();
   const isCls = project.task === "classify";
   const mn = metricNames(project.task);
-  const annotateImage = useApp((s) => s.annotateImage);
   const annotateQueue = useApp((s) => s.annotateQueue);
   const setPage = useApp((s) => s.setPage);
   const openRun = useApp((s) => s.openRun);
@@ -342,7 +341,14 @@ export default function Eval({ project }: { project: ProjectInfo }) {
 
           <div className="card" ref={errBox}>
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 10 }}>
-              <div className="muted">{t("错例")} <span className="dim">· {t("点图片去标注页检查和修改")}</span></div>
+              <div className="muted">
+                {t("错例")} <span className="dim">· {t("点图片去标注页检查和修改")}</span>
+                {!isCls && (
+                  <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
+                    {t("漏：标了框但模型没找到 · 误：模型多报、你没标 · 错：位置对上了但类别不一样")}
+                  </div>
+                )}
+              </div>
               {isCls ? (
                 <span className="dim" style={{ fontSize: 12 }}>{t("分错 {n} 张，按模型把握从高到低（越靠前越可能是标错了）", { n: ev.errors.length })}</span>
               ) : (
@@ -364,7 +370,7 @@ export default function Eval({ project }: { project: ProjectInfo }) {
             ) : (
               <div className="thumbs">
                 {errors.map((e) => (
-                  <div key={e.imageId} className="thumb" onClick={() => annotateImage(e.imageId)}>
+                  <div key={e.imageId} className="thumb" onClick={() => annotateQueue(errors.map((x) => x.imageId), t("评估错例"), { focus: e.imageId })}>
                     <img src={thumbUrl(project.path, e.imageId)} loading="lazy" alt="" draggable={false} />
                     <span className="nm">
                       {isCls && e.gt != null && e.pred != null ? (

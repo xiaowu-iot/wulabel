@@ -29,13 +29,14 @@ interface AppStore {
   highlight: Highlight | null;
   /** 指定顺序的一批图去标注（比如模型挑出来最值得标的），标注页会多一个筛选项 */
   /** 指定的一批图去标注；from 为 review 时标注页显示「返回审核」 */
-  queue: { ids: number[]; name: string; from?: "review" } | null;
+  queue: { ids: number[]; name: string; from?: "review"; marks?: Record<number, Highlight> } | null;
   /** 训练、评估、部署页打开时要选中的训练记录（比如训练页点「看评估」） */
   focusRunId: number | null;
   setProject: (p: ProjectInfo | null) => void;
   setPage: (p: PageKey) => void;
   annotateImage: (id: number, highlight?: Highlight) => void;
-  annotateQueue: (ids: number[], name: string, opts?: { from?: "review"; focus?: number }) => void;
+  /** marks：这批图里每张要高亮的框（比如体检发现的问题位置） */
+  annotateQueue: (ids: number[], name: string, opts?: { from?: "review"; focus?: number; marks?: Record<number, Highlight> }) => void;
   clearQueue: () => void;
   takeFocusImage: () => number | null;
   /** 带着训练记录去训练 / 评估 / 部署页 */
@@ -62,7 +63,7 @@ export const useApp = create<AppStore>((set, get) => ({
       ...(get().queue && !get().queue!.ids.includes(id) ? { queue: null } : {}),
     }),
   annotateQueue: (ids, name, opts) =>
-    set({ queue: { ids, name, from: opts?.from }, focusImageId: opts?.focus ?? null, highlight: null, page: "annotate" }),
+    set({ queue: { ids, name, from: opts?.from, marks: opts?.marks }, focusImageId: opts?.focus ?? null, highlight: null, page: "annotate" }),
   clearQueue: () => set({ queue: null }),
   takeFocusImage: () => {
     const id = get().focusImageId;

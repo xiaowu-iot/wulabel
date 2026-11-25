@@ -1816,7 +1816,11 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             onUpdatePoly={onUpdatePoly}
             onDrawing={setDrawingPoly}
             onScale={setScale}
-            highlight={highlight && highlight.imageId === imageId ? highlight : null}
+            highlight={
+              highlight && highlight.imageId === imageId
+                ? highlight
+                : (filter === "queue" && imageId != null && queue?.marks?.[imageId]) || null
+            }
             kpts={poses.map((p) => ({ key: p.key, labelId: p.labelId, kpts: p.kpts }))}
             skeleton={template?.skeleton}
             placing={placing}
