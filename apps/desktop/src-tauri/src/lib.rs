@@ -145,6 +145,8 @@ pub fn run() {
             commands::merge_label,
             commands::stop_prelabel,
             commands::split_summary,
+            commands::unedited_prelabels,
+            commands::confirm_prelabels,
             commands::assign_splits,
             commands::list_split_images,
             commands::set_split,

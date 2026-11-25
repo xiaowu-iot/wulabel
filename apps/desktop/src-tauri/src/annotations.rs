@@ -188,6 +188,40 @@ pub fn save_predictions(p: &Project, image_id: i64, anns: &[Annotation]) -> AppR
     Ok(true)
 }
 
+/// 已标注、已审核，但标注全是预标注（模型、文本提示、巡瞳 AI）、人一个都没改过的图。
+/// 没细看就确认的话，模型会把自己认错的也学进去
+pub fn unedited_prelabels(p: &Project) -> AppResult<Vec<i64>> {
+    let conn = p.conn.lock();
+    let mut stmt = conn.prepare(
+        "SELECT i.id FROM images i
+         WHERE i.status IN ('labeled', 'reviewed')
+           AND EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = i.id)
+           AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = i.id AND a.source NOT IN ('model', 'text', 'ai'))
+         ORDER BY i.id",
+    )?;
+    let ids = stmt.query_map([], |r| r.get(0))?.collect::<Result<Vec<i64>, _>>()?;
+    Ok(ids)
+}
+
+/// 人看过、确认没问题：这些图上的预标注记为人工确认，不再提醒。返回改了几个标注
+pub fn confirm_prelabels(p: &Project, ids: &[i64]) -> AppResult<usize> {
+    let mut conn = p.conn.lock();
+    let tx = conn.transaction()?;
+    let mut n = 0;
+    {
+        let now = db::now();
+        let mut up = tx.prepare(
+            "UPDATE annotations SET source = 'manual', updated_at = ?2
+             WHERE image_id = ?1 AND source IN ('model', 'text', 'ai')",
+        )?;
+        for id in ids {
+            n += up.execute(params![id, now])?;
+        }
+    }
+    tx.commit()?;
+    Ok(n)
+}
+
 pub fn set_status(p: &Project, image_id: i64, status: &str) -> AppResult<()> {
     if !STATUSES.contains(&status) {
         return Err(msg(t!("不支持的状态：{status}", status = status)));
@@ -506,6 +540,27 @@ mod tests {
         let kept = load(&p, 1).unwrap().annotations;
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].data, pred.data);
+        drop(p);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn unedited_prelabel_images() {
+        let (base, p) = setup("raw");
+        let a = add_label(&p, "安全帽", "#3d8bfd").unwrap();
+        let mut pred = bbox(a.id, 1.0, 1.0, 5.0, 5.0);
+        pred.source = "model".into();
+        // 图 1 直接确认了模型的框；图 2 有人工画的框
+        save(&p, 1, &[pred.clone()]).unwrap();
+        save(&p, 2, &[pred.clone(), bbox(a.id, 20.0, 20.0, 5.0, 5.0)]).unwrap();
+        assert_eq!(unedited_prelabels(&p).unwrap(), vec![1]);
+        // 还没确认（未标注）的预标注不算
+        set_status(&p, 1, "todo").unwrap();
+        assert!(unedited_prelabels(&p).unwrap().is_empty());
+        set_status(&p, 1, "labeled").unwrap();
+        assert_eq!(confirm_prelabels(&p, &[1]).unwrap(), 1);
+        assert!(unedited_prelabels(&p).unwrap().is_empty());
+        assert_eq!(load(&p, 1).unwrap().annotations[0].source, "manual");
         drop(p);
         let _ = fs::remove_dir_all(base);
     }

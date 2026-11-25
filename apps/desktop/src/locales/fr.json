@@ -1710,5 +1710,12 @@
   "每个类别最好 50 张以上，至少 20 张": "Idéalement 50 images ou plus par classe, au moins 20",
   "每个类别最好 100 个框以上，至少 30 个": "Idéalement 100 boîtes ou plus par classe, au moins 30",
   "实在凑不够的，可以在「标注」页删掉这个类别，删的时候把标注合并到相近的类别": "Si vous n'en avez pas assez, supprimez la classe sur la page Annotation en fusionnant ses annotations dans une classe proche",
-  "这些类别标得太少，容易认不出：{list}": "Trop peu d'annotations, risque d'être manquées : {list}"
+  "这些类别标得太少，容易认不出：{list}": "Trop peu d'annotations, risque d'être manquées : {list}",
+  "预标注大多没人改过": "La plupart des pré-annotations n'ont jamais été modifiées",
+  "{n} 张图（约 {pct}%）的标注全是预标注、没人改过。没细看就确认的话，模型会把自己认错的也学进去，越训越偏。建议先去「标注」页把这批翻一遍。": "{n} images (environ {pct} %) n'ont que des pré-annotations jamais modifiées. Si elles ont été validées sans y regarder de près, le modèle apprend ses propres erreurs et dérive un peu plus à chaque entraînement. Parcourez-les d'abord sur la page Annotation.",
+  "{n} 张图的标注全是预标注、没人改过": "{n} images n'ont que des pré-annotations non modifiées",
+  "预标注没人改过的图": "Pré-annotations non modifiées",
+  "去看这批": "Les revoir",
+  "这 {n} 张都看过、没问题了？之后不再提醒。": "Avez-vous vérifié ces {n} images et sont-elles correctes ? Ce rappel ne s'affichera plus.",
+  "都看过了": "Tout vérifié"
 }

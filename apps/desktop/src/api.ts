@@ -692,6 +692,9 @@ export const api = {
   /** 批量改状态，返回改了几张；改成 todo 时有人工标注的图会变成已标注 */
   setStatusMany: (ids: number[], status: ImageStatus) => invoke<number>("set_status_many", { ids, status }),
   listLabels: () => invoke<Label[]>("list_labels"),
+  /** 已标注但标注全是预标注、人没改过的图 */
+  uneditedPrelabels: () => invoke<number[]>("unedited_prelabels"),
+  confirmPrelabels: (ids: number[]) => invoke<number>("confirm_prelabels", { ids }),
   interpolateFrames: (imageId: number) => invoke<InterpResult>("interpolate_frames", { imageId }),
   trackFrames: (imageId: number, count: number) => invoke<TrackResult>("track_frames", { imageId, count }),
   addLabel: (name: string, color: string) => invoke<Label>("add_label", { name, color }),
