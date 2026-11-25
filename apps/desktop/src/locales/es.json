@@ -1710,5 +1710,12 @@
   "每个类别最好 50 张以上，至少 20 张": "Lo ideal son 50+ imágenes por clase, como mínimo 20",
   "每个类别最好 100 个框以上，至少 30 个": "Lo ideal son 100+ cajas por clase, como mínimo 30",
   "实在凑不够的，可以在「标注」页删掉这个类别，删的时候把标注合并到相近的类别": "Si no consigues suficientes, elimina la clase en la página Anotar y combina sus anotaciones con una clase parecida",
-  "这些类别标得太少，容易认不出：{list}": "Pocas anotaciones, pueden no reconocerse: {list}"
+  "这些类别标得太少，容易认不出：{list}": "Pocas anotaciones, pueden no reconocerse: {list}",
+  "预标注大多没人改过": "La mayoría de las preanotaciones no se han revisado",
+  "{n} 张图（约 {pct}%）的标注全是预标注、没人改过。没细看就确认的话，模型会把自己认错的也学进去，越训越偏。建议先去「标注」页把这批翻一遍。": "{n} imágenes (aprox. {pct}%) solo tienen preanotaciones que nadie ha editado. Si se confirmaron sin mirarlas bien, el modelo aprende sus propios errores y se desvía más con cada entrenamiento. Revísalas primero en la página Anotar.",
+  "{n} 张图的标注全是预标注、没人改过": "{n} imágenes solo tienen preanotaciones sin editar",
+  "预标注没人改过的图": "Preanotaciones sin editar",
+  "去看这批": "Revisarlas",
+  "这 {n} 张都看过、没问题了？之后不再提醒。": "¿Has revisado las {n} imágenes y están bien? No se volverá a avisar.",
+  "都看过了": "Ya revisadas"
 }

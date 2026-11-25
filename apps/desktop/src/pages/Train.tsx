@@ -148,6 +148,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const setPage = useApp((s) => s.setPage);
   const openRun = useApp((s) => s.openRun);
   const focusRunId = useApp((s) => s.focusRunId);
+  const annotateQueue = useApp((s) => s.annotateQueue);
   const takeFocusRun = useApp((s) => s.takeFocusRun);
   const task = project.task;
   // 协作时才有审核；一个人标注时不出现「已审核」「只用已审核的图片」
@@ -175,6 +176,8 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const [onnxMsg, setOnnxMsg] = useState("");
   const [versions, setVersions] = useState<VersionInfo[]>([]);
   const [labels, setLabels] = useState<Label[]>([]);
+  /** 标注全是预标注、人没改过的图 */
+  const [rawIds, setRawIds] = useState<number[]>([]);
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [comparing, setComparing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -242,6 +245,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
       api.envStatus(false).then(setEnv).catch(() => {});
       api.listVersions().then(setVersions).catch(() => {});
       api.listLabels().then(setLabels).catch(() => {});
+      api.uneditedPrelabels().then(setRawIds).catch(() => {});
     })();
   }, [loadRuns, message]);
 
@@ -363,15 +367,27 @@ export default function Train({ project }: { project: ProjectInfo }) {
     .map((l) => (l.count === 0 ? t("「{name}」还没标过", { name: l.name }) : clsTask ? t("「{name}」{n} 张", { name: l.name, n: l.count }) : t("「{name}」{n} 个框", { name: l.name, n: l.count })))
     .join("、") + (fewCls.length > 6 ? t(" 等 {n} 个类别", { n: fewCls.length }) : "");
 
+  // 预标注没人改过的占了不少：没细看就确认的话，模型会把自己认错的也学进去
+  const rawPct = trainable ? Math.round((rawIds.length / trainable) * 100) : 0;
+  const rawMany = rawIds.length >= 10 && rawPct >= 30;
+  const confirmRaw = async () => {
+    try {
+      await api.confirmPrelabels(rawIds);
+      setRawIds([]);
+    } catch (e) {
+      message.error(errText(e));
+    }
+  };
+
   const start = () => {
-    if (!fewData && !fewVal && !fewCls.length) {
+    if (!fewData && !fewVal && !fewCls.length && !rawMany) {
       doStart();
       return;
     }
     // 凑够约 300 步要的轮数
     const needEpochs = Math.min(500, Math.ceil(300 / stepsPerEpoch));
     modal.confirm({
-      title: fewData ? t("数据太少，这样训多半学不到东西") : fewCls.length ? t("有的类别标得太少") : t("验证集太少"),
+      title: fewData ? t("数据太少，这样训多半学不到东西") : fewCls.length ? t("有的类别标得太少") : rawMany ? t("预标注大多没人改过") : t("验证集太少"),
       width: 520,
       content: (
         <div>
@@ -395,6 +411,11 @@ export default function Train({ project }: { project: ProjectInfo }) {
                 <li>{t("实在凑不够的，可以在「标注」页删掉这个类别，删的时候把标注合并到相近的类别")}</li>
               </ul>
             </>
+          )}
+          {rawMany && (
+            <p style={{ marginTop: 0 }}>
+              {t("{n} 张图（约 {pct}%）的标注全是预标注、没人改过。没细看就确认的话，模型会把自己认错的也学进去，越训越偏。建议先去「标注」页把这批翻一遍。", { n: rawIds.length, pct: rawPct })}
+            </p>
           )}
           {fewVal && <p style={{ margin: 0 }}>{t("验证集只有 {n} 张，指标波动会很大、不可信。", { n: valN })}</p>}
         </div>
@@ -670,6 +691,19 @@ export default function Train({ project }: { project: ProjectInfo }) {
                   {fewData && <span style={{ color: "var(--warn)" }}> · {t("步数太少，多半学不到东西")}</span>}
                   {fewVal && <div style={{ color: "var(--warn)" }}>{t("验证集只有 {n} 张，指标波动会很大、不可信。", { n: valN })}</div>}
                   {fewCls.length > 0 && <div style={{ color: "var(--warn)" }}>{t("这些类别标得太少，容易认不出：{list}", { list: fewClsText })}</div>}
+                  {rawIds.length > 0 && (
+                    <div style={{ color: rawMany ? "var(--warn)" : undefined }}>
+                      {t("{n} 张图的标注全是预标注、没人改过", { n: rawIds.length })}
+                      <Button type="link" size="small" style={{ padding: "0 4px", height: "auto", fontSize: 12 }} onClick={() => annotateQueue(rawIds, t("预标注没人改过的图"))}>
+                        {t("去看这批")}
+                      </Button>
+                      <Popconfirm title={t("这 {n} 张都看过、没问题了？之后不再提醒。", { n: rawIds.length })} onConfirm={confirmRaw}>
+                        <Button type="link" size="small" style={{ padding: "0 4px", height: "auto", fontSize: 12 }}>
+                          {t("都看过了")}
+                        </Button>
+                      </Popconfirm>
+                    </div>
+                  )}
                 </div>
               )}
               <Button

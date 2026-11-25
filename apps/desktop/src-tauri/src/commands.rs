@@ -1089,6 +1089,16 @@ pub async fn append_annotation(state: State<'_, AppState>, image_id: i64, annota
 // ---------- 数据集 ----------
 
 #[tauri::command]
+pub async fn unedited_prelabels(state: State<'_, AppState>) -> AppResult<Vec<i64>> {
+    annotations::unedited_prelabels(&*state.current()?)
+}
+
+#[tauri::command]
+pub async fn confirm_prelabels(state: State<'_, AppState>, ids: Vec<i64>) -> AppResult<usize> {
+    annotations::confirm_prelabels(&*state.current()?, &ids)
+}
+
+#[tauri::command]
 pub async fn split_summary(state: State<'_, AppState>) -> AppResult<SplitSummary> {
     dataset::split_summary(&*state.current()?)
 }

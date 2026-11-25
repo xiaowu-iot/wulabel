@@ -1710,5 +1710,12 @@
   "每个类别最好 50 张以上，至少 20 张": "Aim for 50+ images per class, at least 20",
   "每个类别最好 100 个框以上，至少 30 个": "Aim for 100+ boxes per class, at least 30",
   "实在凑不够的，可以在「标注」页删掉这个类别，删的时候把标注合并到相近的类别": "If you can't get enough, delete the class on the Annotate page and merge its annotations into a similar class",
-  "这些类别标得太少，容易认不出：{list}": "Too few annotations, may be missed: {list}"
+  "这些类别标得太少，容易认不出：{list}": "Too few annotations, may be missed: {list}",
+  "预标注大多没人改过": "Most pre-labels were never edited",
+  "{n} 张图（约 {pct}%）的标注全是预标注、没人改过。没细看就确认的话，模型会把自己认错的也学进去，越训越偏。建议先去「标注」页把这批翻一遍。": "{n} images (about {pct}%) only have pre-labels that nobody edited. If they were confirmed without a close look, the model learns its own mistakes and drifts further with each training. Go through them on the Annotate page first.",
+  "{n} 张图的标注全是预标注、没人改过": "{n} images only have unedited pre-labels",
+  "预标注没人改过的图": "Unedited pre-labels",
+  "去看这批": "Review them",
+  "这 {n} 张都看过、没问题了？之后不再提醒。": "Have you checked all {n} images and they're fine? You won't be reminded again.",
+  "都看过了": "All checked"
 }
