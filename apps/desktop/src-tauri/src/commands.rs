@@ -1193,6 +1193,24 @@ pub async fn import_dataset(app: AppHandle, state: State<'_, AppState>, dir: Str
     .map_err(|e| msg(t!("导入任务异常：{e}", e = e)))?
 }
 
+/// 当前项目（检测、分割、关键点）转成多标签分类项目：新建项目，图片复制过去
+#[tauri::command]
+pub async fn convert_to_multilabel(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    parent: String,
+    name: String,
+    empty_label: Option<String>,
+) -> AppResult<crate::convert::ConvertResult> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let progress = progress_emitter(app, "import-progress");
+        crate::convert::to_multilabel(&project, &PathBuf::from(parent), &name, empty_label.as_deref(), &progress)
+    })
+    .await
+    .map_err(|e| msg(t!("转换任务异常：{e}", e = e)))?
+}
+
 // ---------- 标注 ----------
 
 #[tauri::command]

@@ -1659,5 +1659,19 @@
   "多：{name}": "Sobra: {name}",
   "模型很确定这张图有这个类别，但没有打上": "El modelo está seguro de que la imagen tiene esta clase, pero no está etiquetada",
   "用已标注和已审核的图片训练多标签分类模型（每个类别各自判断有没有）。": "Entrena un modelo de clasificación multietiqueta con imágenes anotadas y revisadas (cada clase se evalúa por separado).",
-  "用已标注的图片训练多标签分类模型（每个类别各自判断有没有）。": "Entrena un modelo de clasificación multietiqueta con imágenes anotadas (cada clase se evalúa por separado)."
+  "用已标注的图片训练多标签分类模型（每个类别各自判断有没有）。": "Entrena un modelo de clasificación multietiqueta con imágenes anotadas (cada clase se evalúa por separado).",
+  "{name}-多标签": "{name}-multietiqueta",
+  "正常": "Normal",
+  "已生成多标签分类项目": "Proyecto de clasificación multietiqueta creado",
+  "{images} 张图片、{labels} 个类别，其中 {neg} 张没有目标的图打上了「{empty}」。": "{images} imágenes, {labels} clases; {neg} imágenes sin objetos se etiquetaron como «{empty}».",
+  "{images} 张图片、{labels} 个类别。": "{images} imágenes, {labels} clases.",
+  "打开新项目": "Abrir el proyecto nuevo",
+  "留在这里": "Quedarme aquí",
+  "转成多标签分类项目": "Convertir en proyecto de clasificación multietiqueta",
+  "开始转换": "Convertir",
+  "新建一个多标签分类项目：每张已标注的图，上面标过哪些类别，就打上哪些类别标签。图片复制过去，这个项目不会改动。": "Crea un proyecto nuevo de clasificación multietiqueta: cada imagen anotada recibe una etiqueta por cada clase anotada en ella. Las imágenes se copian; este proyecto no cambia.",
+  "新项目名": "Nombre del proyecto nuevo",
+  "标为「没有目标」的图也要，打上这个类别：": "Incluir también las imágenes marcadas «Sin objetos», con la clase:",
+  "请输入类别名": "Escribe un nombre de clase",
+  "多标签分类每张图至少要有一个类别，没问题的图用「正常」「全新」这样的类别。": "En la clasificación multietiqueta cada imagen necesita al menos una clase; usa una como «Normal» o «Nuevo» para las imágenes sin problemas."
 }
