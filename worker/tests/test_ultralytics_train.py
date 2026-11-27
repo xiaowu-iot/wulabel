@@ -63,7 +63,7 @@ class UltralyticsTrainTest(unittest.TestCase):
             self.assertEqual(meta["classes"], CLASSES)
             self.assertEqual(meta["engine"], "ultralytics")
             metrics = [json.loads(ln) for ln in (out / "metrics.jsonl").read_text(encoding="utf-8").splitlines()]
-            self.assertEqual(len(metrics), 1)
+            self.assertEqual(len(metrics), 1, metrics)
             self.assertIn("map50", metrics[0])
             ev = json.loads((out / "eval.json").read_text(encoding="utf-8"))
             self.assertIn("val", ev["splits"])
