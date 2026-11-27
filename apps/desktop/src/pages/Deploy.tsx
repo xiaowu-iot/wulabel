@@ -494,6 +494,7 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
   const [sort, setSort] = useState(prefs.get("batchSort", "1") === "1");
   const [every, setEvery] = useState(Number(prefs.get("batchVideoEvery", "1")) || 1);
   const [minFrames, setMinFrames] = useState(Number(prefs.get("batchVideoMin", "1")) || 1);
+  const [beside, setBeside] = useState(prefs.get("batchShotsBeside", "0") === "1");
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<ImportProgress | null>(null);
   const [res, setRes] = useState<BatchResult | null>(null);
@@ -514,13 +515,14 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
     prefs.set("batchSort", sort ? "1" : "0");
     prefs.set("batchVideoEvery", String(every));
     prefs.set("batchVideoMin", String(minFrames));
+    prefs.set("batchShotsBeside", beside ? "1" : "0");
     setBusy(true);
     setRes(null);
     setAdded(null);
     setProg(null);
     const un = await listen<ImportProgress>("batch-progress", (e) => setProg(e.payload));
     try {
-      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {}, videoEvery: every, videoMinFrames: minFrames });
+      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {}, videoEvery: every, videoMinFrames: minFrames, shotsBeside: beside });
       setRes(r);
       if (r.stopped)
         message.info(
@@ -576,8 +578,13 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
             <InputNumber min={1} max={50} step={1} precision={0} value={minFrames} onChange={(v) => setMinFrames(Number(v ?? 1))} style={{ width: 70 }} />
             <span>{t("帧检出才算有")}</span>
           </Space>
+          <div style={{ marginTop: 6 }}>
+            <Checkbox checked={beside} onChange={(e) => setBeside(e.target.checked)}>
+              {t("视频截图放回视频所在的文件夹（子文件夹「识别截图」）")}
+            </Checkbox>
+          </div>
         </Form.Item>
-        <Form.Item label={t("结果放在")} extra={t("不能放在要识别的文件夹里面。")}>
+        <Form.Item label={t("结果放在")} extra={t("可以放在要识别的文件夹里面，下次识别时会自动跳过结果。")}>
           <FolderPicker value={output} onChange={setOutput} title={t("选择结果放在哪个文件夹")} />
         </Form.Item>
         <Form.Item
@@ -604,6 +611,9 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
                 ? t("按类别复制到各自的文件夹")
                 : t("按找到的类别复制到各自的文件夹（找到几种就复制几份）")}
           </Checkbox>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            {t("视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。")}
+          </div>
         </Form.Item>
       </Form>
       <Space>
@@ -647,7 +657,9 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
               </div>
               {res.videos > 0 && (
                 <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
-                  {t("视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。")}
+                  {beside
+                    ? t("视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。")
+                    : t("视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。")}
                 </div>
               )}
               <Space>

@@ -1773,5 +1773,13 @@
   "{name} {n} 个": "{name} {n}",
   "视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。": "As capturas dos vídeos ficam na pasta de resultados, nas mesmas subpastas dos vídeos, uma por classe encontrada (o quadro com a maior pontuação).",
   "部署页的「批量识别」支持视频：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好；可以设每隔几秒看一帧、至少几帧检出才算有。": "O \"Reconhecimento em lote\" da página Implantar agora aceita vídeos: cada vídeo é visto uma vez e ocupa uma linha na tabela, e uma captura é salva para cada classe encontrada, em pastas com o nome da subpasta de cada vídeo (como números de pedido). Dá para definir a cada quantos segundos um quadro é analisado e em quantos quadros uma classe precisa aparecer para contar.",
-  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "No pacote de serviço de inferência, um vídeo local configurado sem repetição (loop: false) agora para ao terminar, em vez de recomeçar."
+  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "No pacote de serviço de inferência, um vídeo local configurado sem repetição (loop: false) agora para ao terminar, em vez de recomeçar.",
+  "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Salvar as capturas dos vídeos junto de cada vídeo (subpasta \"Capturas do reconhecimento\")",
+  "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "Pode ficar dentro da pasta que está sendo reconhecida; na próxima vez os resultados são pulados automaticamente.",
+  "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "Nos vídeos é copiada a captura de cada classe (com o número do pedido no início do nome), não o vídeo.",
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "As capturas dos vídeos ficam na pasta \"Capturas do reconhecimento\" junto de cada vídeo, uma por classe encontrada (o quadro com a maior pontuação), com a classe e a pontuação escritas na caixa.",
+  "批量识别视频的截图像标注页一样画框，框旁边写着类别和分数。": "As capturas de vídeo do reconhecimento em lote agora têm as caixas desenhadas como na página de anotação, com a classe e a pontuação ao lado de cada caixa.",
+  "批量识别新增选项：视频截图放回视频所在的文件夹（子文件夹「识别截图」），不用再手动拷回去。": "Nova opção do reconhecimento em lote: salvar as capturas dos vídeos junto de cada vídeo (subpasta \"Capturas do reconhecimento\"), sem precisar copiá-las à mão.",
+  "批量识别的结果文件夹可以放在要识别的文件夹里面，下次识别时自动跳过。": "A pasta de resultados do reconhecimento em lote agora pode ficar dentro da pasta reconhecida; na próxima vez ela é pulada automaticamente.",
+  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Corrigido: com \"copiar por classe\" marcado, o reconhecimento em lote copiava os vídeos inteiros. Agora copia a captura de cada classe, com o número do pedido no início do nome."
 }

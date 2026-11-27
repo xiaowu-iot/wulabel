@@ -10,7 +10,7 @@ English · [简体中文](README.md)
 
 [Website](https://wulabel.xiaowuiot.com/en/) · [Download](#download) · [User guide](https://wulabel.xiaowuiot.com/en/guide.html) ([Markdown](docs/i18n/en/使用教程-详细版.md)) · [Releases](https://github.com/xiaowu-iot/wulabel/releases)
 
-[![Latest release](https://img.shields.io/badge/release-v0.6.6-brightgreen)](https://github.com/xiaowu-iot/wulabel/releases)
+[![Latest release](https://img.shields.io/badge/release-v0.6.7-brightgreen)](https://github.com/xiaowu-iot/wulabel/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#download)
 

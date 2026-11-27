@@ -1773,5 +1773,13 @@
   "{name} {n} 个": "{name} {n}",
   "视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。": "Les captures des vidéos sont dans le dossier de résultats, dans les mêmes sous-dossiers que les vidéos, une par classe trouvée (l'image au score le plus élevé).",
   "部署页的「批量识别」支持视频：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好；可以设每隔几秒看一帧、至少几帧检出才算有。": "La « Reconnaissance par lot » de la page Déploiement prend désormais en charge les vidéos : chaque vidéo est regardée une fois et occupe une ligne du tableau, et une capture est enregistrée pour chaque classe trouvée, dans des dossiers portant le nom du sous-dossier de chaque vidéo (par exemple des numéros de commande). Vous pouvez régler la fréquence d'analyse des images et le nombre d'images dans lesquelles une classe doit apparaître pour compter.",
-  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "Dans le paquet de service d'inférence, une vidéo locale configurée sans boucle (loop: false) s'arrête désormais à la fin au lieu de recommencer."
+  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "Dans le paquet de service d'inférence, une vidéo locale configurée sans boucle (loop: false) s'arrête désormais à la fin au lieu de recommencer.",
+  "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Enregistrer les captures vidéo à côté de chaque vidéo (sous-dossier « Captures de reconnaissance »)",
+  "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "Il peut être dans le dossier à reconnaître ; la prochaine fois, les résultats sont ignorés automatiquement.",
+  "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "Pour les vidéos, c'est la capture de chaque classe qui est copiée (nom précédé du numéro de commande), pas la vidéo.",
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Les captures vidéo sont dans le dossier « Captures de reconnaissance » à côté de chaque vidéo, une par classe trouvée (l'image au score le plus élevé), avec la classe et le score écrits sur le cadre.",
+  "批量识别视频的截图像标注页一样画框，框旁边写着类别和分数。": "Les captures vidéo de la reconnaissance par lot ont maintenant des cadres dessinés comme sur la page d'annotation, avec la classe et le score à côté de chaque cadre.",
+  "批量识别新增选项：视频截图放回视频所在的文件夹（子文件夹「识别截图」），不用再手动拷回去。": "Nouvelle option de la reconnaissance par lot : enregistrer les captures vidéo à côté de chaque vidéo (sous-dossier « Captures de reconnaissance »), sans les recopier à la main.",
+  "批量识别的结果文件夹可以放在要识别的文件夹里面，下次识别时自动跳过。": "Le dossier de résultats de la reconnaissance par lot peut maintenant se trouver dans le dossier à reconnaître ; il est ignoré automatiquement la fois suivante.",
+  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Corrigé : avec « copier par classe » coché, la reconnaissance par lot copiait les vidéos entières. Elle copie désormais la capture de chaque classe, avec le numéro de commande devant le nom."
 }

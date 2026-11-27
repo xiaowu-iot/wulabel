@@ -94,6 +94,8 @@ export interface BatchOptions {
   videoEvery?: number;
   /** 视频里一个类别至少几帧检出才算有 */
   videoMinFrames?: number;
+  /** 视频截图放回视频所在的文件夹（子文件夹「识别截图」） */
+  shotsBeside?: boolean;
 }
 export interface BatchResult {
   images: number;

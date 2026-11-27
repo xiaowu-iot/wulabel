@@ -1773,5 +1773,13 @@
   "{name} {n} 个": "{name} {n}",
   "视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。": "Video screenshots are in the results folder, in the same subfolders as the videos, one per class found (the highest-scoring frame).",
   "部署页的「批量识别」支持视频：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好；可以设每隔几秒看一帧、至少几帧检出才算有。": "\"Batch recognition\" on the Deploy page now handles videos: each video is watched once and gets one row in the table, and a screenshot is saved for each class found, in folders named after the videos' subfolders (such as order numbers). You can set how often a frame is checked and how many frames a class must appear in to count.",
-  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "In the inference service package, a local video set not to loop (loop: false) now stops when it ends instead of starting over."
+  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "In the inference service package, a local video set not to loop (loop: false) now stops when it ends instead of starting over.",
+  "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Save video screenshots next to each video (in a \"Recognition screenshots\" subfolder)",
+  "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "It can be inside the folder you're recognizing; results are skipped automatically next time.",
+  "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "For videos, the screenshot of each class is copied (file name prefixed with the order number), not the video itself.",
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Video screenshots are in a \"Recognition screenshots\" folder next to each video, one per class found (the highest-scoring frame), with the class and score written on the box.",
+  "批量识别视频的截图像标注页一样画框，框旁边写着类别和分数。": "Video screenshots from batch recognition now have boxes drawn like on the Annotate page, with the class and score next to each box.",
+  "批量识别新增选项：视频截图放回视频所在的文件夹（子文件夹「识别截图」），不用再手动拷回去。": "New batch recognition option: save video screenshots next to each video (in a \"Recognition screenshots\" subfolder), so you don't have to copy them back by hand.",
+  "批量识别的结果文件夹可以放在要识别的文件夹里面，下次识别时自动跳过。": "The batch recognition results folder can now be inside the folder you're recognizing; it's skipped automatically next time.",
+  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Fixed: with \"copy to class folders\" checked, batch recognition copied whole videos. It now copies the screenshot of each class, with the order number in front of the file name."
 }

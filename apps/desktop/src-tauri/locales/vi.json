@@ -483,5 +483,7 @@
   "巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型": "Nền tảng Xuntong hiện chỉ hỗ trợ mô hình huấn luyện bằng mô hình tích hợp của Wulabel (YOLOX…)",
   "文件夹": "Thư mục",
   "{name}（{n} 帧）": "{name} ({n} khung hình)",
-  "这个文件夹里没有图片或视频": "Thư mục này không có ảnh hoặc video"
+  "这个文件夹里没有图片或视频": "Thư mục này không có ảnh hoặc video",
+  "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "Thư mục kết quả không được trùng với thư mục cần nhận diện. Hãy chọn thư mục khác (thư mục con bên trong cũng được).",
+  "识别截图": "Ảnh chụp nhận diện"
 }
