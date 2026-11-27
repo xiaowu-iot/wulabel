@@ -16,6 +16,7 @@ import {
   Switch,
   Tabs,
   Tag,
+  Typography,
 } from "antd";
 import {
   CameraOutlined,
@@ -45,6 +46,14 @@ const stamp = () => {
 const fill = (s: string, key: string, node: ReactNode) => {
   const i = s.indexOf(`{${key}}`);
   return i < 0 ? s : <>{s.slice(0, i)}{node}{s.slice(i + key.length + 2)}</>;
+};
+const VIDEO_EXTS = ["mp4", "avi", "mkv", "mov", "flv", "ts", "h264", "264"];
+// 推理服务包的视频流：本地路径（不带 ://）最后一段没有扩展名，多半是填成了文件夹（Linux 的 /dev/video0 这类设备除外）
+const looksLikeFolder = (url: string) => {
+  const u = url.trim();
+  if (!u || u.includes("://") || u.startsWith("/dev/")) return false;
+  const last = u.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+  return /[\\/]$/.test(u) || !/\.[A-Za-z0-9]{1,5}$/.test(last);
 };
 const join = (parent: string, name: string) => `${parent.replace(/[\\/]+$/, "")}${parent.includes("\\") ? "\\" : "/"}${name}`;
 
@@ -385,7 +394,7 @@ function LiveTab({ run, labels, recConf, classRec }: { run: RunInfo; labels: Lab
             <Button
               icon={<FolderOpenOutlined />}
               onClick={async () => {
-                const f = await open({ title: t("选择视频文件"), filters: [{ name: t("视频"), extensions: ["mp4", "avi", "mkv", "mov", "flv", "ts", "h264", "264"] }] });
+                const f = await open({ title: t("选择视频文件"), filters: [{ name: t("视频"), extensions: VIDEO_EXTS }] });
                 if (typeof f === "string") setFile(f);
               }}
             />
@@ -859,6 +868,16 @@ function ServiceTab({ run, project, recConf, classRec }: { run: RunInfo; project
       message.warning(t("生效时段格式：07:00-19:00"));
       return;
     }
+    const folders = f.streams.filter((s) => looksLikeFolder(s.url)).map((s) => s.name.trim() || s.url.trim());
+    if (folders.length) {
+      const go = await modal.confirm({
+        title: t("视频流地址像是文件夹"),
+        content: t("{names} 的地址没有文件扩展名。本地视频要填到视频文件本身，比如 1.mp4；填文件夹的话服务会一直连接失败。", { names: folders.join("、") }),
+        okText: t("仍然生成"),
+        cancelText: t("回去改"),
+      });
+      if (!go) return;
+    }
     const config = {
       gpu: f.gpu,
       max_side: 1280,
@@ -910,10 +929,32 @@ function ServiceTab({ run, project, recConf, classRec }: { run: RunInfo; project
         <div className="card">
           <h3 className="h3">{t("视频流")}</h3>
           {f.streams.map((s, i) => (
-            <div key={i} className="row" style={{ marginBottom: 8, flexWrap: "nowrap" }}>
-              <Input style={{ width: 110 }} value={s.name} placeholder={t("名称")} onChange={(e) => setStream(i, { name: e.target.value })} />
-              <Input value={s.url} placeholder={t("rtsp:// / http(s):// 地址或视频文件路径")} onChange={(e) => setStream(i, { url: e.target.value })} />
-              <Button icon={<DeleteOutlined />} disabled={f.streams.length === 1} onClick={() => set({ streams: f.streams.filter((_, j) => j !== i) })} />
+            <div key={i} style={{ marginBottom: 8 }}>
+              <div className="row" style={{ flexWrap: "nowrap" }}>
+                <Input style={{ width: 110 }} value={s.name} placeholder={t("名称")} onChange={(e) => setStream(i, { name: e.target.value })} />
+                <Space.Compact style={{ flex: 1 }}>
+                  <Input
+                    value={s.url}
+                    status={looksLikeFolder(s.url) ? "warning" : undefined}
+                    placeholder={t("rtsp:// / http(s):// 地址或视频文件路径")}
+                    onChange={(e) => setStream(i, { url: e.target.value })}
+                  />
+                  <Button
+                    icon={<FolderOpenOutlined />}
+                    title={t("选择视频文件")}
+                    onClick={async () => {
+                      const v = await open({ title: t("选择视频文件"), filters: [{ name: t("视频"), extensions: VIDEO_EXTS }] });
+                      if (typeof v === "string") setStream(i, { url: v });
+                    }}
+                  />
+                </Space.Compact>
+                <Button icon={<DeleteOutlined />} disabled={f.streams.length === 1} onClick={() => set({ streams: f.streams.filter((_, j) => j !== i) })} />
+              </div>
+              {looksLikeFolder(s.url) && (
+                <Typography.Text type="warning" style={{ display: "block", fontSize: 12, marginTop: 4 }}>
+                  {t("这像是一个文件夹。本地视频要填到视频文件本身（带 .mp4 等扩展名），填文件夹服务会一直连接失败。")}
+                </Typography.Text>
+              )}
             </div>
           ))}
           <Button size="small" icon={<PlusOutlined />} onClick={() => set({ streams: [...f.streams, { name: t("摄像头{n}", { n: f.streams.length + 1 }), url: "" }] })}>

@@ -43,7 +43,7 @@ Muốn suy luận bằng GPU NVIDIA: đổi `onnxruntime` thành `onnxruntime-gp
 }
 ```
 
-- Nguồn video hỗ trợ RTSP, HTTP-FLV, HLS (m3u8), MP4 qua http, cũng có thể là đường dẫn tới tệp video cục bộ để thử nghiệm (tệp cục bộ và video theo yêu cầu qua http mặc định phát lặp lại).
+- Nguồn video hỗ trợ RTSP, HTTP-FLV, HLS (m3u8), MP4 qua http, cũng có thể là đường dẫn tới tệp video cục bộ để thử nghiệm (tệp cục bộ và video theo yêu cầu qua http mặc định phát lặp lại). Video cục bộ phải điền đến chính tệp đó, ví dụ `D:\\test\\1.mp4` (trong JSON viết mỗi dấu gạch chéo ngược hai lần, hoặc viết `D:/test/1.mp4`), không được chỉ điền thư mục; khi nhật ký liên tục hiện "Kết nối thất bại" thì kiểm tra điểm này trước. Muốn nhận diện một thư mục ảnh thì dùng `POST /predict` gửi từng ảnh một.
 - Vùng phát hiện được xét theo **trung điểm cạnh dưới** của khung đối tượng (vị trí người, xe đứng).
 
 ## Nội dung cảnh báo

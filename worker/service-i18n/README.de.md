@@ -43,7 +43,7 @@ Inferenz auf einer NVIDIA-GPU: Ersetzen Sie in `requirements.txt` `onnxruntime` 
 }
 ```
 
-- Als Quelle gehen RTSP, HTTP-FLV, HLS (m3u8) und MP4 über http. Auch der Pfad zu einer lokalen Videodatei ist möglich, zum Testen (lokale Dateien und http-Videos auf Abruf werden standardmäßig in Schleife abgespielt).
+- Als Quelle gehen RTSP, HTTP-FLV, HLS (m3u8) und MP4 über http. Auch der Pfad zu einer lokalen Videodatei ist möglich, zum Testen (lokale Dateien und http-Videos auf Abruf werden standardmäßig in Schleife abgespielt). Bei einem lokalen Video muss die Datei selbst angegeben werden, z. B. `D:\\test\\1.mp4` (in JSON jeden Backslash doppelt schreiben oder `D:/test/1.mp4` verwenden), nicht nur der Ordner. Meldet das Log ständig „Verbindung fehlgeschlagen“, prüfe zuerst das. Um einen Ordner mit Bildern zu erkennen, schicke sie einzeln per `POST /predict`.
 - Der Erkennungsbereich wird anhand des **Mittelpunkts der Unterkante** jeder Box geprüft (dort, wo Person oder Fahrzeug steht).
 
 ## Alarmnachricht

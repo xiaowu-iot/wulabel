@@ -1755,5 +1755,10 @@
   "训练支持 Ultralytics 模型：模型下拉框里可以直接选 YOLO11、YOLO26、YOLOv8、YOLO12、YOLOv10、YOLOv9、RT-DETR，检测、分割、关键点、分类都有；也能输入任意模型名，或选本地 .pt 接着训、.yaml 从头训。第一次用自动安装组件、下载权重。": "Melatih model Ultralytics: pilih YOLO11, YOLO26, YOLOv8, YOLO12, YOLOv10, YOLOv9, atau RT-DETR langsung di daftar model, untuk deteksi, segmentasi, titik kunci, dan klasifikasi. Bisa juga memasukkan nama model apa pun, melanjutkan dari .pt lokal, atau melatih dari .yaml. Saat pertama kali, komponen dan bobot dipasang dan diunduh otomatis.",
   "Ultralytics 模型训完自动转成 ONNX，用 Wulabel 自己的评估算指标和错例；预标注、实时验证、批量识别、导出、推理服务包都能直接用。高级设置里的「更多参数」可以填任意训练参数。": "Model Ultralytics otomatis dikonversi ke ONNX setelah dilatih dan dievaluasi dengan metrik serta penjelajah kesalahan Wulabel; pra-label, uji langsung, pengenalan massal, ekspor, dan paket layanan inferensi langsung bisa dipakai. \"Parameter lain\" di pengaturan lanjutan menerima parameter pelatihan apa pun.",
   "分割项目默认推荐 YOLO11 分割，比 Mask R-CNN 快、准。": "Proyek segmentasi kini default merekomendasikan YOLO11 segmentasi, lebih cepat dan akurat daripada Mask R-CNN.",
-  "导入的外部模型支持分割、关键点、分类项目，也能实时验证、导出和生成推理服务包。": "Model eksternal yang diimpor kini mendukung proyek segmentasi, titik kunci, dan klasifikasi, serta bisa dipakai untuk uji langsung, ekspor, dan paket layanan inferensi."
+  "导入的外部模型支持分割、关键点、分类项目，也能实时验证、导出和生成推理服务包。": "Model eksternal yang diimpor kini mendukung proyek segmentasi, titik kunci, dan klasifikasi, serta bisa dipakai untuk uji langsung, ekspor, dan paket layanan inferensi.",
+  "这像是一个文件夹。本地视频要填到视频文件本身（带 .mp4 等扩展名），填文件夹服务会一直连接失败。": "Ini tampaknya folder. Untuk video lokal, isi file videonya langsung (dengan ekstensi seperti .mp4). Jika diisi folder, layanan akan terus gagal terhubung.",
+  "视频流地址像是文件夹": "Alamat stream tampaknya folder",
+  "{names} 的地址没有文件扩展名。本地视频要填到视频文件本身，比如 1.mp4；填文件夹的话服务会一直连接失败。": "Alamat {names} tidak punya ekstensi file. Untuk video lokal, isi file videonya langsung, misalnya 1.mp4. Jika diisi folder, layanan akan terus gagal terhubung.",
+  "仍然生成": "Tetap buat",
+  "回去改": "Kembali dan perbaiki"
 }

@@ -255,7 +255,14 @@ class Stream(threading.Thread):
             if not cap.isOpened():
                 self.status["connected"] = False
                 self.status["errors"] += 1
-                log.warning(tr("[%s] 连接失败，10 秒后重试"), self.name)
+                if "://" in url:
+                    log.warning(tr("[%s] 连接失败，10 秒后重试"), self.name)
+                elif os.path.isdir(url):
+                    log.warning(tr("[%s] 地址是文件夹，要填视频文件本身（比如 D:\\测试\\1.mp4），10 秒后重试"), self.name)
+                elif not os.path.exists(url):
+                    log.warning(tr("[%s] 视频文件不存在：%s，10 秒后重试"), self.name, url)
+                else:
+                    log.warning(tr("[%s] 视频文件打不开（格式不支持或文件损坏；路径有中文的话换成英文路径试试），10 秒后重试"), self.name)
                 time.sleep(10)
                 continue
             # 本地视频文件和 http(s) 点播（MP4、点播 m3u8，有总帧数）按原速循环播放；直播流有多少读多少

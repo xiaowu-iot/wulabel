@@ -1755,5 +1755,10 @@
   "训练支持 Ultralytics 模型：模型下拉框里可以直接选 YOLO11、YOLO26、YOLOv8、YOLO12、YOLOv10、YOLOv9、RT-DETR，检测、分割、关键点、分类都有；也能输入任意模型名，或选本地 .pt 接着训、.yaml 从头训。第一次用自动安装组件、下载权重。": "Train Ultralytics models: pick YOLO11, YOLO26, YOLOv8, YOLO12, YOLOv10, YOLOv9 or RT-DETR right in the model list, for detection, segmentation, keypoints and classification. You can also enter any model name, continue from a local .pt or train from a .yaml. The component and weights are installed and downloaded automatically the first time.",
   "Ultralytics 模型训完自动转成 ONNX，用 Wulabel 自己的评估算指标和错例；预标注、实时验证、批量识别、导出、推理服务包都能直接用。高级设置里的「更多参数」可以填任意训练参数。": "Ultralytics models are converted to ONNX after training and evaluated with Wulabel's own metrics and error browser; pre-labeling, live test, batch recognition, export and inference service packages work right away. \"More parameters\" in advanced settings accepts any training argument.",
   "分割项目默认推荐 YOLO11 分割，比 Mask R-CNN 快、准。": "Segmentation projects now default to YOLO11 segmentation, which is faster and more accurate than Mask R-CNN.",
-  "导入的外部模型支持分割、关键点、分类项目，也能实时验证、导出和生成推理服务包。": "Imported external models now work in segmentation, keypoint and classification projects, and can be used for live tests, export and inference service packages."
+  "导入的外部模型支持分割、关键点、分类项目，也能实时验证、导出和生成推理服务包。": "Imported external models now work in segmentation, keypoint and classification projects, and can be used for live tests, export and inference service packages.",
+  "这像是一个文件夹。本地视频要填到视频文件本身（带 .mp4 等扩展名），填文件夹服务会一直连接失败。": "This looks like a folder. For a local video, enter the video file itself (with an extension such as .mp4). With a folder the service will keep failing to connect.",
+  "视频流地址像是文件夹": "Stream address looks like a folder",
+  "{names} 的地址没有文件扩展名。本地视频要填到视频文件本身，比如 1.mp4；填文件夹的话服务会一直连接失败。": "The address of {names} has no file extension. For a local video, enter the video file itself, e.g. 1.mp4. With a folder the service will keep failing to connect.",
+  "仍然生成": "Generate anyway",
+  "回去改": "Go back and fix"
 }

@@ -1755,5 +1755,10 @@
   "训练支持 Ultralytics 模型：模型下拉框里可以直接选 YOLO11、YOLO26、YOLOv8、YOLO12、YOLOv10、YOLOv9、RT-DETR，检测、分割、关键点、分类都有；也能输入任意模型名，或选本地 .pt 接着训、.yaml 从头训。第一次用自动安装组件、下载权重。": "Treine modelos do Ultralytics: escolha YOLO11, YOLO26, YOLOv8, YOLO12, YOLOv10, YOLOv9 ou RT-DETR direto na lista de modelos, para detecção, segmentação, pontos-chave e classificação. Também é possível digitar qualquer nome de modelo, continuar a partir de um .pt local ou treinar a partir de um .yaml. Na primeira vez o componente e os pesos são instalados e baixados automaticamente.",
   "Ultralytics 模型训完自动转成 ONNX，用 Wulabel 自己的评估算指标和错例；预标注、实时验证、批量识别、导出、推理服务包都能直接用。高级设置里的「更多参数」可以填任意训练参数。": "Os modelos do Ultralytics são convertidos para ONNX ao fim do treino e avaliados com as métricas e o navegador de erros do Wulabel; pré-rotulagem, teste ao vivo, reconhecimento em lote, exportação e pacotes de serviço de inferência funcionam na hora. \"Mais parâmetros\" nas configurações avançadas aceita qualquer argumento de treino.",
   "分割项目默认推荐 YOLO11 分割，比 Mask R-CNN 快、准。": "Projetos de segmentação passam a recomendar o YOLO11 de segmentação, mais rápido e preciso que o Mask R-CNN.",
-  "导入的外部模型支持分割、关键点、分类项目，也能实时验证、导出和生成推理服务包。": "Modelos externos importados funcionam em projetos de segmentação, pontos-chave e classificação, e servem para teste ao vivo, exportação e pacotes de serviço de inferência."
+  "导入的外部模型支持分割、关键点、分类项目，也能实时验证、导出和生成推理服务包。": "Modelos externos importados funcionam em projetos de segmentação, pontos-chave e classificação, e servem para teste ao vivo, exportação e pacotes de serviço de inferência.",
+  "这像是一个文件夹。本地视频要填到视频文件本身（带 .mp4 等扩展名），填文件夹服务会一直连接失败。": "Isto parece uma pasta. Para um vídeo local, informe o próprio arquivo de vídeo (com uma extensão como .mp4). Com uma pasta, o serviço vai falhar ao conectar o tempo todo.",
+  "视频流地址像是文件夹": "O endereço do stream parece uma pasta",
+  "{names} 的地址没有文件扩展名。本地视频要填到视频文件本身，比如 1.mp4；填文件夹的话服务会一直连接失败。": "O endereço de {names} não tem extensão de arquivo. Para um vídeo local, informe o próprio arquivo de vídeo, por exemplo 1.mp4. Com uma pasta, o serviço vai falhar ao conectar o tempo todo.",
+  "仍然生成": "Gerar mesmo assim",
+  "回去改": "Voltar e corrigir"
 }

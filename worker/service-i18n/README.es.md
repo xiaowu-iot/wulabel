@@ -43,7 +43,7 @@ Para inferir con una GPU NVIDIA: cambia `onnxruntime` por `onnxruntime-gpu` en `
 }
 ```
 
-- Las fuentes pueden ser RTSP, HTTP-FLV, HLS (m3u8) o MP4 por http. También se puede indicar la ruta de un archivo de video local, para pruebas (los archivos locales y los videos bajo demanda por http se reproducen en bucle por defecto).
+- Las fuentes pueden ser RTSP, HTTP-FLV, HLS (m3u8) o MP4 por http. También se puede indicar la ruta de un archivo de video local, para pruebas (los archivos locales y los videos bajo demanda por http se reproducen en bucle por defecto). Un video local debe apuntar al archivo en sí, por ejemplo `D:\\test\\1.mp4` (en JSON, escribe cada barra invertida dos veces o usa `D:/test/1.mp4`), no solo a la carpeta; si el registro muestra una y otra vez «Error de conexión», revisa esto primero. Para reconocer una carpeta de imágenes, envíalas de una en una con `POST /predict`.
 - La región de detección se comprueba con el **punto medio del borde inferior** de cada caja (donde está la persona o el vehículo).
 
 ## Contenido de la alarma

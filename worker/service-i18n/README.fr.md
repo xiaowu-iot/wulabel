@@ -43,7 +43,7 @@ Pour l'inférence sur un GPU NVIDIA : remplacez `onnxruntime` par `onnxruntime-g
 }
 ```
 
-- Les sources peuvent être des flux RTSP, HTTP-FLV, HLS (m3u8) ou MP4 via http. Une source peut aussi être le chemin d'un fichier vidéo local, pour les tests (les fichiers locaux et les vidéos à la demande via http sont lus en boucle par défaut).
+- Les sources peuvent être des flux RTSP, HTTP-FLV, HLS (m3u8) ou MP4 via http. Une source peut aussi être le chemin d'un fichier vidéo local, pour les tests (les fichiers locaux et les vidéos à la demande via http sont lus en boucle par défaut). Pour une vidéo locale, indiquez le fichier lui-même, par exemple `D:\\test\\1.mp4` (en JSON, doublez chaque barre oblique inverse ou écrivez `D:/test/1.mp4`), pas seulement le dossier ; si le journal affiche sans arrêt « Échec de la connexion », vérifiez d'abord ce point. Pour reconnaître un dossier d'images, envoyez-les une par une avec `POST /predict`.
 - La zone de détection est évaluée sur le **milieu du bord inférieur** de chaque boîte (là où se tient la personne ou le véhicule).
 
 ## Contenu de l'alerte
