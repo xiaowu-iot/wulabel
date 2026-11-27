@@ -16,12 +16,9 @@ use crate::runtime::Runtime;
 use crate::training;
 use crate::t;
 
+/// 模型文件：内置模型的 best.pt，或 Ultralytics 等引擎、外部导入的 model.onnx
 fn weights(p: &Project, run_id: i64) -> AppResult<PathBuf> {
-    let w = PathBuf::from(training::get_run(p, run_id)?.dir).join("best.pt");
-    if !w.exists() {
-        return Err(msg(t!("这次训练没有产出模型")));
-    }
-    Ok(w)
+    training::weights_of(p, run_id)
 }
 
 fn now_stamp() -> String {
@@ -305,7 +302,7 @@ pub fn build_service(
     let mut cfg = config.clone();
     cfg["model"] = serde_json::json!("model.onnx");
     // 关键点模型：告警截图按项目的骨架连线画
-    if training::model_task(training::get_run(p, run_id)?.config["model"].as_str().unwrap_or("")) == "pose" {
+    if training::get_run(p, run_id)?.task == "pose" {
         cfg["skeleton"] = serde_json::json!(crate::keypoints::get(p)?.skeleton);
     }
     fs::write(out.join("config.json"), serde_json::to_string_pretty(&cfg)?)?;

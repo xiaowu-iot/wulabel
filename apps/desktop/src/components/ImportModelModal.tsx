@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Spin } from "antd";
 import { FolderOpenOutlined } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
-import { api, errText, Label, OnnxInfo } from "../api";
+import { api, errText, Label, OnnxInfo, taskName } from "../api";
 import { t } from "../i18n";
 
 const KINDS = [
@@ -76,9 +76,11 @@ export default function ImportModelModal({ open: visible, onClose, onDone }: { o
         kind,
         classes,
         imgSize,
+        task: info?.task ?? "detect",
+        kptShape: info?.kptShape ?? null,
         useClasses: all ? null : use.filter((i) => i < classes.length),
       });
-      message.success(t("已导入，可以在标注页用它预标注，或在评估页评估"));
+      message.success(t("已导入，可以用它预标注、评估，或到部署页使用"));
       onDone(id);
       onClose();
     } catch (e) {
@@ -101,7 +103,7 @@ export default function ImportModelModal({ open: visible, onClose, onDone }: { o
       destroyOnHidden
     >
       <p className="muted" style={{ marginTop: 0 }}>
-        {t("在别处（比如 Ultralytics YOLO）训好的检测模型导出成 ONNX 后导进来，就能用它预标注、体检、评估和误报测试。")}
+        {t("在别处（比如 Ultralytics YOLO）训好的模型导出成 ONNX 后导进来，就能像训练出的模型一样预标注、评估、实时验证和部署。检测、分割、关键点、分类都支持，任务要和项目一致。")}
       </p>
       <Button icon={<FolderOpenOutlined />} onClick={pick} loading={probing}>
         {path ? t("换一个模型") : t("选择 .onnx 文件")}
@@ -127,7 +129,7 @@ export default function ImportModelModal({ open: visible, onClose, onDone }: { o
             </Form.Item>
           </div>
           <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
-            {t("输出：{list}", { list: info.outputs.map((o) => `${o.name} [${o.shape.join(", ")}]`).join(t("；")) })}
+            {taskName(info.task)} · {t("输出：{list}", { list: info.outputs.map((o) => `${o.name} [${o.shape.join(", ")}]`).join(t("；")) })}
           </div>
           <Form.Item
             label={

@@ -66,6 +66,8 @@ pub struct RunInfo {
     pub config: serde_json::Value,
     pub best_map50: Option<f64>,
     pub created_at: i64,
+    /// 项目任务（detect / segment / classify / multilabel / pose），训练或导入时记下
+    pub task: String,
     pub has_weights: bool,
     pub has_onnx: bool,
     /// 停止、中断或失败的训练，留有断点（resume.pt）：可以从最后一个完整的轮次接着训练
@@ -110,15 +112,25 @@ fn run_dir(p: &Project, name: &str) -> PathBuf {
 
 /// 导入的外部模型（别处训好的 ONNX），训练记录里 engine 记为这个
 pub const EXTERNAL: &str = "external";
+/// 内置模型（torchvision、YOLOX）训练出的是 best.pt；其他引擎（Ultralytics、外部导入）统一用 model.onnx
+pub const TORCHVISION: &str = "torchvision";
+
+/// 这条训练记录的模型文件：内置模型是 best.pt，其余都是 model.onnx
+pub fn model_path(dir: &Path, engine: &str) -> PathBuf {
+    if engine == TORCHVISION {
+        dir.join("best.pt")
+    } else {
+        dir.join("model.onnx")
+    }
+}
 
 fn row_to_info(p: &Project, r: &rusqlite::Row) -> rusqlite::Result<RunInfo> {
     let dir: String = r.get(1)?;
     let abs = run_dir(p, &dir);
     let config: String = r.get(4)?;
     let engine: String = r.get(2)?;
-    let external = engine == EXTERNAL;
     let status: String = r.get(3)?;
-    let can_resume = !external && matches!(status.as_str(), "stopped" | "interrupted" | "failed") && abs.join("resume.pt").exists();
+    let can_resume = engine == TORCHVISION && matches!(status.as_str(), "stopped" | "interrupted" | "failed") && abs.join("resume.pt").exists();
     Ok(RunInfo {
         id: r.get(0)?,
         name: dir.clone(),
@@ -127,14 +139,15 @@ fn row_to_info(p: &Project, r: &rusqlite::Row) -> rusqlite::Result<RunInfo> {
         config: serde_json::from_str(&config).unwrap_or(serde_json::Value::Null),
         best_map50: r.get(5)?,
         created_at: r.get(6)?,
-        has_weights: abs.join("best.pt").exists() || (external && abs.join("model.onnx").exists()),
+        task: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
+        has_weights: model_path(&abs, &engine).exists(),
         has_onnx: abs.join("model.onnx").exists(),
         can_resume,
         engine,
     })
 }
 
-const RUN_COLS: &str = "id, dir, engine, status, config_json, best_metric, created_at";
+const RUN_COLS: &str = "id, dir, engine, status, config_json, best_metric, created_at, task";
 
 pub fn list_runs(p: &Project) -> AppResult<Vec<RunInfo>> {
     let conn = p.conn.lock();
@@ -252,6 +265,9 @@ pub fn start(
             let r = get_run(&p, b)?;
             if r.engine == EXTERNAL {
                 return Err(msg(t!("导入的外部模型不能接着训练")));
+            }
+            if r.engine != TORCHVISION {
+                return Err(msg(t!("接着训练要用和那次相同的模型")));
             }
             let w = PathBuf::from(&r.dir).join("best.pt");
             if !w.exists() {
@@ -529,15 +545,11 @@ pub enum Deploy {
     Live,
 }
 
-/// 内置模型（检测、分割、关键点、分类）都支持全部部署方式；导入的外部模型提前拦住给出清楚提示
-pub fn ensure_deployable(p: &Project, id: i64, what: Deploy) -> AppResult<()> {
+/// 内置模型、Ultralytics 等引擎训练的模型、导入的外部模型都支持全部部署方式（后两种本身就是 ONNX），只要有模型文件
+pub fn ensure_deployable(p: &Project, id: i64, _what: Deploy) -> AppResult<()> {
     let run = get_run(p, id)?;
-    if run.engine == EXTERNAL {
-        return Err(msg(if what == Deploy::Onnx {
-            t!("导入的外部模型本身就是 ONNX，直接用原来的模型文件部署即可")
-        } else {
-            t!("导入的外部模型暂不支持实时验证和推理服务包，可以用来预标注、评估和误报测试")
-        }));
+    if !run.has_weights {
+        return Err(msg(t!("这次训练没有产出模型")));
     }
     Ok(())
 }
@@ -546,11 +558,15 @@ pub fn export_onnx(p: &Project, rt: &Runtime, id: i64, log: &(dyn Fn(String) + S
     ensure_deployable(p, id, Deploy::Onnx)?;
     let run = get_run(p, id)?;
     let dir = PathBuf::from(&run.dir);
+    let out = dir.join("model.onnx");
+    // Ultralytics 等引擎和外部导入的本身就是 ONNX
+    if run.engine != TORCHVISION {
+        return Ok(out.to_string_lossy().into_owned());
+    }
     let w = dir.join("best.pt");
     if !w.exists() {
         return Err(msg(t!("这次训练没有产出模型")));
     }
-    let out = dir.join("model.onnx");
     let mut c = rt.worker(&["export"])?;
     c.arg(&w).arg(&out);
     crate::runtime::run_logged(c, &|line| {
@@ -767,7 +783,7 @@ pub fn class_map(p: &Project, classes: &[String]) -> AppResult<Vec<i64>> {
 pub fn weights_of(p: &Project, run_id: i64) -> AppResult<PathBuf> {
     let run = get_run(p, run_id)?;
     let dir = PathBuf::from(&run.dir);
-    let w = if run.engine == EXTERNAL { dir.join("model.onnx") } else { dir.join("best.pt") };
+    let w = model_path(&dir, &run.engine);
     if !w.exists() {
         return Err(msg(t!("这次训练没有产出模型")));
     }

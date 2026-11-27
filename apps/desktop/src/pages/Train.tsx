@@ -802,7 +802,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                       <>
                         {/* 训练中的记录评估页不让选（还没训完） */}
                         {run.status !== "running" && <Button size="small" onClick={() => openRun(run.id, "eval")}>{t("看评估")}</Button>}
-                        {run.engine !== "external" && (
+                        {run.engine === "torchvision" && (
                           <Button size="small" icon={<ExportOutlined />} loading={exporting} onClick={doExport}>
                             {run.hasOnnx ? t("重新导出 ONNX") : t("导出 ONNX")}
                           </Button>
@@ -928,13 +928,11 @@ export default function Train({ project }: { project: ProjectInfo }) {
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <span className="muted">{t("训练记录")} <span className="dim">· {t("勾选两次以上可以对比，也可以一起删除")}</span></span>
               <Space>
-                {task === "detect" && (
-                  <Tooltip title={t("导入别处训好的 YOLO 等 ONNX 模型，用来预标注、评估、误报测试")}>
-                    <Button size="small" onClick={() => setImporting(true)}>
-                      {t("导入外部模型")}
-                    </Button>
-                  </Tooltip>
-                )}
+                <Tooltip title={t("导入别处训好的 YOLO 等 ONNX 模型，用来预标注、评估和部署")}>
+                  <Button size="small" onClick={() => setImporting(true)}>
+                    {t("导入外部模型")}
+                  </Button>
+                </Tooltip>
                 <Tooltip title={compareIds.length > 8 ? t("最多同时对比 8 次训练") : undefined}>
                   <Button size="small" disabled={compareIds.length < 2 || compareIds.length > 8} onClick={() => setComparing(true)}>
                     {compareIds.length >= 2 ? t("对比所选（{n}）", { n: compareIds.length }) : t("对比所选")}

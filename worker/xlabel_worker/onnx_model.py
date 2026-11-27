@@ -16,9 +16,9 @@ from .i18n import tr
 KINDS = onnx_decode.KINDS
 
 _NOTES = {
-    "wulabel": "Wulabel 导出的模型",
-    "e2e": "端到端输出（模型里已做过 NMS）",
-    "no_names": "没有类别名，请手动填写",
+    "wulabel": lambda: tr("Wulabel 导出的模型"),
+    "e2e": lambda: tr("端到端输出（模型里已做过 NMS）"),
+    "no_names": lambda: tr("没有类别名，请手动填写"),
 }
 
 
@@ -26,7 +26,7 @@ def inspect(path: str) -> dict:
     """读模型的输入输出和元数据，猜格式、任务、类别名、类别数、输入尺寸"""
     info = onnx_decode.inspect_session(onnx_decode.session(path, use_gpu=False))
     note = info.get("note")
-    info["note"] = tr(_NOTES[note]) if note in _NOTES else ""
+    info["note"] = _NOTES[note]() if note in _NOTES else ""
     return info
 
 

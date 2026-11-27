@@ -91,9 +91,13 @@ interface FrameEv {
   fps: number;
 }
 
-/** 模型对应的任务（和后端 training::model_task 一致） */
-const taskOf = (model?: string) =>
-  model?.startsWith("maskrcnn") ? "segment" : model?.startsWith("keypointrcnn") ? "pose" : model?.startsWith("cls_") ? "classify" : "detect";
+/** 训练记录对应的任务：按记录里的项目任务（多标签也是分类模型）；老记录没有时按模型名推断 */
+const taskOf = (run: RunInfo) => {
+  const t0 = run.task === "multilabel" ? "classify" : run.task;
+  if (t0) return t0;
+  const model = run.config?.model;
+  return model?.startsWith("maskrcnn") ? "segment" : model?.startsWith("keypointrcnn") ? "pose" : model?.startsWith("cls_") ? "classify" : "detect";
+};
 
 /** 置信度输入框旁边的「用推荐值」（推荐值是评估页 F1 最高的阈值） */
 function RecConf({ value, rec, onUse }: { value: number; rec: number | null; onUse: (v: number) => void }) {
@@ -189,7 +193,7 @@ function LiveTab({ run, labels, recConf, classRec }: { run: RunInfo; labels: Lab
   colorRef.current = colorOf;
   const skeleton = useRef<[number, number][]>([]);
   useEffect(() => {
-    if (taskOf(run.config?.model) === "pose") api.keypointTemplate().then((tp) => (skeleton.current = tp.skeleton)).catch(() => {});
+    if (taskOf(run) === "pose") api.keypointTemplate().then((tp) => (skeleton.current = tp.skeleton)).catch(() => {});
   }, [run]);
 
   const drawFrame = (f: FrameEv) => {
@@ -955,7 +959,7 @@ function ServiceTab({ run, project, recConf, classRec }: { run: RunInfo; project
           <Checkbox checked={f.saveImage} onChange={(e) => set({ saveImage: e.target.checked })}>
             {t("保存告警截图（带框）")}
           </Checkbox>
-          {taskOf(run.config?.model) === "classify" && (
+          {taskOf(run) === "classify" && (
             <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>
               {t("分类模型按整张画面告警：某个类别的概率达到置信度阈值就告警，不按区域过滤。")}
             </div>
