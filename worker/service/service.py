@@ -40,56 +40,34 @@ def tr(zh: str) -> str:
 
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
-import onnxruntime as ort  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
+# 模型解码（检测、分割、关键点、分类；Wulabel 和 Ultralytics 等格式）：服务包里 onnx_decode.py 和本文件放在一起，
+# 开发时用 worker/xlabel_worker 里的同一份
+for _d in (HERE, HERE.parent / "xlabel_worker"):
+    if (_d / "onnx_decode.py").exists():
+        sys.path.insert(0, str(_d))
+        break
+from onnx_decode import OnnxModel  # noqa: E402
 log = logging.getLogger("xlabel")
 
 
 # ---------------- 推理 ----------------
 
 
-def mask_to_poly(mask: np.ndarray, scale: float) -> list[float]:
-    """一个目标的掩膜概率图转成多边形 [x1, y1, x2, y2, ...]（原图像素），取面积最大的一块"""
-    m = (mask > 0.5).astype(np.uint8)
-    cnts, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not cnts:
-        return []
-    c = max(cnts, key=cv2.contourArea)
-    if cv2.contourArea(c) < 10:
-        return []
-    pts = cv2.approxPolyDP(c, 0.004 * cv2.arcLength(c, True), True).reshape(-1, 2)
-    if len(pts) < 3:
-        return []
-    return [round(float(v) / scale, 1) for p in pts for v in p]
-
-
 class Detector:
-    """按导出的输出自动区分任务：probs → 分类；masks → 实例分割；keypoints → 关键点；否则目标检测"""
+    """模型解码交给 onnx_decode：任务（检测、分割、关键点、分类）和格式（Wulabel、Ultralytics 等）自动识别"""
 
     def __init__(self, model_path: Path, use_gpu: bool, max_side: int):
-        providers = ["CPUExecutionProvider"]
-        if use_gpu and "CUDAExecutionProvider" in ort.get_available_providers():
-            providers.insert(0, "CUDAExecutionProvider")
-        self.sess = ort.InferenceSession(str(model_path), providers=providers)
-        inp = self.sess.get_inputs()[0]
-        self.input = inp.name
-        self.outputs = [o.name for o in self.sess.get_outputs()]
-        self.task = (
-            "classify" if "probs" in self.outputs
-            else "segment" if "masks" in self.outputs
-            else "pose" if "keypoints" in self.outputs
-            else "detect"
-        )
-        # 分类模型输入固定尺寸 [N, 3, S, S]
-        self.size = inp.shape[-1] if isinstance(inp.shape[-1], int) else 224
-        meta = json.loads(model_path.with_name("model.json").read_text(encoding="utf-8"))
-        self.classes: list[str] = meta["classes"]
+        mj = model_path.with_name("model.json")
+        meta = json.loads(mj.read_text(encoding="utf-8")) if mj.exists() else {}
+        self.m = OnnxModel(model_path, meta, use_gpu=use_gpu, max_side=max_side)
+        self.task = self.m.task
+        self.classes: list[str] = self.m.classes
         # 多标签分类：每个类别各自的分数，够阈值的都算
-        self.multi = bool(meta.get("multiLabel"))
-        self.max_side = max_side
+        self.multi = self.m.multi
         self.lock = threading.Lock()
-        log.info(tr("模型已加载：%s，类别 %s，推理设备 %s"), model_path.name, self.classes, self.sess.get_providers()[0])
+        log.info(tr("模型已加载：%s，类别 %s，推理设备 %s"), model_path.name, self.classes, self.m.provider)
 
     def name_of(self, i: int) -> str:
         return self.classes[i] if 0 <= i < len(self.classes) else str(i)
@@ -97,39 +75,19 @@ class Detector:
     def detect(self, bgr: np.ndarray, min_score: float = 0.05) -> list[dict]:
         """检测、分割、关键点：每个目标一项，带 box [x, y, w, h]（分割多 polygon，关键点多 keypoints [x, y, v, ...]）。
         分类：概率不低于 min_score 的类别各一项（按概率从高到低，最多 5 个；多标签分类不限个数），没有 box"""
-        if self.task == "classify":
-            rgb = cv2.cvtColor(cv2.resize(bgr, (self.size, self.size), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB)
-            x = (rgb.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]
-            with self.lock:
-                probs = self.sess.run(None, {self.input: x})[0][0]
-            order = np.argsort(-probs) if getattr(self, "multi", False) else np.argsort(-probs)[:5]
-            return [{"label": self.name_of(int(i)), "score": round(float(probs[i]), 4)} for i in order if probs[i] >= min_score]
-        h, w = bgr.shape[:2]
-        scale = min(1.0, self.max_side / max(h, w))
-        img = cv2.resize(bgr, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA) if scale < 1 else bgr
-        x = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32).transpose(2, 0, 1) / 255.0
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         with self.lock:
-            res = dict(zip(self.outputs, self.sess.run(None, {self.input: x})))
+            res = self.m.predict(rgb, min_score)
         out = []
-        for i, (b, l, s) in enumerate(zip(res["boxes"], res["labels"], res["scores"])):
-            if s < min_score:
-                continue
-            x0, y0, x1, y1 = (b / scale).tolist()
-            d = {
-                "label": self.name_of(int(l) - 1),
-                "score": round(float(s), 4),
-                "box": [round(x0, 1), round(y0, 1), round(x1 - x0, 1), round(y1 - y0, 1)],
-            }
-            if self.task == "segment":
-                d["polygon"] = mask_to_poly(res["masks"][i, 0], scale)
-            elif self.task == "pose":
-                ks = res.get("keypoints_scores")
-                flat = []
-                for j, (kx, ky, _) in enumerate(res["keypoints"][i]):
-                    # 关键点分数 > 0 当成找到了（可见性记 2），否则记 0
-                    found = ks is None or ks[i, j] > 0
-                    flat += [round(float(kx) / scale, 1), round(float(ky) / scale, 1), 2] if found else [0, 0, 0]
-                d["keypoints"] = flat
+        for r in res:
+            d = {"label": self.name_of(r["cls"]), "score": round(float(r["score"]), 4)}
+            if "box" in r:
+                x0, y0, x1, y1 = r["box"]
+                d["box"] = [round(x0, 1), round(y0, 1), round(x1 - x0, 1), round(y1 - y0, 1)]
+                if self.task == "segment":
+                    d["polygon"] = [round(v, 1) for v in r.get("polygon") or []]
+                elif self.task == "pose":
+                    d["keypoints"] = [round(v, 1) if j % 3 < 2 else int(v) for j, v in enumerate(r.get("keypoints") or [])]
             out.append(d)
         return out
 

@@ -96,6 +96,58 @@ def _multi_splits(root: Path, classes: list[str], model, ck: dict, cmap: dict[in
     return out
 
 
+def _onnx_cls_splits(root: Path, classes: list[str], det, cmap: dict[int, int], use, report: dict) -> dict:
+    """ONNX 分类模型（单标签或多标签）在分类数据集上评估"""
+    out = {}
+    multi = bool(getattr(det.m, "multi", False))
+    for split in SPLITS:
+        if not has_cls_split(root, split):
+            continue
+        doc = json.loads((root / "annotations" / f"{split}.json").read_text(encoding="utf-8"))
+        if bool(doc.get("multiLabel")) != multi:
+            raise RuntimeError(tr("这个模型和项目一个是多标签分类、一个是单标签分类，不能用来评估"))
+        items = doc["images"]
+        emit("progress", split=split, done=0, total=len(items))
+        ys, ps, ids = [], [], []
+        y_true, y_pred, scores = [], [], []
+        for i, it in enumerate(items):
+            res = det.predict_full(load_image(root / it["file"]), 0.0)
+            if multi:
+                p = np.zeros(len(classes))
+                for d in res:
+                    if d["cls"] in cmap and (use is None or d["cls"] in use):
+                        p[cmap[d["cls"]]] = d["score"]
+                y = np.zeros(len(classes))
+                for c in it["labels"]:
+                    y[int(c)] = 1.0
+                ps.append(p)
+                ys.append(y)
+            else:
+                top = next((d for d in res if use is None or d["cls"] in use), None)
+                t = int(it["label"])
+                pi = cmap.get(top["cls"], -1) if top else -1
+                y_true.append(t)
+                # 判成项目里没有的类别时记成分错
+                y_pred.append(pi if pi >= 0 else (t + 1) % max(len(classes), 1))
+                scores.append(top["score"] if top else 0.0)
+            ids.append(int(it["id"]))
+            if (i + 1) % 10 == 0 or i + 1 == len(items):
+                emit("progress", split=split, done=i + 1, total=len(items))
+        if multi:
+            y = np.stack(ys) if ys else np.zeros((0, len(classes)))
+            p = np.stack(ps) if ps else np.zeros((0, len(classes)))
+            r = multilabel_eval(y, p, ids, len(classes))
+            r.thresholds = multilabel_threshold_curve(y, p)
+            report["multiLabel"] = True
+        else:
+            r = classify_eval(y_true, y_pred, ids, len(classes), scores=np.array(scores))
+            r.thresholds = classify_threshold_curve(y_true, y_pred, scores)
+        out[split] = split_report(r, classes, len(items))
+        n, v = len(items), f"{r.map50:.3f}"
+        log(tr("验证集：{n} 张，准确率 {acc}", n=n, acc=v) if split == "val" else tr("测试集：{n} 张，准确率 {acc}", n=n, acc=v))
+    return out
+
+
 def run(cfg: dict) -> None:
     root = Path(cfg["dataset"])
     out = Path(cfg["out"])
@@ -112,17 +164,20 @@ def run(cfg: dict) -> None:
         use = info.get("use")
         if not cmap:
             raise RuntimeError(tr("模型的类别名和项目类别一个都对不上，请在导入模型时把类别名改成项目里的名字"))
-        log(tr("外部模型：{n} 个类别和项目类别对应上", n=len(cmap)))
+        log(tr("模型的 {n} 个类别和项目类别对应上", n=len(cmap)))
+        report["task"] = det.task
+        if det.task == "classify":
+            report["splits"] = _onnx_cls_splits(root, classes, det, cmap, use, report)
+        else:
 
-        def predict(img):
-            dets = [d for d in det.predict(img, 0.05) if d[4] in cmap and (use is None or d[4] in use)]
-            if not dets:
-                return np.zeros((0, 4)), np.zeros(0), np.zeros(0, dtype=int)
-            a = np.array([d[:4] for d in dets], dtype=np.float32)
-            return a, np.array([d[5] for d in dets]), np.array([cmap[d[4]] for d in dets], dtype=int)
+            def predict(img):
+                dets = [d for d in det.predict(img, 0.05) if d[4] in cmap and (use is None or d[4] in use)]
+                if not dets:
+                    return np.zeros((0, 4)), np.zeros(0), np.zeros(0, dtype=int)
+                a = np.array([d[:4] for d in dets], dtype=np.float32)
+                return a, np.array([d[5] for d in dets]), np.array([cmap[d[4]] for d in dets], dtype=int)
 
-        report["task"] = "detect"
-        report["splits"] = _det_splits(root, classes, predict)
+            report["splits"] = _det_splits(root, classes, predict)
     else:
         model, ck = models.load(weights, device)
         key = ck["model"]

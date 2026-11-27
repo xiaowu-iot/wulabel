@@ -243,6 +243,7 @@ pub fn export_formats(
 // ---------- 推理服务包 ----------
 
 const SERVICE_FILES: [&str; 5] = ["service.py", "requirements.txt", "run.bat", "run.sh", "README.md"];
+const DECODER: &str = "onnx_decode.py";
 
 /// 生成推理服务包：模型（ONNX）+ 服务程序 + 配置 + 说明
 pub fn build_service(
@@ -263,6 +264,9 @@ pub fn build_service(
             return Err(msg(t!("安装文件不完整，缺少服务模板 {f}", f = f)));
         }
     }
+    if !rt.worker_dir.join("xlabel_worker").join(DECODER).exists() {
+        return Err(msg(t!("安装文件不完整，缺少服务模板 {f}", f = DECODER)));
+    }
     check_out(out)?;
     log(t!("导出模型（ONNX）…"));
     step(0, STEPS, t!("导出模型（ONNX）…"));
@@ -279,6 +283,8 @@ pub fn build_service(
     for f in SERVICE_FILES {
         fs::copy(template.join(f), out.join(f))?;
     }
+    // 模型解码（检测、分割、关键点、分类，Wulabel 和 Ultralytics 等格式）和训练时用的是同一份代码
+    fs::copy(rt.worker_dir.join("xlabel_worker").join(DECODER), out.join(DECODER))?;
     // 界面不是中文时，说明、启动脚本和服务提示换成对应语言（worker/service-i18n/，没有的语言用英文）
     let lang = crate::i18n::lang();
     if lang != "zh" {
@@ -318,6 +324,7 @@ mod tests {
         for f in SERVICE_FILES {
             assert!(dir.join(f).exists(), "缺少 {f}");
         }
+        assert!(dir.join("../xlabel_worker").join(DECODER).exists(), "缺少 {DECODER}");
         // run.bat 必须是 CRLF，否则部分 Windows 环境执行异常
         let bat = fs::read(dir.join("run.bat")).unwrap();
         assert!(bat.windows(2).any(|w| w == b"\r\n"));
