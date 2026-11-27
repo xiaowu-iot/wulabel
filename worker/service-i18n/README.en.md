@@ -43,7 +43,7 @@ To run inference on an NVIDIA GPU: replace `onnxruntime` with `onnxruntime-gpu` 
 }
 ```
 
-- Streams can be RTSP, HTTP-FLV, HLS (m3u8) or MP4 over http. A stream can also be a local video file path, for testing (local files and http on-demand videos loop by default). A local video must point to the file itself, e.g. `D:\\test\\1.mp4` (in JSON, write each backslash twice, or use `D:/test/1.mp4`), not just a folder; check this first if the log keeps saying "Connection failed". To recognize a folder of images, send them one at a time with `POST /predict`.
+- Streams can be RTSP, HTTP-FLV, HLS (m3u8) or MP4 over http. A stream can also be a local video file path, for testing (local files and http on-demand videos loop by default). A local video must point to the file itself, e.g. `D:\\test\\1.mp4` (in JSON, write each backslash twice, or use `D:/test/1.mp4`), not just a folder; check this first if the log keeps saying "Connection failed". To recognize a folder of images, send them one at a time with `POST /predict`. To play a local video only once, add `"loop": false` to that stream. To go through a batch of videos once each, with results per folder, use "Batch recognition" on the Wulabel Deploy page instead.
 - The detection region is checked against the **bottom-center point** of each box (where a person or vehicle stands).
 
 ## Alert message

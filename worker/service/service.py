@@ -287,6 +287,10 @@ class Stream(threading.Thread):
                     time.sleep(1 / fps)
             cap.release()
             self.status["connected"] = False
+            if is_file and not self.s.get("loop", True) and self.running:
+                # 本地视频设了不循环：播完就停，不再从头播
+                log.info(tr("[%s] 视频播放完了"), self.name)
+                return
             log.warning(tr("[%s] 断开，5 秒后重连"), self.name)
             time.sleep(5)
 

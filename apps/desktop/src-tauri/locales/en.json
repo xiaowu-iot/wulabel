@@ -480,5 +480,8 @@
   "没有目标": "No objects",
   "模型的任务类型和项目不一致，不能导入": "The model's task type doesn't match the project, so it can't be imported",
   "Ultralytics 的分类模型不支持多标签分类，请选内置模型": "Ultralytics classification models don't support multi-label classification; choose a built-in model",
-  "巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型": "The Xuntong platform currently only accepts models trained with Wulabel's built-in models (YOLOX, etc.)"
+  "巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型": "The Xuntong platform currently only accepts models trained with Wulabel's built-in models (YOLOX, etc.)",
+  "文件夹": "Folder",
+  "{name}（{n} 帧）": "{name} ({n} frames)",
+  "这个文件夹里没有图片或视频": "No images or videos in this folder"
 }

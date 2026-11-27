@@ -492,6 +492,8 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
   const [output, setOutput] = useState(prefs.get("batchOutput", ""));
   const [conf, setConf] = useState(recConf ?? 0.5);
   const [sort, setSort] = useState(prefs.get("batchSort", "1") === "1");
+  const [every, setEvery] = useState(Number(prefs.get("batchVideoEvery", "1")) || 1);
+  const [minFrames, setMinFrames] = useState(Number(prefs.get("batchVideoMin", "1")) || 1);
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<ImportProgress | null>(null);
   const [res, setRes] = useState<BatchResult | null>(null);
@@ -510,15 +512,22 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
     prefs.set("batchInput", input);
     prefs.set("batchOutput", output);
     prefs.set("batchSort", sort ? "1" : "0");
+    prefs.set("batchVideoEvery", String(every));
+    prefs.set("batchVideoMin", String(minFrames));
     setBusy(true);
     setRes(null);
     setAdded(null);
     setProg(null);
     const un = await listen<ImportProgress>("batch-progress", (e) => setProg(e.payload));
     try {
-      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {} });
+      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {}, videoEvery: every, videoMinFrames: minFrames });
       setRes(r);
-      if (r.stopped) message.info(t("已停止，识别过的 {n} 张已写进表格", { n: r.images }));
+      if (r.stopped)
+        message.info(
+          r.videos
+            ? t("已停止，识别过的 {n} 张图片、{v} 个视频已写进表格", { n: r.images, v: r.videos })
+            : t("已停止，识别过的 {n} 张已写进表格", { n: r.images }),
+        );
     } catch (e) {
       message.error(errText(e));
     } finally {
@@ -549,11 +558,24 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
       <p className="desc" style={{ marginTop: 0 }}>
         {isCls
           ? t("用这个模型把一个文件夹里的图片都识别一遍（包括子文件夹），结果导出成表格，Excel 直接打开；也可以按识别出的类别把图片复制到各自的文件夹。")
-          : t("用这个模型把一个文件夹里的图片都检测一遍（包括子文件夹），每张图找到几个什么目标导出成表格，Excel 直接打开；也可以按找到的类别把图片复制到各自的文件夹。")}
+          : t("用这个模型把一个文件夹里的图片都检测一遍（包括子文件夹），每张图找到几个什么目标导出成表格，Excel 直接打开；也可以按找到的类别把图片复制到各自的文件夹。")}{" "}
+        {t("视频也能识别：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好。")}
       </p>
       <Form layout="vertical" disabled={busy}>
         <Form.Item label={t("要识别的文件夹")}>
           <FolderPicker value={input} onChange={setInput} title={t("选择要识别的文件夹")} />
+        </Form.Item>
+        <Form.Item
+          label={t("视频")}
+          extra={t("视频按间隔取帧识别；一个类别在几帧里都检出才算有，可以减少偶尔一帧的误判。第一次识别视频会自动下载 ffmpeg（约 90MB）。")}
+        >
+          <Space wrap>
+            <span>{t("每隔")}</span>
+            <InputNumber min={0.2} max={60} step={0.5} value={every} onChange={(v) => setEvery(Number(v ?? 1))} style={{ width: 80 }} />
+            <span>{t("秒看一帧，至少")}</span>
+            <InputNumber min={1} max={50} step={1} precision={0} value={minFrames} onChange={(v) => setMinFrames(Number(v ?? 1))} style={{ width: 70 }} />
+            <span>{t("帧检出才算有")}</span>
+          </Space>
         </Form.Item>
         <Form.Item label={t("结果放在")} extra={t("不能放在要识别的文件夹里面。")}>
           <FolderPicker value={output} onChange={setOutput} title={t("选择结果放在哪个文件夹")} />
@@ -609,17 +631,25 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
           type={res.failed ? "warning" : "success"}
           showIcon
           message={
-            res.failed
-              ? t("识别了 {n} 张，其中 {f} 张读不了或出错（表格里标为「识别出错」）", { n: res.images, f: res.failed })
-              : t("识别了 {n} 张", { n: res.images })
+            res.videos
+              ? t("识别了 {n} 张图片、{v} 个视频（看了 {fr} 帧）", { n: res.images, v: res.videos, fr: res.frames }) +
+                (res.failed ? t("，其中 {f} 个读不了或出错（表格里标为「识别出错」）", { f: res.failed }) : "")
+              : res.failed
+                ? t("识别了 {n} 张，其中 {f} 张读不了或出错（表格里标为「识别出错」）", { n: res.images, f: res.failed })
+                : t("识别了 {n} 张", { n: res.images })
           }
           description={
             <div>
               <div style={{ margin: "4px 0 8px" }}>
                 {res.counts.map(([name, n]) => (
-                  <Tag key={name}>{t("{name} {n} 张", { name, n })}</Tag>
+                  <Tag key={name}>{res.videos ? t("{name} {n} 个", { name, n }) : t("{name} {n} 张", { name, n })}</Tag>
                 ))}
               </div>
+              {res.videos > 0 && (
+                <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
+                  {t("视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。")}
+                </div>
+              )}
               <Space>
                 <Button size="small" icon={<FolderOpenOutlined />} onClick={() => api.revealPath(res.output).catch(() => {})}>
                   {t("打开结果文件夹")}

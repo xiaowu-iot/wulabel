@@ -1760,5 +1760,18 @@
   "视频流地址像是文件夹": "Stream-Adresse sieht nach einem Ordner aus",
   "{names} 的地址没有文件扩展名。本地视频要填到视频文件本身，比如 1.mp4；填文件夹的话服务会一直连接失败。": "Die Adresse von {names} hat keine Dateiendung. Gib bei einem lokalen Video die Videodatei selbst an, z. B. 1.mp4. Mit einem Ordner schlägt die Verbindung des Dienstes ständig fehl.",
   "仍然生成": "Trotzdem erstellen",
-  "回去改": "Zurück und korrigieren"
+  "回去改": "Zurück und korrigieren",
+  "推理服务包的视频流地址填成文件夹时直接提示：本地视频要填到视频文件本身（比如 1.mp4）；旁边加了「选择视频文件」按钮。": "Das Inferenz-Servicepaket warnt jetzt, wenn als Stream-Adresse ein Ordner eingetragen ist: Bei einem lokalen Video muss die Videodatei selbst angegeben werden (z. B. 1.mp4). Daneben gibt es jetzt die Schaltfläche „Videodatei wählen“.",
+  "推理服务包打不开本地视频时，日志说清原因：地址是文件夹、文件不存在，还是格式不支持。": "Kann das Inferenz-Servicepaket ein lokales Video nicht öffnen, nennt das Protokoll jetzt den Grund: Die Adresse ist ein Ordner, die Datei existiert nicht oder das Format wird nicht unterstützt.",
+  "已停止，识别过的 {n} 张图片、{v} 个视频已写进表格": "Gestoppt. Die bisher erkannten {n} Bilder und {v} Videos stehen in der Tabelle",
+  "视频也能识别：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好。": "Auch Videos werden erkannt: Jedes Video wird einmal angesehen, bekommt eine Zeile in der Tabelle, und für jede gefundene Klasse wird ein Screenshot gespeichert – in einem Ordner mit dem Namen des Unterordners, in dem das Video liegt (z. B. eine Bestellnummer).",
+  "视频按间隔取帧识别；一个类别在几帧里都检出才算有，可以减少偶尔一帧的误判。第一次识别视频会自动下载 ffmpeg（约 90MB）。": "Aus Videos wird in festen Abständen ein Frame geprüft; eine Klasse zählt nur, wenn sie in mindestens so vielen Frames gefunden wird – das verringert einzelne Fehltreffer. Beim ersten Erkennen von Videos wird ffmpeg (ca. 90 MB) automatisch heruntergeladen.",
+  "秒看一帧，至少": "Sek. 1 Frame prüfen; mindestens",
+  "帧检出才算有": "Frames müssen treffen",
+  "识别了 {n} 张图片、{v} 个视频（看了 {fr} 帧）": "{n} Bilder und {v} Videos erkannt ({fr} Frames geprüft)",
+  "，其中 {f} 个读不了或出错（表格里标为「识别出错」）": ", davon {f} nicht lesbar oder fehlerhaft (in der Tabelle als „Erkennungsfehler“ markiert)",
+  "{name} {n} 个": "{name} {n}",
+  "视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。": "Die Video-Screenshots liegen im Ergebnisordner, in denselben Unterordnern wie die Videos, einer pro gefundener Klasse (der Frame mit der höchsten Punktzahl).",
+  "部署页的「批量识别」支持视频：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好；可以设每隔几秒看一帧、至少几帧检出才算有。": "Die „Stapelerkennung“ auf der Seite „Bereitstellen“ unterstützt jetzt Videos: Jedes Video wird einmal angesehen und bekommt eine Zeile in der Tabelle, und für jede gefundene Klasse wird ein Screenshot gespeichert – in Ordnern mit dem Namen des jeweiligen Unterordners (z. B. Bestellnummern). Einstellbar ist, wie oft ein Frame geprüft wird und in wie vielen Frames eine Klasse vorkommen muss.",
+  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "Im Inferenz-Servicepaket hält ein lokales Video ohne Wiederholung (loop: false) jetzt am Ende an, statt von vorn zu beginnen."
 }

@@ -1760,5 +1760,18 @@
   "视频流地址像是文件夹": "Địa chỉ luồng video có vẻ là thư mục",
   "{names} 的地址没有文件扩展名。本地视频要填到视频文件本身，比如 1.mp4；填文件夹的话服务会一直连接失败。": "Địa chỉ của {names} không có phần mở rộng tệp. Với video cục bộ, hãy điền chính tệp video, ví dụ 1.mp4. Nếu điền thư mục, dịch vụ sẽ kết nối thất bại liên tục.",
   "仍然生成": "Vẫn tạo",
-  "回去改": "Quay lại sửa"
+  "回去改": "Quay lại sửa",
+  "推理服务包的视频流地址填成文件夹时直接提示：本地视频要填到视频文件本身（比如 1.mp4）；旁边加了「选择视频文件」按钮。": "Gói dịch vụ suy luận giờ báo ngay khi địa chỉ luồng video là một thư mục: video cục bộ phải điền chính tệp video (ví dụ 1.mp4). Bên cạnh có thêm nút \"Chọn tệp video\".",
+  "推理服务包打不开本地视频时，日志说清原因：地址是文件夹、文件不存在，还是格式不支持。": "Khi gói dịch vụ suy luận không mở được video cục bộ, nhật ký giờ nói rõ lý do: địa chỉ là thư mục, tệp không tồn tại hoặc định dạng không được hỗ trợ.",
+  "已停止，识别过的 {n} 张图片、{v} 个视频已写进表格": "Đã dừng. {n} ảnh và {v} video đã nhận diện được ghi vào bảng",
+  "视频也能识别：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好。": "Cũng nhận diện được video: mỗi video xem một lần, chiếm một dòng trong bảng, mỗi lớp tìm thấy lưu một ảnh chụp, đặt trong thư mục mang tên thư mục con chứa video (ví dụ mã đơn hàng).",
+  "视频按间隔取帧识别；一个类别在几帧里都检出才算有，可以减少偶尔一帧的误判。第一次识别视频会自动下载 ffmpeg（约 90MB）。": "Video được lấy khung hình theo khoảng thời gian để nhận diện; một lớp chỉ được tính khi xuất hiện ở ít nhất số khung hình này, giúp giảm nhận nhầm do một khung hình lẻ. Lần đầu nhận diện video sẽ tự tải ffmpeg (khoảng 90MB).",
+  "秒看一帧，至少": "giây xem 1 khung hình; ít nhất",
+  "帧检出才算有": "khung hình khớp mới tính",
+  "识别了 {n} 张图片、{v} 个视频（看了 {fr} 帧）": "Đã nhận diện {n} ảnh và {v} video (xem {fr} khung hình)",
+  "，其中 {f} 个读不了或出错（表格里标为「识别出错」）": ", trong đó {f} tệp không đọc được hoặc bị lỗi (ghi là \"Lỗi nhận diện\" trong bảng)",
+  "{name} {n} 个": "{name} {n}",
+  "视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。": "Ảnh chụp từ video nằm trong thư mục kết quả, theo đúng thư mục con chứa video, mỗi lớp tìm thấy một ảnh (khung hình có điểm cao nhất).",
+  "部署页的「批量识别」支持视频：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好；可以设每隔几秒看一帧、至少几帧检出才算有。": "\"Nhận diện hàng loạt\" ở trang Triển khai giờ hỗ trợ video: mỗi video xem một lần, chiếm một dòng trong bảng, mỗi lớp tìm thấy lưu một ảnh chụp, đặt theo thư mục con chứa video (ví dụ mã đơn hàng); có thể đặt bao nhiêu giây xem một khung hình và cần ít nhất bao nhiêu khung hình khớp mới tính.",
+  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "Trong gói dịch vụ suy luận, video cục bộ đặt không lặp (loop: false) giờ phát xong thì dừng, không phát lại từ đầu."
 }

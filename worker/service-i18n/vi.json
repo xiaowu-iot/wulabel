@@ -10,6 +10,7 @@
   "[%s] 视频文件打不开（格式不支持或文件损坏；路径有中文的话换成英文路径试试），10 秒后重试": "[%s] Không mở được tệp video (định dạng không hỗ trợ hoặc tệp bị hỏng; nếu đường dẫn có chữ có dấu, hãy thử đường dẫn chỉ gồm chữ không dấu). Thử lại sau 10 giây",
   "[%s] 已连接": "[%s] Đã kết nối",
   "[%s] 断开，5 秒后重连": "[%s] Mất kết nối, kết nối lại sau 5 giây",
+  "[%s] 视频播放完了": "[%s] Video đã phát xong",
   "[%s] 检测出错": "[%s] Lỗi phát hiện",
   "[%s] 告警：%s": "[%s] Cảnh báo: %s",
   "、": ", ",

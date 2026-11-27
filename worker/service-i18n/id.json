@@ -10,6 +10,7 @@
   "[%s] 视频文件打不开（格式不支持或文件损坏；路径有中文的话换成英文路径试试），10 秒后重试": "[%s] File video tidak bisa dibuka (format tidak didukung atau file rusak; jika path berisi karakter khusus, coba path berhuruf Inggris saja). Coba lagi dalam 10 detik",
   "[%s] 已连接": "[%s] Terhubung",
   "[%s] 断开，5 秒后重连": "[%s] Terputus, menyambung ulang dalam 5 detik",
+  "[%s] 视频播放完了": "[%s] Video selesai diputar",
   "[%s] 检测出错": "[%s] Kesalahan deteksi",
   "[%s] 告警：%s": "[%s] Alarm: %s",
   "、": ", ",

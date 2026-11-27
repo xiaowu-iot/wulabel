@@ -10,6 +10,7 @@
   "[%s] 视频文件打不开（格式不支持或文件损坏；路径有中文的话换成英文路径试试），10 秒后重试": "[%s] No se puede abrir el archivo de video (formato no compatible o archivo dañado; si la ruta tiene acentos u otros caracteres especiales, prueba con una ruta sin ellos). Reintentando en 10 s",
   "[%s] 已连接": "[%s] Conectado",
   "[%s] 断开，5 秒后重连": "[%s] Desconectado, reconectando en 5 s",
+  "[%s] 视频播放完了": "[%s] El video terminó",
   "[%s] 检测出错": "[%s] Error de detección",
   "[%s] 告警：%s": "[%s] Alarma: %s",
   "、": ", ",

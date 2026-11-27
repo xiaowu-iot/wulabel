@@ -19,7 +19,7 @@ use crate::t;
 
 pub const VIDEO_EXTS: [&str; 9] = ["mp4", "mov", "mkv", "avi", "webm", "flv", "wmv", "m4v", "ts"];
 
-fn is_video(p: &Path) -> bool {
+pub(crate) fn is_video(p: &Path) -> bool {
     p.extension()
         .and_then(|e| e.to_str())
         .map(|e| VIDEO_EXTS.contains(&e.to_ascii_lowercase().as_str()))
@@ -172,7 +172,7 @@ fn now_nanos() -> u128 {
 
 /// 抽一个视频：输出到 out_dir/v{idx}_%06d.jpg，边抽边回调当前帧数，返回实际产出帧数
 #[allow(clippy::too_many_arguments)]
-fn extract_one(
+pub(crate) fn extract_one(
     ffmpeg: &Path,
     video: &Path,
     out_dir: &Path,
@@ -279,6 +279,11 @@ impl Extractor {
         if let Some(c) = self.child.lock().unwrap().take() {
             let _ = c.lock().unwrap().kill();
         }
+    }
+
+    /// 开始新任务前清掉上次的停止标记
+    pub(crate) fn reset(&self) {
+        self.stopped.store(false, Ordering::Relaxed);
     }
 
     fn set(&self, c: Option<Arc<Mutex<Child>>>) {
@@ -675,7 +680,7 @@ pub fn extract_stream(
 }
 
 /// 用 `ffmpeg -i` 读视频时长（秒），从 stderr 的 "Duration: HH:MM:SS.ms" 里解析
-fn duration(ffmpeg: &Path, video: &Path) -> Option<f64> {
+pub(crate) fn duration(ffmpeg: &Path, video: &Path) -> Option<f64> {
     let out = command(ffmpeg).args(["-hide_banner", "-i"]).arg(video).output().ok()?;
     let text = String::from_utf8_lossy(&out.stderr);
     let i = text.find("Duration:")?;

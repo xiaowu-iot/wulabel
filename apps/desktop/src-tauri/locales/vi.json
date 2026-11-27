@@ -480,5 +480,8 @@
   "没有目标": "Không có đối tượng",
   "模型的任务类型和项目不一致，不能导入": "Loại tác vụ của mô hình không khớp với dự án, không nhập được",
   "Ultralytics 的分类模型不支持多标签分类，请选内置模型": "Mô hình phân loại của Ultralytics không hỗ trợ phân loại đa nhãn, hãy chọn mô hình tích hợp",
-  "巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型": "Nền tảng Xuntong hiện chỉ hỗ trợ mô hình huấn luyện bằng mô hình tích hợp của Wulabel (YOLOX…)"
+  "巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型": "Nền tảng Xuntong hiện chỉ hỗ trợ mô hình huấn luyện bằng mô hình tích hợp của Wulabel (YOLOX…)",
+  "文件夹": "Thư mục",
+  "{name}（{n} 帧）": "{name} ({n} khung hình)",
+  "这个文件夹里没有图片或视频": "Thư mục này không có ảnh hoặc video"
 }
