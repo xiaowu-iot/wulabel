@@ -1751,5 +1751,9 @@
   "更准，建议 6GB 以上显存": "Más preciso; se recomiendan 6 GB+ de memoria GPU",
   "很准、较慢，建议 8GB 以上显存": "Muy preciso, más lento; se recomiendan 8 GB+ de memoria GPU",
   "最准、最慢，建议 12GB 以上显存": "El más preciso y lento; se recomiendan 12 GB+ de memoria GPU",
-  "分割": "segmentación"
+  "分割": "segmentación",
+  "训练支持 Ultralytics 模型：模型下拉框里可以直接选 YOLO11、YOLO26、YOLOv8、YOLO12、YOLOv10、YOLOv9、RT-DETR，检测、分割、关键点、分类都有；也能输入任意模型名，或选本地 .pt 接着训、.yaml 从头训。第一次用自动安装组件、下载权重。": "Entrene modelos de Ultralytics: elija YOLO11, YOLO26, YOLOv8, YOLO12, YOLOv10, YOLOv9 o RT-DETR directamente en la lista de modelos, para detección, segmentación, puntos clave y clasificación. También puede escribir cualquier nombre de modelo, continuar desde un .pt local o entrenar desde un .yaml. La primera vez el componente y los pesos se instalan y descargan automáticamente.",
+  "Ultralytics 模型训完自动转成 ONNX，用 Wulabel 自己的评估算指标和错例；预标注、实时验证、批量识别、导出、推理服务包都能直接用。高级设置里的「更多参数」可以填任意训练参数。": "Los modelos de Ultralytics se convierten a ONNX al terminar y se evalúan con las métricas y el explorador de errores de Wulabel; preetiquetado, prueba en vivo, reconocimiento por lotes, exportación y paquetes de servicio de inferencia funcionan de inmediato. «Más parámetros» en la configuración avanzada acepta cualquier argumento de entrenamiento.",
+  "分割项目默认推荐 YOLO11 分割，比 Mask R-CNN 快、准。": "Los proyectos de segmentación recomiendan por defecto YOLO11 de segmentación, más rápido y preciso que Mask R-CNN.",
+  "导入的外部模型支持分割、关键点、分类项目，也能实时验证、导出和生成推理服务包。": "Los modelos externos importados funcionan en proyectos de segmentación, puntos clave y clasificación, y sirven para pruebas en vivo, exportación y paquetes de servicio de inferencia."
 }
