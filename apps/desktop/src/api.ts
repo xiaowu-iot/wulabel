@@ -90,9 +90,16 @@ export interface BatchOptions {
   sort: boolean;
   /** 多标签分类：每个类别单独的阈值（类别名 → 阈值） */
   classConf?: Record<string, number>;
+  /** 视频每隔几秒看一帧 */
+  videoEvery?: number;
+  /** 视频里一个类别至少几帧检出才算有 */
+  videoMinFrames?: number;
 }
 export interface BatchResult {
   images: number;
+  videos: number;
+  /** 视频一共看了多少帧 */
+  frames: number;
   failed: number;
   csv: string;
   output: string;

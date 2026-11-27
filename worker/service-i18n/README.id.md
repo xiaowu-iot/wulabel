@@ -43,7 +43,7 @@ Untuk inferensi dengan GPU NVIDIA: ganti `onnxruntime` menjadi `onnxruntime-gpu`
 }
 ```
 
-- Sumber video mendukung RTSP, HTTP-FLV, HLS (m3u8), dan MP4 lewat http, juga bisa berupa path file video lokal untuk pengujian (file lokal dan video on-demand lewat http diputar berulang secara default).
+- Sumber video mendukung RTSP, HTTP-FLV, HLS (m3u8), dan MP4 lewat http, juga bisa berupa path file video lokal untuk pengujian (file lokal dan video on-demand lewat http diputar berulang secara default). File video lokal harus diisi sampai ke file-nya sendiri, misalnya `D:\\test\\1.mp4` (di JSON tulis backslash dua kali, atau tulis `D:/test/1.mp4`), jangan hanya foldernya; kalau log terus menampilkan "Gagal terhubung", periksa ini dulu. Untuk mengenali satu folder gambar, kirim gambarnya satu per satu dengan `POST /predict`. Agar video lokal hanya diputar sekali, tambahkan `"loop": false` pada stream itu. Untuk memeriksa banyak video masing-masing sekali dengan hasil per folder, lebih mudah memakai "Pengenalan massal" di halaman Deploy Wulabel.
 - Area deteksi diperiksa berdasarkan **titik tengah sisi bawah** setiap kotak (tempat orang atau kendaraan berdiri).
 
 ## Isi alarm

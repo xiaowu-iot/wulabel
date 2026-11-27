@@ -43,7 +43,7 @@ Para fazer inferência numa GPU NVIDIA: troque `onnxruntime` por `onnxruntime-gp
 }
 ```
 
-- Os streams podem ser RTSP, HTTP-FLV, HLS (m3u8) ou MP4 via http. Também podem ser o caminho de um arquivo de vídeo local, para testes (arquivos locais e vídeos sob demanda via http repetem em loop por padrão).
+- Os streams podem ser RTSP, HTTP-FLV, HLS (m3u8) ou MP4 via http. Também podem ser o caminho de um arquivo de vídeo local, para testes (arquivos locais e vídeos sob demanda via http repetem em loop por padrão). Um vídeo local precisa apontar para o próprio arquivo, por exemplo `D:\\test\\1.mp4` (no JSON, escreva cada barra invertida duas vezes ou use `D:/test/1.mp4`), e não só para a pasta; se o log mostrar sem parar "Falha na conexão", confira isso primeiro. Para reconhecer uma pasta de imagens, envie uma por vez com `POST /predict`. Para reproduzir um vídeo local só uma vez, adicione `"loop": false` a esse stream. Para passar por um lote de vídeos uma vez cada, com resultados por pasta, é mais prático usar o "Reconhecimento em lote" da página Implantar do Wulabel.
 - A região de detecção é verificada pelo **ponto central da borda inferior** de cada caixa (onde a pessoa ou o veículo está).
 
 ## Mensagem de alarme
