@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -214,6 +215,83 @@ class Predictor:
         emit("done", count=n)
 
 
+_FONTS: dict[int, object] = {}
+
+
+def _font_paths() -> list[str]:
+    """系统里能显示中文的字体（Windows、macOS、常见 Linux 发行版）"""
+    win = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+    paths = [os.path.join(win, n) for n in ("msyh.ttc", "msyhbd.ttc", "simhei.ttf", "simsun.ttc", "malgun.ttf", "arial.ttf")]
+    paths += [
+        "/System/Library/Fonts/PingFang.ttc", "/System/Library/Fonts/STHeiti Medium.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/wqy-microhei/wqy-microhei.ttc", "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    return paths
+
+
+def _font(size: int):
+    from PIL import ImageFont
+
+    if size not in _FONTS:
+        f = None
+        for p in _font_paths():
+            if os.path.exists(p):
+                try:
+                    f = ImageFont.truetype(p, size)
+                    break
+                except OSError:
+                    continue
+        if f is None:
+            try:
+                f = ImageFont.load_default(size)
+            except TypeError:
+                f = ImageFont.load_default()
+        _FONTS[size] = f
+    return _FONTS[size]
+
+
+def draw(req: dict) -> None:
+    """批量识别的视频截图：像标注页一样画框（分割画轮廓），框的左上角写类别和分数；没有框的（分类）写在左上角"""
+    from PIL import Image, ImageDraw
+
+    im = Image.open(req["src"]).convert("RGB")
+    W, H = im.size
+    d = ImageDraw.Draw(im)
+    lw = max(2, round(max(W, H) / 400))
+    font = _font(max(14, round(max(W, H) / 48)))
+    next_y = 6
+    for it in req.get("items") or []:
+        color = it.get("color") or "#e5534b"
+        text = f"{it['label']} {float(it.get('score', 0)):.2f}"
+        box, poly = it.get("box"), it.get("poly")
+        if poly and len(poly) >= 6:
+            pts = list(zip(poly[0::2], poly[1::2]))
+            d.line(pts + [pts[0]], fill=color, width=lw)
+        elif box:
+            x, y, w, h = box
+            d.rectangle([x, y, x + w, y + h], outline=color, width=lw)
+        l, t, r, b = d.textbbox((0, 0), text, font=font)
+        tw, th = r - l, b - t
+        pad = max(3, th // 4)
+        bw, bh = tw + 2 * pad, th + 2 * pad
+        if box:
+            x0, y0 = box[0], box[1] - bh
+            if y0 < 0:  # 框贴着上边，标签放到框里面
+                y0 = box[1]
+        else:
+            x0, y0 = 6, next_y
+            next_y += bh + 4
+        x0 = min(max(0, x0), max(0, W - bw))
+        d.rectangle([x0, y0, x0 + bw, y0 + bh], fill=color)
+        d.text((x0 + pad - l, y0 + pad - t), text, fill="#ffffff", font=font)
+    im.save(req["dst"], "JPEG", quality=92)
+    emit("done")
+
+
 def run() -> None:
     p = Predictor()
     for line in sys.stdin:
@@ -233,6 +311,8 @@ def run() -> None:
                 p.text(req)
             elif cmd == "sam_boxes":
                 p.sam_boxes(req)
+            elif cmd == "draw":
+                draw(req)
             elif cmd == "quit":
                 break
             else:

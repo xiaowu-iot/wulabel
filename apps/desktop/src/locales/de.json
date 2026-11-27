@@ -1773,5 +1773,9 @@
   "{name} {n} 个": "{name} {n}",
   "视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。": "Die Video-Screenshots liegen im Ergebnisordner, in denselben Unterordnern wie die Videos, einer pro gefundener Klasse (der Frame mit der höchsten Punktzahl).",
   "部署页的「批量识别」支持视频：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好；可以设每隔几秒看一帧、至少几帧检出才算有。": "Die „Stapelerkennung“ auf der Seite „Bereitstellen“ unterstützt jetzt Videos: Jedes Video wird einmal angesehen und bekommt eine Zeile in der Tabelle, und für jede gefundene Klasse wird ein Screenshot gespeichert – in Ordnern mit dem Namen des jeweiligen Unterordners (z. B. Bestellnummern). Einstellbar ist, wie oft ein Frame geprüft wird und in wie vielen Frames eine Klasse vorkommen muss.",
-  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "Im Inferenz-Servicepaket hält ein lokales Video ohne Wiederholung (loop: false) jetzt am Ende an, statt von vorn zu beginnen."
+  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "Im Inferenz-Servicepaket hält ein lokales Video ohne Wiederholung (loop: false) jetzt am Ende an, statt von vorn zu beginnen.",
+  "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Video-Screenshots neben dem jeweiligen Video speichern (Unterordner „Erkennungs-Screenshots“)",
+  "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "Darf im zu erkennenden Ordner liegen; beim nächsten Mal werden die Ergebnisse automatisch übersprungen.",
+  "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "Bei Videos wird der Screenshot jeder Klasse kopiert (Dateiname mit Bestellnummer davor), nicht das Video selbst.",
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Die Video-Screenshots liegen im Ordner „Erkennungs-Screenshots“ neben jedem Video, einer pro gefundener Klasse (der Frame mit der höchsten Punktzahl), Klasse und Punktzahl stehen am Rahmen."
 }

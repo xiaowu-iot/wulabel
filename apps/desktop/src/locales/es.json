@@ -1773,5 +1773,9 @@
   "{name} {n} 个": "{name} {n}",
   "视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。": "Las capturas de los videos están en la carpeta de resultados, en las mismas subcarpetas que los videos, una por clase encontrada (el fotograma con la puntuación más alta).",
   "部署页的「批量识别」支持视频：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好；可以设每隔几秒看一帧、至少几帧检出才算有。": "El «Reconocimiento por lotes» de la página Desplegar ahora admite videos: cada video se revisa una vez y ocupa una fila en la tabla, y se guarda una captura por cada clase encontrada, en carpetas con el nombre de la subcarpeta de cada video (por ejemplo, números de pedido). Puedes elegir cada cuántos segundos se revisa un fotograma y en cuántos fotogramas debe aparecer una clase para contar.",
-  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "En el paquete de servicio de inferencia, un video local configurado sin bucle (loop: false) ahora se detiene al terminar en lugar de volver a empezar."
+  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "En el paquete de servicio de inferencia, un video local configurado sin bucle (loop: false) ahora se detiene al terminar en lugar de volver a empezar.",
+  "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Guardar las capturas de video junto a cada video (subcarpeta «Capturas de reconocimiento»)",
+  "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "Puede estar dentro de la carpeta que reconoces; la próxima vez los resultados se omiten automáticamente.",
+  "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "En los videos se copia la captura de cada clase (con el número de pedido delante del nombre), no el video.",
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Las capturas de video están en la carpeta «Capturas de reconocimiento» junto a cada video, una por clase encontrada (el fotograma con mayor puntuación), con la clase y la puntuación escritas en el cuadro."
 }

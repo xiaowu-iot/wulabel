@@ -1773,5 +1773,9 @@
   "{name} {n} 个": "{name} {n}",
   "视频的截图在结果文件夹里，按视频所在的子文件夹放，每个识别出的类别一张（分数最高的那一帧）。": "Tangkapan layar video ada di folder hasil, di subfolder yang sama dengan videonya, satu per kelas yang ditemukan (frame dengan skor tertinggi).",
   "部署页的「批量识别」支持视频：每个视频看一遍，表格里一个视频一行，识别出的每个类别存一张截图，按视频所在的子文件夹（比如单号）放好；可以设每隔几秒看一帧、至少几帧检出才算有。": "\"Pengenalan massal\" di halaman Deploy kini mendukung video: setiap video dilihat sekali dan jadi satu baris di tabel, dan untuk setiap kelas yang ditemukan disimpan satu tangkapan layar di folder sesuai subfolder videonya (misalnya nomor pesanan). Bisa diatur tiap berapa detik satu frame dilihat dan minimal berapa frame cocok agar kelas dihitung.",
-  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "Di paket layanan inferensi, video lokal yang diatur tanpa pengulangan (loop: false) kini berhenti saat selesai, tidak diputar ulang dari awal."
+  "推理服务包的本地视频设成不循环（loop: false）时，播完就停，不再从头重播。": "Di paket layanan inferensi, video lokal yang diatur tanpa pengulangan (loop: false) kini berhenti saat selesai, tidak diputar ulang dari awal.",
+  "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Simpan tangkapan layar video di samping tiap video (subfolder \"Tangkapan pengenalan\")",
+  "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "Boleh di dalam folder yang dikenali; lain kali hasilnya otomatis dilewati.",
+  "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "Untuk video, yang disalin adalah tangkapan layar tiap kelas (nama file diawali nomor pesanan), bukan videonya.",
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Tangkapan layar video ada di folder \"Tangkapan pengenalan\" di samping tiap video, satu per kelas yang ditemukan (frame dengan skor tertinggi), dengan kelas dan skor tertulis di kotak."
 }

@@ -483,5 +483,7 @@
   "巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型": "Por ahora la plataforma Xuntong solo admite modelos entrenados con los modelos integrados de Wulabel (YOLOX, etc.)",
   "文件夹": "Carpeta",
   "{name}（{n} 帧）": "{name} ({n} fotogramas)",
-  "这个文件夹里没有图片或视频": "No hay imágenes ni videos en esta carpeta"
+  "这个文件夹里没有图片或视频": "No hay imágenes ni videos en esta carpeta",
+  "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "La carpeta de resultados no puede ser la misma que la carpeta a reconocer. Elige otra (puede ser una subcarpeta dentro de ella).",
+  "识别截图": "Capturas de reconocimiento"
 }
