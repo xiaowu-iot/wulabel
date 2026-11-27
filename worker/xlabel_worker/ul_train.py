@@ -230,6 +230,10 @@ def _callbacks(model, out: Path, task: str, epochs: int, state: dict) -> None:
 
     def on_fit_epoch_end(trainer):
         ep = int(trainer.epoch) + 1
+        # 训练结束时 Ultralytics 用 best.pt 再验证一遍，也会触发这个回调：同一轮只记一次
+        if state.get("metric_epoch") == ep:
+            return
+        state["metric_epoch"] = ep
         m = _metrics(trainer, task)
         fit, best_fit = getattr(trainer, "fitness", None), getattr(trainer, "best_fitness", None)
         best = fit is not None and best_fit is not None and float(fit) >= float(best_fit)

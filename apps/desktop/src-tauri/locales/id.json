@@ -477,5 +477,8 @@
   "结果文件夹不能放在要识别的文件夹里面": "Folder hasil tidak boleh berada di dalam folder yang dikenali",
   "这个文件夹里没有图片": "Tidak ada gambar di folder ini",
   "批量识别异常：{e}": "Pengenalan massal gagal: {e}",
-  "没有目标": "Tanpa objek"
+  "没有目标": "Tanpa objek",
+  "模型的任务类型和项目不一致，不能导入": "Jenis tugas model tidak sesuai dengan proyek, tidak bisa diimpor",
+  "Ultralytics 的分类模型不支持多标签分类，请选内置模型": "Model klasifikasi Ultralytics tidak mendukung klasifikasi multi-label; pilih model bawaan",
+  "巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型": "Platform Xuntong saat ini hanya mendukung model yang dilatih dengan model bawaan Wulabel (YOLOX, dll.)"
 }

@@ -267,7 +267,7 @@ pub fn start(
     if cfg.epochs == 0 || (cfg.batch == 0 && !ultra) || cfg.img_size < 128 {
         return Err(msg(t!("训练参数不对")));
     }
-    let mut cmd = rt.worker(&["train"])?; // 先确认环境存在
+    let cmd = rt.worker(&["train"])?; // 先确认环境存在
     if ultra {
         if p.meta.task == "multilabel" {
             return Err(msg(t!("Ultralytics 的分类模型不支持多标签分类，请选内置模型")));
@@ -1028,6 +1028,8 @@ mod tests {
             version: None,
             base_run: None,
             aug: None,
+            engine: TORCHVISION.into(),
+            extra: None,
         };
         let id = start(p.clone(), &rt, jobs.clone(), cfg, Arc::new(move |_, e| ev2.lock().push(e)), &|_, _| {}).unwrap();
         assert!(start(p.clone(), &rt, jobs.clone(), TrainConfig { epochs: 1, ..serde_json::from_value(get_run(&p, id).unwrap().config).unwrap() }, Arc::new(|_, _| {}), &|_, _| {}).is_err(), "同时只能一个训练");
