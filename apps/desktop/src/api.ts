@@ -310,6 +310,10 @@ export interface TrainConfig {
   baseRun?: number | null;
   /** 数据增强；空 = 默认 */
   aug?: AugConfig | null;
+  /** 训练引擎：torchvision（内置模型，默认）/ ultralytics（YOLOv8 / 11 等，model 是模型名或本地 .pt / .yaml 路径） */
+  engine?: "torchvision" | "ultralytics";
+  /** Ultralytics 的「更多参数」：一行一个 key=value */
+  extra?: string | null;
 }
 
 /** 数据增强参数（和 worker 的 augment.py 一致） */
