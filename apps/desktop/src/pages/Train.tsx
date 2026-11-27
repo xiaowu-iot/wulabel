@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Checkbox, Empty, Form, InputNumber, Popconfirm, Progress, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Alert, App, Button, Checkbox, Empty, Form, Input, InputNumber, Modal, Popconfirm, Progress, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
 import {
   CaretRightOutlined,
   DeleteOutlined,
@@ -8,6 +8,7 @@ import {
   StopOutlined,
 } from "@ant-design/icons";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { api, EnvStatus, errText, ImportProgress, isClsTask, Label, ProjectInfo, RunDetail, RunInfo, RunStatus, SplitSummary, Task, TrainConfig, VersionInfo } from "../api";
 import { prefs, useApp, useReview } from "../store";
 import { t } from "../i18n";
@@ -17,6 +18,7 @@ import ImportModelModal from "../components/ImportModelModal";
 import AugPanel from "../components/AugPanel";
 import { DownloadEv, downloadPercent, downloadText } from "../components/DownloadProgress";
 import SplitModal from "../components/SplitModal";
+import { ULTRA_ARGS_DOC, ultraGroups, ultraName, ultraTaskOf } from "../ultraModels";
 
 /** 内置模型，和 worker/xlabel_worker/models.py 的 MODELS 对应。oneStage：单阶段检测，部署到 TensorRT / NPU 更顺；
  *  yolox：YOLOX 系列（官方数据增强，增强设置里只有翻转生效）；defaultSize：选中时默认的输入尺寸 */
@@ -50,11 +52,12 @@ export const MODELS: {
 
 /** 各任务的默认训练参数 */
 const TASK_DEFAULTS: Record<Task, Partial<TrainConfig>> = {
-  detect: { model: "yolox_s", imgSize: 640, batch: 4, epochs: 50, lr: 0.01 },
-  segment: { model: "maskrcnn_r50", imgSize: 640, batch: 2, epochs: 30, lr: 0.01 },
-  pose: { model: "keypointrcnn_r50", imgSize: 640, batch: 2, epochs: 40, lr: 0.01 },
-  classify: { model: "cls_mobilenet", imgSize: 224, batch: 32, epochs: 30, lr: 0.01 },
-  multilabel: { model: "cls_mobilenet", imgSize: 224, batch: 32, epochs: 30, lr: 0.01 },
+  detect: { engine: "torchvision", model: "yolox_s", imgSize: 640, batch: 4, epochs: 50, lr: 0.01 },
+  // 分割默认 YOLO11 分割（Ultralytics）：比 Mask R-CNN 快、准，批大小 0 表示按显存自动选
+  segment: { engine: "ultralytics", model: "yolo11s-seg.pt", imgSize: 640, batch: 0, epochs: 100, lr: 0.01 },
+  pose: { engine: "torchvision", model: "keypointrcnn_r50", imgSize: 640, batch: 2, epochs: 40, lr: 0.01 },
+  classify: { engine: "torchvision", model: "cls_mobilenet", imgSize: 224, batch: 32, epochs: 30, lr: 0.01 },
+  multilabel: { engine: "torchvision", model: "cls_mobilenet", imgSize: 224, batch: 32, epochs: 30, lr: 0.01 },
 };
 
 /** 模型列表里的任务：多标签分类用的也是分类模型 */
@@ -62,21 +65,34 @@ const modelTask = (task: Task): Task => (task === "multilabel" ? "classify" : ta
 
 const isMac = navigator.userAgent.includes("Mac");
 
-/** 按显存推荐模型。检测用 YOLOX：没有独立显卡用 Tiny，4GB 以上 S，8GB 以上 M；Mac（Apple 芯片）用 S */
+/** 按显存推荐模型（返回模型选择框的值，Ultralytics 的带 ul: 前缀）。检测用 YOLOX：没有独立显卡用 Tiny，4GB 以上 S，8GB 以上 M；
+ *  Mac（Apple 芯片）用 S。分割用 YOLO11 分割：4GB 以上或 Mac 用 S，否则 N */
 const recommendModel = (task: Task, gpuMem: number) =>
   ({
     detect: isMac ? "yolox_s" : gpuMem >= 8000 ? "yolox_m" : gpuMem >= 3800 ? "yolox_s" : "yolox_tiny",
-    segment: gpuMem >= 8000 ? "maskrcnn_r50_v2" : "maskrcnn_r50",
+    segment: isMac || gpuMem >= 3800 ? "ul:yolo11s-seg.pt" : "ul:yolo11n-seg.pt",
     pose: "keypointrcnn_r50",
     classify: gpuMem >= 6000 ? "cls_efficientnet" : "cls_mobilenet",
     multilabel: gpuMem >= 6000 ? "cls_efficientnet" : "cls_mobilenet",
   })[task];
 
-/** 训练记录显示的模型名（导入的外部模型显示导入时起的名字） */
+/** 训练记录显示的模型名（导入的外部模型显示导入时起的名字，Ultralytics 的显示 YOLO11-S 分割这样的名字） */
 export const modelName = (r: RunInfo) =>
   r.engine === "external"
     ? t("{name}（外部）", { name: (r.config as { displayName?: string })?.displayName || t("外部模型") })
-    : MODELS.find((m) => m.value === r.config?.model)?.name ?? String(r.config?.model ?? "");
+    : r.engine === "ultralytics"
+      ? ultraName(String(r.config?.model ?? ""))
+      : MODELS.find((m) => m.value === r.config?.model)?.name ?? String(r.config?.model ?? "");
+
+/** 选的模型和项目任务对得上吗（Ultralytics 的本地文件猜不出任务，训练时再检查） */
+const modelFits = (cfg: TrainConfig, task: Task) => {
+  if (cfg.engine === "ultralytics") {
+    if (task === "multilabel") return false;
+    const ut = ultraTaskOf(cfg.model);
+    return ut == null || ut === modelTask(task);
+  }
+  return MODELS.some((m) => m.value === cfg.model && m.task === modelTask(task));
+};
 
 /** 各任务主指标的叫法（分类没有 mAP，worker 把准确率放在 map50、宏 F1 放在 map；多标签分类 map50 是各类别 AP 的平均） */
 export const metricNames = (task: Task) =>
@@ -167,6 +183,9 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const [prep, setPrep] = useState<ImportProgress | null>(null);
   // 高级设置（输入尺寸、批大小、数据增强、设备）默认收起，记住用户上次的选择
   const [advOpen, setAdvOpen] = useState(prefs.get("trainAdv", "0") === "1");
+  /** 「输入模型名」对话框（Ultralytics 认得的模型名或结构文件名） */
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customName, setCustomName] = useState("");
   const toggleAdv = (v: boolean) => {
     setAdvOpen(v);
     prefs.set("trainAdv", v ? "1" : "0");
@@ -294,20 +313,45 @@ export default function Train({ project }: { project: ProjectInfo }) {
 
   // 项目任务和当前选的模型对不上（比如分割项目却选了检测模型）时，自动切到对应任务的模型
   useEffect(() => {
-    if (!MODELS.some((m) => m.value === cfg.model && m.task === modelTask(task))) {
+    if (!modelFits(cfg, task)) {
       update({ ...TASK_DEFAULTS[task] });
     }
   }, [task]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const picked = MODELS.find((m) => m.value === cfg.model);
+  const ultra = cfg.engine === "ultralytics";
+  const picked = ultra ? undefined : MODELS.find((m) => m.value === cfg.model);
   const sizeOptions = isClsTask(task) ? [128, 160, 224, 256, 320, 384] : [320, 416, 480, 640, 800, 960, 1280];
   /** 换模型：YOLOX 有自己的默认输入尺寸，从 YOLOX 换回其他模型时恢复 640 */
-  const pickModel = (value: string) => {
+  /** 用 Ultralytics 的模型（官方模型名或本地 .pt / .yaml 路径）：从内置模型换过来时批大小改成自动、尺寸回到默认；轮数少于 50 时提到 100 */
+  const useUltra = (model: string) =>
+    update({
+      engine: "ultralytics",
+      model,
+      ...(ultra ? {} : { batch: 0, imgSize: isClsTask(task) ? 224 : 640 }),
+      ...(cfg.epochs < 50 ? { epochs: 100 } : {}),
+    });
+  const pickModel = async (value: string) => {
+    if (value === "__custom__") {
+      setCustomName(ultra ? cfg.model : "");
+      setCustomOpen(true);
+      return;
+    }
+    if (value === "__local__") {
+      const f = await open({ title: t("选择模型文件"), filters: [{ name: t("模型文件（.pt / .yaml）"), extensions: ["pt", "yaml", "yml"] }] });
+      if (typeof f === "string") useUltra(f);
+      return;
+    }
+    if (value.startsWith("ul:")) {
+      useUltra(value.slice(3));
+      return;
+    }
     const next = MODELS.find((m) => m.value === value);
+    // 从 Ultralytics 换回内置模型：批大小回到这个任务的默认值（内置模型不能自动选批大小）
+    const back = ultra ? { engine: "torchvision" as const, batch: cfg.batch > 0 ? cfg.batch : (isClsTask(task) ? 32 : 2) } : { engine: "torchvision" as const };
     // YOLOX 要的轮数多一些，少于 50 轮时提到 50
-    if (next?.defaultSize) update({ model: value, imgSize: next.defaultSize, ...(next.yolox && cfg.epochs < 50 ? { epochs: 50 } : {}) });
-    else if (picked?.defaultSize && !isClsTask(task)) update({ model: value, imgSize: 640 });
-    else update({ model: value });
+    if (next?.defaultSize) update({ ...back, model: value, imgSize: next.defaultSize, ...(next.yolox && cfg.epochs < 50 ? { epochs: 50 } : {}) });
+    else if ((picked?.defaultSize || ultra) && !isClsTask(task)) update({ ...back, model: value, imgSize: 640 });
+    else update({ ...back, model: value });
   };
 
   const doStart = async () => {
@@ -341,12 +385,66 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const epochs = run?.config?.epochs ?? cfg.epochs;
   const gpuMem = env?.gpu?.vramMb ?? 0;
   const useVersion = cfg.version != null && versions.some((v) => v.id === cfg.version);
-  // 可以接着训的：自己训练出来、有模型文件、模型属于这个任务的
+  // 可以接着训的：自己训练出来、有模型文件、模型属于这个任务的（内置模型和 Ultralytics 的都行，外部导入的不行）
   const baseRuns = runs.filter(
-    (r) => r.engine !== "external" && r.hasWeights && r.status !== "running" && MODELS.some((m) => m.value === r.config?.model && m.task === modelTask(task)),
+    (r) =>
+      r.hasWeights &&
+      r.status !== "running" &&
+      (r.engine === "ultralytics"
+        ? r.task === task
+        : r.engine === "torchvision" && MODELS.some((m) => m.value === r.config?.model && m.task === modelTask(task))),
   );
   const baseRun = baseRuns.find((r) => r.id === cfg.baseRun) ?? null;
   const recommended = recommendModel(task, gpuMem);
+  // 模型选择框：内置模型、Ultralytics 各系列、其他（输入模型名、本地文件）
+  const groups = ultraGroups(task);
+  const selValue = ultra ? `ul:${cfg.model}` : cfg.model;
+  const ultraKnown = groups.flatMap((g) => g.models).find((m) => m.file === cfg.model);
+  const optLabel = (name: string, value: string, tags: ReactNode = null) => (
+    <span>
+      <b>{name}</b>
+      {value === recommended && <Tag color="blue" style={{ marginLeft: 6 }}>{t("推荐")}</Tag>}
+      {tags}
+    </span>
+  );
+  const modelOptions = [
+    {
+      label: t("内置模型（Apache-2.0 / BSD，可以直接商用）"),
+      options: models.map((m) => ({
+        value: m.value,
+        search: m.name,
+        label: optLabel(
+          m.name,
+          m.value,
+          <>
+            {m.yolox && <Tag color="green" style={{ marginLeft: 6 }}>YOLO</Tag>}
+            {m.oneStage && <Tag style={{ marginLeft: 6 }}>{t("单阶段")}</Tag>}
+          </>,
+        ),
+      })),
+    },
+    ...groups.map((g) => ({
+      label: t("{family}（Ultralytics · AGPL-3.0）", { family: g.family }),
+      options: g.models.map((m) => ({ value: `ul:${m.file}`, search: `${m.name} ${m.file}`, label: optLabel(m.name, `ul:${m.file}`) })),
+    })),
+    {
+      label: t("其他"),
+      options: [
+        ...(ultra && !ultraKnown ? [{ value: selValue, search: cfg.model, label: <b>{ultraName(cfg.model)}</b> }] : []),
+        ...(task !== "multilabel"
+          ? [
+              { value: "__custom__", search: "", label: t("输入模型名…（Ultralytics 认得的都行，如 yolo11x-seg.pt）") },
+              { value: "__local__", search: "", label: t("本地模型文件（.pt 接着训 / .yaml 从头训）…") },
+            ]
+          : []),
+      ],
+    },
+  ];
+  const selDesc = baseRun
+    ? null
+    : ultra
+      ? (ultraKnown?.desc ?? (/[\\/]/.test(cfg.model) ? cfg.model : ""))
+      : picked?.desc;
 
   // 估一下训练集、验证集张数和步数（未划分的图按比例分；只用已审核时会更少，所以都说「约」）
   const ver = useVersion ? versions.find((v) => v.id === cfg.version) : undefined;
@@ -355,7 +453,8 @@ export default function Train({ project }: { project: ProjectInfo }) {
   const trainN = counts ? counts.train + Math.round((counts.unset * cfg.ratios[0]) / ratioSum) : 0;
   const valN = counts ? counts.val + Math.round((counts.unset * cfg.ratios[1]) / ratioSum) : 0;
   // 和 worker 一样：图比批大小多时丢掉最后不满的一批
-  const stepsPerEpoch = trainN > cfg.batch ? Math.floor(trainN / cfg.batch) : 1;
+  const effBatch = cfg.batch > 0 ? cfg.batch : 16; // 0 是 Ultralytics 自动选批大小，按 16 估
+  const stepsPerEpoch = trainN > effBatch ? Math.floor(trainN / effBatch) : 1;
   const totalSteps = stepsPerEpoch * cfg.epochs;
   const fewData = trainN > 0 && (trainN < 20 || totalSteps < 300);
   const fewVal = trainN > 0 && valN <= 2;
@@ -582,7 +681,11 @@ export default function Train({ project }: { project: ProjectInfo }) {
                   value={baseRun ? baseRun.id : 0}
                   onChange={(v) => {
                     const r = baseRuns.find((x) => x.id === v);
-                    update(r ? { baseRun: r.id, model: String(r.config.model), imgSize: r.config.imgSize ?? cfg.imgSize } : { baseRun: null });
+                    update(
+                      r
+                        ? { baseRun: r.id, model: String(r.config.model), engine: r.engine === "ultralytics" ? "ultralytics" : "torchvision", imgSize: r.config.imgSize ?? cfg.imgSize }
+                        : { baseRun: null },
+                    );
                   }}
                   options={[
                     { value: 0, label: t("从预训练权重开始（从头训）") },
@@ -603,19 +706,22 @@ export default function Train({ project }: { project: ProjectInfo }) {
                       })
                 }
               >
-                <Radio.Group value={cfg.model} disabled={!!baseRun} onChange={(e) => pickModel(e.target.value)}>
-                  <Space direction="vertical">
-                    {models.map((m) => (
-                      <Radio key={m.value} value={m.value}>
-                        <b>{m.name}</b>
-                        {m.value === recommended && <Tag color="blue" style={{ marginLeft: 6 }}>{t("推荐")}</Tag>}
-                        {m.yolox && <Tag color="green" style={{ marginLeft: 6 }}>YOLO</Tag>}
-                        {m.oneStage && <Tag style={{ marginLeft: 6 }}>{t("单阶段")}</Tag>}
-                        <div className="dim" style={{ fontSize: 12 }}>{m.desc}</div>
-                      </Radio>
-                    ))}
-                  </Space>
-                </Radio.Group>
+                <Select
+                  style={{ width: "100%" }}
+                  showSearch
+                  disabled={!!baseRun}
+                  value={selValue}
+                  onChange={pickModel}
+                  filterOption={(input, opt) => String((opt as { search?: string })?.search ?? "").toLowerCase().includes(input.toLowerCase())}
+                  options={modelOptions}
+                  listHeight={360}
+                />
+                {selDesc && <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{selDesc}</div>}
+                {ultra && (
+                  <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>
+                    {t("Ultralytics 模型（AGPL-3.0）：自己用、公司内部用不受限制；训出的模型放进闭源产品对外销售，需要向 Ultralytics 购买授权。第一次用会自动安装组件、下载预训练权重。")}
+                  </div>
+                )}
               </Form.Item>
               <Form.Item label={t("训练轮数")} tooltip={t("数据越少需要的轮数越多；一般 20~50，YOLOX 建议 50 以上")}>
                 <InputNumber min={1} max={500} value={cfg.epochs} onChange={(v) => update({ epochs: Number(v ?? 30) })} />
@@ -655,11 +761,40 @@ export default function Train({ project }: { project: ProjectInfo }) {
                     options={sizeOptions.map((v) => ({ value: v, label: v }))}
                   />
                 </Form.Item>
-                <Form.Item label={t("批大小")} tooltip={t("显存不够报错时调小")}>
-                  <InputNumber min={1} max={64} value={cfg.batch} onChange={(v) => update({ batch: Number(v ?? 4) })} />
+                <Form.Item label={t("批大小")} tooltip={ultra ? t("0 表示按显存自动选；显存不够报错时调小") : t("显存不够报错时调小")}>
+                  <InputNumber min={ultra ? 0 : 1} max={256} value={cfg.batch} onChange={(v) => update({ batch: Number(v ?? (ultra ? 0 : 4)) })} />
                 </Form.Item>
               </Space>
-              {picked?.yolox ? (
+              {ultra ? (
+                <>
+                  <Alert
+                    style={{ marginBottom: 12 }}
+                    type="info"
+                    showIcon
+                    message={t("Ultralytics 用自己的数据增强")}
+                    description={t("Mosaic 拼图、随机缩放平移、颜色抖动、水平翻转等按 Ultralytics 默认开启。要调整可以写在下面的「更多参数」里，比如 mosaic=0.5、fliplr=0。")}
+                  />
+                  <Form.Item
+                    label={
+                      <span>
+                        {t("更多参数")}
+                        <Button type="link" size="small" style={{ padding: "0 6px", height: "auto" }} onClick={() => api.openUrl(ULTRA_ARGS_DOC).catch(() => {})}>
+                          {t("参数说明")}
+                        </Button>
+                      </span>
+                    }
+                    tooltip={t("一行一个 key=value，原样交给 Ultralytics 训练，比如 cos_lr=True、patience=30、optimizer=AdamW。数据位置、输出位置由软件管，写了也不生效。")}
+                  >
+                    <Input.TextArea
+                      rows={3}
+                      placeholder={"cos_lr=True\npatience=30"}
+                      value={cfg.extra ?? ""}
+                      onChange={(e) => update({ extra: e.target.value })}
+                      style={{ fontFamily: "var(--mono, monospace)", fontSize: 12 }}
+                    />
+                  </Form.Item>
+                </>
+              ) : picked?.yolox ? (
                 <Alert
                   style={{ marginBottom: 12 }}
                   type="info"
@@ -802,7 +937,7 @@ export default function Train({ project }: { project: ProjectInfo }) {
                       <>
                         {/* 训练中的记录评估页不让选（还没训完） */}
                         {run.status !== "running" && <Button size="small" onClick={() => openRun(run.id, "eval")}>{t("看评估")}</Button>}
-                        {run.engine !== "external" && (
+                        {run.engine === "torchvision" && (
                           <Button size="small" icon={<ExportOutlined />} loading={exporting} onClick={doExport}>
                             {run.hasOnnx ? t("重新导出 ONNX") : t("导出 ONNX")}
                           </Button>
@@ -928,13 +1063,11 @@ export default function Train({ project }: { project: ProjectInfo }) {
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 6 }}>
               <span className="muted">{t("训练记录")} <span className="dim">· {t("勾选两次以上可以对比，也可以一起删除")}</span></span>
               <Space>
-                {task === "detect" && (
-                  <Tooltip title={t("导入别处训好的 YOLO 等 ONNX 模型，用来预标注、评估、误报测试")}>
-                    <Button size="small" onClick={() => setImporting(true)}>
-                      {t("导入外部模型")}
-                    </Button>
-                  </Tooltip>
-                )}
+                <Tooltip title={t("导入别处训好的 YOLO 等 ONNX 模型，用来预标注、评估和部署")}>
+                  <Button size="small" onClick={() => setImporting(true)}>
+                    {t("导入外部模型")}
+                  </Button>
+                </Tooltip>
                 <Tooltip title={compareIds.length > 8 ? t("最多同时对比 8 次训练") : undefined}>
                   <Button size="small" disabled={compareIds.length < 2 || compareIds.length > 8} onClick={() => setComparing(true)}>
                     {compareIds.length >= 2 ? t("对比所选（{n}）", { n: compareIds.length }) : t("对比所选")}
@@ -977,6 +1110,26 @@ export default function Train({ project }: { project: ProjectInfo }) {
         onClose={() => setSplitOpen(false)}
         onChanged={setSplit}
       />
+      <Modal
+        title={t("输入模型名")}
+        open={customOpen}
+        onCancel={() => setCustomOpen(false)}
+        onOk={() => {
+          if (customName.trim()) useUltra(customName.trim());
+          setCustomOpen(false);
+        }}
+        okText={t("确定")}
+        cancelText={t("取消")}
+        destroyOnHidden
+      >
+        <p className="muted" style={{ marginTop: 0 }}>
+          {t("Ultralytics 认得的模型名都可以：官方权重会自动下载（如 yolo11x-seg.pt、yolo12m.pt、rtdetr-l.pt），结构文件从头训（如 yolo11s.yaml）。名字里带 -seg、-pose、-cls 的分别是分割、关键点、分类模型。")}
+        </p>
+        <Input autoFocus value={customName} placeholder="yolo11m-seg.pt" onChange={(e) => setCustomName(e.target.value)} onPressEnter={() => {
+          if (customName.trim()) useUltra(customName.trim());
+          setCustomOpen(false);
+        }} />
+      </Modal>
       <ImportModelModal
         open={importing}
         onClose={() => setImporting(false)}

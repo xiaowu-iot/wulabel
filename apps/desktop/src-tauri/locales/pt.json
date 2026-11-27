@@ -477,5 +477,8 @@
   "结果文件夹不能放在要识别的文件夹里面": "A pasta de resultados não pode ficar dentro da pasta reconhecida",
   "这个文件夹里没有图片": "Não há imagens nesta pasta",
   "批量识别异常：{e}": "Erro no reconhecimento em lote: {e}",
-  "没有目标": "Sem objetos"
+  "没有目标": "Sem objetos",
+  "模型的任务类型和项目不一致，不能导入": "O tipo de tarefa do modelo não corresponde ao do projeto; não é possível importar",
+  "Ultralytics 的分类模型不支持多标签分类，请选内置模型": "Os modelos de classificação do Ultralytics não suportam classificação multirrótulo; escolha um modelo integrado",
+  "巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型": "No momento, a plataforma Xuntong só aceita modelos treinados com os modelos integrados do Wulabel (YOLOX etc.)"
 }

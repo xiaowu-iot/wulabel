@@ -45,6 +45,27 @@ def pick_device() -> torch.device:
     return torch.device("cpu")
 
 
+def onnx_pred(model, img, conf: float, use=None) -> dict:
+    """ONNX 模型的结果换成 pred 行的格式（boxes / polys / poses / tags）；use：只要这些类别（None 表示全要）"""
+    boxes, polys, poses, tags = [], [], [], []
+    for d in model.predict_full(img, conf):
+        c, s = d["cls"], round(d["score"], 4)
+        if use is not None and c not in use:
+            continue
+        if "box" not in d:
+            tags.append([c, s])
+            continue
+        x0, y0, x1, y1 = d["box"]
+        box = [round(x0, 2), round(y0, 2), round(x1 - x0, 2), round(y1 - y0, 2)]
+        boxes.append(box + [c, s])
+        if d.get("polygon"):
+            polys.append([c, s] + [round(v, 1) for v in d["polygon"]])
+        if "keypoints" in d:
+            kp = d["keypoints"]
+            poses.append([c, s] + box + [round(v, 1) if j % 3 < 2 else int(v) for j, v in enumerate(kp)])
+    return {"boxes": boxes, "polys": polys, "poses": poses, "tags": tags}
+
+
 class Predictor:
     def __init__(self):
         self.device = pick_device()
@@ -58,12 +79,13 @@ class Predictor:
         key = (str(p), p.stat().st_mtime, p.with_suffix(".json").stat().st_mtime if p.suffix == ".onnx" else 0)
         if key != self.key:
             if p.suffix.lower() == ".onnx":
-                # 导入的外部模型（YOLO 等）
+                # ONNX 模型（导入的外部模型、Ultralytics 等引擎训练后导出的）
                 from . import onnx_model
 
                 self.model, info = onnx_model.load(p)
-                self.ck = {"classes": info.get("classes", []), "model": "external", "use": info.get("use")}
-                self.task = "external"
+                self.ck = {"classes": info.get("classes", []), "model": "onnx", "use": info.get("use")}
+                self.task = "onnx"
+                self.onnx_task = self.model.task
             else:
                 self.model, self.ck = models.load(p, self.device)
                 self.task = models.task_of(self.ck.get("model", ""))
@@ -89,14 +111,8 @@ class Predictor:
         for it in items:
             try:
                 img = load_image(Path(it["path"]))
-                if self.task == "external":
-                    use = self.ck.get("use")
-                    boxes = [
-                        [round(x0, 2), round(y0, 2), round(x1 - x0, 2), round(y1 - y0, 2), c, round(s, 4)]
-                        for x0, y0, x1, y1, c, s in self.model.predict(img, conf)
-                        if use is None or c in use
-                    ]
-                    emit("pred", id=it["id"], boxes=boxes, polys=[], poses=[], tags=[])
+                if self.task == "onnx":
+                    emit("pred", id=it["id"], **onnx_pred(self.model, img, conf, self.ck.get("use")))
                     n += 1
                     continue
                 if self.task == "classify":
@@ -133,7 +149,7 @@ class Predictor:
             except Exception as e:
                 emit("pred", id=it["id"], boxes=[], polys=[], poses=[], tags=[], error=str(e))
             n += 1
-        emit("done", count=n, classes=self.ck["classes"], task=self.task)
+        emit("done", count=n, classes=self.ck["classes"], task=getattr(self, "onnx_task", self.task) if self.task == "onnx" else self.task)
 
     # ---------- 标注辅助：SAM、文本提示 ----------
 

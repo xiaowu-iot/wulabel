@@ -92,6 +92,12 @@ pub struct ExternalModel {
     /// 模型的类别名（按模型里的顺序）；可以改成项目里的类别名来对应
     pub classes: Vec<String>,
     pub img_size: u32,
+    /// 模型的任务（detect / segment / pose / classify），识别模型时得到；不传时按目标检测
+    #[serde(default)]
+    pub task: Option<String>,
+    /// 关键点模型每个目标的关键点数和每点维度 [K, 2 或 3]
+    #[serde(default)]
+    pub kpt_shape: Option<Vec<u32>>,
     /// 只用这些类别（模型类别序号），为空表示全用
     #[serde(default)]
     pub use_classes: Option<Vec<usize>>,
@@ -99,8 +105,10 @@ pub struct ExternalModel {
 
 /// 导入外部模型：复制到 runs/ 下，记一条训练记录（engine = external），之后就能像训练出的模型一样用来预标注、体检、评估
 pub fn import_onnx(p: &Project, path: &str, m: &ExternalModel) -> AppResult<i64> {
-    if p.meta.task != "detect" {
-        return Err(msg(t!("外部模型目前只支持目标检测项目")));
+    // 多标签分类项目用分类模型（每个类别各自的分数）
+    let want = if p.meta.task == "multilabel" { "classify" } else { p.meta.task.as_str() };
+    if m.task.as_deref().unwrap_or("detect") != want {
+        return Err(msg(t!("模型的任务类型和项目不一致，不能导入")));
     }
     if m.classes.is_empty() || m.classes.iter().any(|c| c.trim().is_empty()) {
         return Err(msg(t!("请填写模型的类别名（和模型输出的顺序一致）")));
@@ -119,7 +127,7 @@ pub fn import_onnx(p: &Project, path: &str, m: &ExternalModel) -> AppResult<i64>
     let dir = p.root.join("runs").join(&name);
     fs::create_dir_all(&dir)?;
     fs::copy(path, dir.join("model.onnx")).map_err(|e| msg(t!("复制模型失败：{e}", e = e)))?;
-    write_info(&dir, m, path)?;
+    write_info(p, &dir, m, path)?;
     let config = serde_json::json!({
         "model": "external", "displayName": m.name.trim(), "kind": m.kind, "classes": m.classes,
         "imgSize": m.img_size, "source": path,
@@ -132,10 +140,19 @@ pub fn import_onnx(p: &Project, path: &str, m: &ExternalModel) -> AppResult<i64>
     Ok(conn.last_insert_rowid())
 }
 
-fn write_info(dir: &Path, m: &ExternalModel, source: &str) -> AppResult<()> {
+fn write_info(p: &Project, dir: &Path, m: &ExternalModel, source: &str) -> AppResult<()> {
+    // 改类别时没传任务、关键点形状的，沿用原来记下的
+    let old: serde_json::Value = fs::read_to_string(dir.join("model.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let task = m.task.clone().or_else(|| old["task"].as_str().map(String::from)).unwrap_or_else(|| "detect".into());
+    let kpt = m.kpt_shape.clone().map(|k| serde_json::json!(k)).unwrap_or_else(|| old["kptShape"].clone());
     let info = serde_json::json!({
-        "kind": m.kind, "classes": m.classes.iter().map(|c| c.trim()).collect::<Vec<_>>(),
-        "imgSize": m.img_size, "use": m.use_classes, "source": source,
+        "kind": m.kind, "task": task,
+        "classes": m.classes.iter().map(|c| c.trim()).collect::<Vec<_>>(),
+        "imgSize": m.img_size, "use": m.use_classes, "source": source, "kptShape": kpt,
+        "multiLabel": p.meta.task == "multilabel", "engine": EXTERNAL,
     });
     fs::write(dir.join("model.json"), serde_json::to_string_pretty(&info)?)?;
     Ok(())
@@ -148,7 +165,7 @@ pub fn update_external(p: &Project, run_id: i64, m: &ExternalModel) -> AppResult
         return Err(msg(t!("只有导入的外部模型可以改类别")));
     }
     let dir = PathBuf::from(&run.dir);
-    write_info(&dir, m, run.config["source"].as_str().unwrap_or(""))?;
+    write_info(p, &dir, m, run.config["source"].as_str().unwrap_or(""))?;
     let mut config = run.config.clone();
     config["classes"] = serde_json::json!(m.classes);
     config["displayName"] = serde_json::json!(m.name.trim());

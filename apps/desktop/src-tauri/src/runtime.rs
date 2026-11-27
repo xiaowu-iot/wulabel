@@ -440,6 +440,33 @@ impl Runtime {
         r
     }
 
+    /// Ultralytics 训练组件（YOLOv8 / 11 等），第一次选这类模型训练时装上。
+    /// 它依赖完整版 opencv-python，和环境里的 opencv-python-headless 都提供 cv2、会互相覆盖，装完删掉完整版、重装 headless 版
+    pub fn ensure_ultralytics(&self, log: &(dyn Fn(String) + Sync)) -> AppResult<()> {
+        let py = self.python().ok_or_else(|| msg(t!("还没有训练环境，请先到「设置」里安装")))?;
+        let has = command(&py).args(["-c", "import ultralytics"]).output().map(|o| o.status.success()).unwrap_or(false);
+        if has {
+            return Ok(());
+        }
+        self.ensure_package("ultralytics", "ultralytics>=8.3,<9", log)?;
+        if let Some(uv) = self.uv() {
+            let mut c = command(&uv);
+            c.args(["pip", "uninstall", "--python"]).arg(&py).arg("opencv-python");
+            let _ = c.output();
+            let mut c = command(&uv);
+            c.args(["pip", "install", "--reinstall", "--python"]).arg(&py).arg("opencv-python-headless");
+            if self.settings().mirror == "china" {
+                c.args(["--index-url", "https://pypi.tuna.tsinghua.edu.cn/simple"]);
+            }
+            let file = self.open_install_log();
+            run_logged(c, &|line: String| {
+                write_log(&file, &line);
+                log(line);
+            })?;
+        }
+        Ok(())
+    }
+
     /// 安装训练环境：uv → Python → PyTorch → 其他依赖 → 自检。
     /// log 收到每一行输出；progress 收到大文件下载进度（文件名、已下载字节、总字节、瞬时速度 字节/秒）；
     /// step 收到当前第几步（第几步、共几步、这一步在做什么）。

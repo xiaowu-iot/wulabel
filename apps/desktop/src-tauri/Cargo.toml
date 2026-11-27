@@ -1,6 +1,6 @@
 [package]
 name = "xlabel"
-version = "0.6.4"
+version = "0.6.5"
 description = "离线 AI 标注训练桌面软件"
 license = "Apache-2.0"
 edition = "2021"

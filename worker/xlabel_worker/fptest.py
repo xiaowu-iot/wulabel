@@ -47,6 +47,8 @@ def _detector(weights: Path, device):
         from . import onnx_model
 
         det, info = onnx_model.load(weights)
+        if det.task == "classify":
+            raise RuntimeError(tr("分类模型没有框，不能做误报测试"))
         use = info.get("use")
         return (lambda img, conf: [d for d in det.predict(img, conf) if use is None or d[4] in use]), info.get("classes", [])
     model, ck = models.load(weights, device)

@@ -91,9 +91,34 @@ def _export_cls(model, size: int, path: Path, multi: bool = False) -> None:
     )
 
 
+ONNX_META_KEYS = ("kind", "task", "classes", "imgSize", "kptShape", "multiLabel", "engine", "model", "source")
+ULTRA_INPUT = "image: float32 [1, 3, S, S], RGB, 0~1, letterbox (keep ratio, center, pad 114)"
+
+
+def _copy_onnx(src: Path, dst: Path) -> dict:
+    """已经是 ONNX 的模型（Ultralytics 等引擎训练后导出的、导入的）：复制过去，写好 model.json"""
+    from . import onnx_decode
+
+    m, info = onnx_decode.load(src)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if Path(src).resolve() != Path(dst).resolve():
+        shutil.copy(src, dst)
+    meta = {k: info[k] for k in ONNX_META_KEYS if info.get(k) is not None}
+    meta.update(kind=m.kind, task=m.task, classes=m.classes, imgSize=m.size)
+    if m.kind != "wulabel":
+        meta.setdefault("input", ULTRA_INPUT.replace("S, S", f"{m.size}, {m.size}"))
+    Path(dst).with_name("model.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return meta
+
+
 def run(weights: str, out: str) -> None:
     out_p = Path(out)
     out_p.parent.mkdir(parents=True, exist_ok=True)
+    if Path(weights).suffix.lower() == ".onnx":
+        log(tr("正在导出 ONNX…"))
+        _copy_onnx(Path(weights), out_p)
+        emit("done", path=str(out_p))
+        return
     model, ck = models.load(Path(weights), torch.device("cpu"))
     size = int(ck["img_size"])
     cls = models.is_cls(ck["model"])
@@ -286,6 +311,8 @@ def run_formats(cfg: dict) -> None:
     """cfg: weights, out, formats(["onnx","onnx_static","openvino","tensorrt","rknn"]), size"""
     out = Path(cfg["out"])
     out.mkdir(parents=True, exist_ok=True)
+    if Path(cfg["weights"]).suffix.lower() == ".onnx":
+        return _run_formats_onnx(cfg, out)
     model, ck = models.load(Path(cfg["weights"]), torch.device("cpu"))
     size = int(cfg.get("size") or ck["img_size"])
     formats = cfg["formats"]
@@ -412,3 +439,106 @@ def run_formats(cfg: dict) -> None:
         shutil.rmtree(dyn.parent, ignore_errors=True)
     emit("progress", step=len(steps), total=len(steps), name="")
     emit("done", results=results)
+
+
+def _run_formats_onnx(cfg: dict, out: Path) -> None:
+    """已经是 ONNX 的模型：ONNX 直接复制；OpenVINO 从 ONNX 转；TensorRT / RKNN 转换包基于同一个 ONNX"""
+    src = Path(cfg["weights"])
+    formats = cfg["formats"]
+    steps = [f for f in ("onnx", "onnx_static", "openvino", "tensorrt", "rknn") if f in formats]
+    results = []
+    passed = []
+
+    def done(fmt, path, ok=True, note=""):
+        results.append({"format": fmt, "path": str(path), "ok": ok, "note": note})
+        emit("format", format=fmt, path=str(path), ok=ok, note=note)
+
+    def stage(name):
+        emit("progress", step=len(passed), total=len(steps), name=name)
+        passed.append(name)
+
+    dyn = out / "onnx" / "model.onnx"
+    meta = _copy_onnx(src, dyn)
+    size = int(meta.get("imgSize") or 640)
+    if "onnx" in formats:
+        stage("onnx")
+        done("onnx", dyn)
+    if "onnx_static" in formats:
+        stage("onnx_static")
+        static = out / "onnx_static" / "model_static.onnx"
+        _copy_onnx(src, static)
+        done("onnx_static", static)
+    if "openvino" in formats:
+        stage("openvino")
+        try:
+            os.environ.setdefault("OPENVINO_TELEMETRY", "0")
+            import openvino as ov
+
+            log(tr("转换 OpenVINO…"))
+            d = out / "openvino"
+            d.mkdir(parents=True, exist_ok=True)
+            ov.save_model(ov.convert_model(str(dyn)), str(d / "model.xml"))
+            shutil.copy(dyn.parent / "model.json", d / "model.json")
+            done("openvino", d / "model.xml")
+        except ImportError:
+            done("openvino", "", ok=False, note=tr("没有安装 OpenVINO"))
+        except Exception as e:
+            done("openvino", "", ok=False, note=tr("转换失败：{e}", e=e))
+    wulabel = meta.get("kind") == "wulabel"
+    for fmt, files in (
+        ("tensorrt", {
+            "build_engine.bat": "trtexec --onnx=model_static.onnx --saveEngine=model.engine --fp16\r\npause\r\n",
+            "build_engine.sh": "#!/bin/sh\nset -e\ncd \"$(dirname \"$0\")\"\ntrtexec --onnx=model_static.onnx --saveEngine=model.engine --fp16\n",
+        }),
+        ("rknn", {"convert_rknn.py": _rknn_script(False)}),
+    ):
+        if fmt not in formats:
+            continue
+        stage(fmt)
+        d = out / fmt
+        d.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, d / "model_static.onnx")
+        shutil.copy(dyn.parent / "model.json", d / "model.json")
+        task = {"segment": "seg", "pose": "pose", "classify": "cls"}.get(meta.get("task"), "det")
+        text = _readme(fmt, size, task, False) if wulabel else _readme_ultra(fmt, size)
+        (d / "README.md").write_text(text, encoding="utf-8")
+        for name, body in files.items():
+            (d / name).write_text(body, encoding="utf-8", newline="")
+        done(fmt, d, note=tr("转换包：需要在目标设备上完成转换，见 README.md"))
+    if "onnx" not in formats and dyn.parent.exists():
+        shutil.rmtree(dyn.parent, ignore_errors=True)
+    emit("progress", step=len(steps), total=len(steps), name="")
+    emit("done", results=results)
+
+
+def _readme_ultra(fmt: str, size: int) -> str:
+    """Ultralytics 系模型（YOLOv8 / 11 等）转换包的说明：输入输出是 Ultralytics 原始格式"""
+    head = tr("# TensorRT 转换包") if fmt == "tensorrt" else tr("# RKNN 转换包（瑞芯微 RK3588 / RK3568 / RK3566 等）")
+    if fmt == "tensorrt":
+        steps = [
+            tr("TensorRT 引擎（.engine）和显卡型号、TensorRT 版本绑定，必须在**目标设备上**生成（例如 Jetson、部署服务器）。"),
+            "",
+            tr("## 步骤"),
+            "",
+            tr("1. 把整个文件夹拷到目标设备，确认已安装 TensorRT（Jetson 刷机自带；服务器需安装 TensorRT 并能运行 `trtexec`）。"),
+            tr("2. Windows 运行 `build_engine.bat`，Linux/Jetson 运行 `bash build_engine.sh`。"),
+            tr("3. 生成 `model.engine`。"),
+        ]
+    else:
+        steps = [
+            tr("瑞芯微官方转换工具 rknn-toolkit2 只支持 **Linux x86_64**（如 Ubuntu 20.04/22.04），不能在 Windows 上运行。"),
+            "",
+            tr("## 步骤"),
+            "",
+            tr("1. 在 Ubuntu 电脑上安装 rknn-toolkit2（见瑞芯微官方仓库 airockchip/rknn-toolkit2，按 Python 版本安装对应的 whl）。"),
+            tr("2. 把整个文件夹拷过去，运行：`python convert_rknn.py rk3588`（芯片型号按实际填写）。"),
+            tr("3. 生成 `model.rknn`，拷到板子上用 rknn-toolkit-lite2 或 RKNN C API 加载。"),
+        ]
+    io = [
+        tr("## 输入输出"),
+        "",
+        tr("- 输入：`[1, 3, {size}, {size}]`，RGB，0~1。原图按比例缩放后居中，四周补 114，补到 {size}×{size}。", size=size),
+        tr("- 输出是 Ultralytics 原始格式（模型里没有 NMS）：检测 `[1, 4+类别数, N]`；分割另有掩膜原型；关键点每个目标后面跟关键点。后处理可以参考 Ultralytics 官方示例，或推理服务包里的 `onnx_decode.py`。"),
+        tr("- 类别见 `model.json`。"),
+    ]
+    return "\n".join([head, "", *steps, "", *io, ""])

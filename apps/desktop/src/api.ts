@@ -310,6 +310,10 @@ export interface TrainConfig {
   baseRun?: number | null;
   /** 数据增强；空 = 默认 */
   aug?: AugConfig | null;
+  /** 训练引擎：torchvision（内置模型，默认）/ ultralytics（YOLOv8 / 11 等，model 是模型名或本地 .pt / .yaml 路径） */
+  engine?: "torchvision" | "ultralytics";
+  /** Ultralytics 的「更多参数」：一行一个 key=value */
+  extra?: string | null;
 }
 
 /** 数据增强参数（和 worker 的 augment.py 一致） */
@@ -372,6 +376,8 @@ export interface RunInfo {
   };
   bestMap50: number | null;
   createdAt: number;
+  /** 项目任务（detect / segment / classify / multilabel / pose），训练或导入时记下 */
+  task: string;
   hasWeights: boolean;
   hasOnnx: boolean;
   /** 停止、中断或失败的训练留有断点：可以从最后训完的一轮接着训练 */
@@ -421,6 +427,10 @@ export interface Thresholds {
 /** 外部 ONNX 模型的识别结果 */
 export interface OnnxInfo {
   kind: string;
+  /** 模型的任务：detect / segment / pose / classify */
+  task: string;
+  /** 关键点模型：[关键点数, 每点维度] */
+  kptShape: number[] | null;
   classes: string[];
   numClasses: number;
   imgSize: number;
@@ -434,6 +444,8 @@ export interface ExternalModel {
   kind: string;
   classes: string[];
   imgSize: number;
+  task?: string;
+  kptShape?: number[] | null;
   /** 只用这些类别（模型类别序号），null 表示全用 */
   useClasses: number[] | null;
 }

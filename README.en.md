@@ -10,7 +10,7 @@ English · [简体中文](README.md)
 
 [Website](https://wulabel.xiaowuiot.com/en/) · [Download](#download) · [User guide](https://wulabel.xiaowuiot.com/en/guide.html) ([Markdown](docs/i18n/en/使用教程-详细版.md)) · [Releases](https://github.com/xiaowu-iot/wulabel/releases)
 
-[![Latest release](https://img.shields.io/badge/release-v0.6.4-brightgreen)](https://github.com/xiaowu-iot/wulabel/releases)
+[![Latest release](https://img.shields.io/badge/release-v0.6.5-brightgreen)](https://github.com/xiaowu-iot/wulabel/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#download)
 
@@ -57,7 +57,7 @@ Updates: the app checks for new versions on startup; click "Update now" and it d
 - **AI assistance**: SAM click-to-outline; text-prompt detection; pre-label with your own trained model (single image or batch)
 - **Health check**: rule checks (tiny boxes, duplicate boxes and images, class imbalance) and model checks (likely missed labels, wrong classes, loose boxes, extra boxes)
 - **Dataset versions**: snapshot annotations, compare, export, train on a version, restore
-- **Training**: detection — YOLOX, Faster R-CNN, RetinaNet, FCOS, SSDLite; segmentation — Mask R-CNN; keypoints — Keypoint R-CNN; classification — MobileNetV3, EfficientNet, ResNet50. Augmentation, resume training, run comparison; batch size is reduced automatically when GPU memory runs out; import external ONNX models (YOLOv5 / v8 / v11, YOLOX, RT-DETR…) for pre-labeling and evaluation
+- **Training**: detection — YOLOX, Faster R-CNN, RetinaNet, FCOS, SSDLite; segmentation — Mask R-CNN; keypoints — Keypoint R-CNN; classification — MobileNetV3, EfficientNet, ResNet50; you can also train Ultralytics YOLO11, YOLO26, YOLOv8, YOLO12, YOLOv10, YOLOv9 and RT-DETR (detection, segmentation, keypoints, classification), enter any model name or continue from a local .pt, with automatic ONNX conversion. Augmentation, resume training, run comparison; batch size is reduced automatically when GPU memory runs out; import external ONNX models (YOLOv5 / v8 / v11, YOLOX, RT-DETR…, any task) for pre-labeling, evaluation and deployment
 - **Evaluation**: mAP, precision, recall (accuracy and F1 for classification); per-class metrics, confusion matrix, error browser; threshold suggestions; false-positive test; delivery report export
 - **Deployment**: live test on a camera or video stream; export ONNX, OpenVINO, TensorRT / RKNN conversion packages; generate an inference service package (multi-stream, alert rules, Webhook / MQTT). Live test and service packages support detection, segmentation, keypoint and classification models
 - **Collaboration**: your computer hosts, members log in from a browser over LAN or online; roles, assignment, per-image locks, review, workload stats, watermark. Or split into offline packages and merge them back

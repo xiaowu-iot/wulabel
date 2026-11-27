@@ -34,6 +34,13 @@ from .protocol import emit, log
 from .train import ClsTask, pick_device, split_report
 
 SPLITS = ("val", "test")
+# 训练结束后在训练进程里顺带评估时不发进度和 done（训练界面有自己的进度）
+QUIET = False
+
+
+def _progress(**kw) -> None:
+    if not QUIET:
+        emit("progress", **kw)
 
 
 def _remap(model_classes: list[str], classes: list[str]) -> dict[int, int]:
@@ -50,7 +57,7 @@ def _det_splits(root: Path, classes: list[str], predict) -> dict:
         ds = CocoDetection(root, split, train=False)
         preds, gts = [], []
         n = len(ds.images)
-        emit("progress", split=split, done=0, total=n)
+        _progress(split=split, done=0, total=n)
         for i, im in enumerate(ds.images):
             boxes, scores, labels = predict(load_image(ds.dir / im["file_name"]))
             preds.append(ImagePred(boxes=boxes, scores=scores, labels=labels))
@@ -58,7 +65,7 @@ def _det_splits(root: Path, classes: list[str], predict) -> dict:
             gts.append(ImageGt(boxes=t["boxes"].numpy(), labels=t["labels"].numpy() - 1, image_id=int(im["id"])))
             # 每 10 张和最后一张报一次进度
             if (i + 1) % 10 == 0 or i + 1 == n:
-                emit("progress", split=split, done=i + 1, total=n)
+                _progress(split=split, done=i + 1, total=n)
         r = evaluate(preds, gts, len(classes))
         r.thresholds = threshold_curve(preds, gts, len(classes))
         out[split] = split_report(r, classes, len(ds.images))
@@ -77,7 +84,7 @@ def _multi_splits(root: Path, classes: list[str], model, ck: dict, cmap: dict[in
             continue
         ds = ClsFolder(root, split, train=False, size=int(ck["img_size"]))
         ys, ps, ids = [], [], []
-        emit("progress", split=split, done=0, total=len(ds))
+        _progress(split=split, done=0, total=len(ds))
         loader = torch.utils.data.DataLoader(ds, batch_size=16, shuffle=False, collate_fn=task.collate)
         for imgs, labels, idl in loader:
             prob = torch.sigmoid(model(imgs.to(device)).float()).cpu().numpy()
@@ -87,7 +94,7 @@ def _multi_splits(root: Path, classes: list[str], model, ck: dict, cmap: dict[in
             ps.append(p)
             ys.append(labels.numpy())
             ids += idl
-            emit("progress", split=split, done=len(ids), total=len(ds))
+            _progress(split=split, done=len(ids), total=len(ds))
         y = np.concatenate(ys) if ys else np.zeros((0, len(classes)))
         p = np.concatenate(ps) if ps else np.zeros((0, len(classes)))
         r = multilabel_eval(y, p, ids, len(classes))
@@ -96,7 +103,61 @@ def _multi_splits(root: Path, classes: list[str], model, ck: dict, cmap: dict[in
     return out
 
 
+def _onnx_cls_splits(root: Path, classes: list[str], det, cmap: dict[int, int], use, report: dict) -> dict:
+    """ONNX 分类模型（单标签或多标签）在分类数据集上评估"""
+    out = {}
+    multi = bool(getattr(det.m, "multi", False))
+    for split in SPLITS:
+        if not has_cls_split(root, split):
+            continue
+        doc = json.loads((root / "annotations" / f"{split}.json").read_text(encoding="utf-8"))
+        if bool(doc.get("multiLabel")) != multi:
+            raise RuntimeError(tr("这个模型和项目一个是多标签分类、一个是单标签分类，不能用来评估"))
+        items = doc["images"]
+        _progress(split=split, done=0, total=len(items))
+        ys, ps, ids = [], [], []
+        y_true, y_pred, scores = [], [], []
+        for i, it in enumerate(items):
+            res = det.predict_full(load_image(root / it["file"]), 0.0)
+            if multi:
+                p = np.zeros(len(classes))
+                for d in res:
+                    if d["cls"] in cmap and (use is None or d["cls"] in use):
+                        p[cmap[d["cls"]]] = d["score"]
+                y = np.zeros(len(classes))
+                for c in it["labels"]:
+                    y[int(c)] = 1.0
+                ps.append(p)
+                ys.append(y)
+            else:
+                top = next((d for d in res if use is None or d["cls"] in use), None)
+                t = int(it["label"])
+                pi = cmap.get(top["cls"], -1) if top else -1
+                y_true.append(t)
+                # 判成项目里没有的类别时记成分错
+                y_pred.append(pi if pi >= 0 else (t + 1) % max(len(classes), 1))
+                scores.append(top["score"] if top else 0.0)
+            ids.append(int(it["id"]))
+            if (i + 1) % 10 == 0 or i + 1 == len(items):
+                _progress(split=split, done=i + 1, total=len(items))
+        if multi:
+            y = np.stack(ys) if ys else np.zeros((0, len(classes)))
+            p = np.stack(ps) if ps else np.zeros((0, len(classes)))
+            r = multilabel_eval(y, p, ids, len(classes))
+            r.thresholds = multilabel_threshold_curve(y, p)
+            report["multiLabel"] = True
+        else:
+            r = classify_eval(y_true, y_pred, ids, len(classes), scores=np.array(scores))
+            r.thresholds = classify_threshold_curve(y_true, y_pred, scores)
+        out[split] = split_report(r, classes, len(items))
+        n, v = len(items), f"{r.map50:.3f}"
+        log(tr("验证集：{n} 张，准确率 {acc}", n=n, acc=v) if split == "val" else tr("测试集：{n} 张，准确率 {acc}", n=n, acc=v))
+    return out
+
+
 def run(cfg: dict) -> None:
+    global QUIET
+    QUIET = bool(cfg.get("quiet"))
     root = Path(cfg["dataset"])
     out = Path(cfg["out"])
     weights = Path(cfg["weights"])
@@ -112,17 +173,20 @@ def run(cfg: dict) -> None:
         use = info.get("use")
         if not cmap:
             raise RuntimeError(tr("模型的类别名和项目类别一个都对不上，请在导入模型时把类别名改成项目里的名字"))
-        log(tr("外部模型：{n} 个类别和项目类别对应上", n=len(cmap)))
+        log(tr("模型的 {n} 个类别和项目类别对应上", n=len(cmap)))
+        report["task"] = det.task
+        if det.task == "classify":
+            report["splits"] = _onnx_cls_splits(root, classes, det, cmap, use, report)
+        else:
 
-        def predict(img):
-            dets = [d for d in det.predict(img, 0.05) if d[4] in cmap and (use is None or d[4] in use)]
-            if not dets:
-                return np.zeros((0, 4)), np.zeros(0), np.zeros(0, dtype=int)
-            a = np.array([d[:4] for d in dets], dtype=np.float32)
-            return a, np.array([d[5] for d in dets]), np.array([cmap[d[4]] for d in dets], dtype=int)
+            def predict(img):
+                dets = [d for d in det.predict(img, 0.05) if d[4] in cmap and (use is None or d[4] in use)]
+                if not dets:
+                    return np.zeros((0, 4)), np.zeros(0), np.zeros(0, dtype=int)
+                a = np.array([d[:4] for d in dets], dtype=np.float32)
+                return a, np.array([d[5] for d in dets]), np.array([cmap[d[4]] for d in dets], dtype=int)
 
-        report["task"] = "detect"
-        report["splits"] = _det_splits(root, classes, predict)
+            report["splits"] = _det_splits(root, classes, predict)
     else:
         model, ck = models.load(weights, device)
         key = ck["model"]
@@ -145,7 +209,7 @@ def run(cfg: dict) -> None:
                 ds = ClsFolder(root, split, train=False, size=int(ck["img_size"]))
                 y_true, y_pred, ids, scores = [], [], [], []
                 model.eval()
-                emit("progress", split=split, done=0, total=len(ds))
+                _progress(split=split, done=0, total=len(ds))
                 with torch.no_grad():
                     loader = torch.utils.data.DataLoader(ds, batch_size=16, shuffle=False, collate_fn=task.collate)
                     for imgs, labels, idl in loader:
@@ -157,7 +221,7 @@ def run(cfg: dict) -> None:
                             y_pred.append(cmap.get(pi, -1))
                             scores.append(s)
                             ids.append(i)
-                        emit("progress", split=split, done=len(ids), total=len(ds))
+                        _progress(split=split, done=len(ids), total=len(ds))
                 # 分错到项目里没有的类别时，混淆矩阵放不下，记成「判成第一个类以外」——这里归到最后统计前过滤
                 yp = [p if p >= 0 else (t + 1) % max(len(classes), 1) for p, t in zip(y_pred, y_true)]
                 r = classify_eval(y_true, yp, ids, len(classes), scores=np.array(scores))
@@ -185,4 +249,5 @@ def run(cfg: dict) -> None:
         raise RuntimeError(tr("没有验证集或测试集。请先在「数据」页划分出验证集，再评估"))
     (out / "eval.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
     first = report["splits"].get("val") or next(iter(report["splits"].values()))
-    emit("done", map50=first["map50"])
+    if not QUIET:
+        emit("done", map50=first["map50"])

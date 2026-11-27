@@ -131,5 +131,17 @@
   "验证集：{n} 张，mAP {map50}": "Validierung: {n} Bilder, mAP {map50}",
   "测试集：{n} 张，mAP {map50}": "Test: {n} Bilder, mAP {map50}",
   "probs [N, 类别数]，每个类别各自的分数（已 sigmoid，多标签：分数达到阈值的类别都算有），类别顺序见 classes": "probs [N, Klassenzahl], unabhängiger Score je Klasse (Sigmoid angewendet; Multi-Label: jede Klasse ab dem Schwellenwert ist vorhanden), Klassenreihenfolge in classes",
-  "第 {epoch} 轮 mAP {map50}、宏平均 F1 {f1}，保存为最好的模型": "Epoche {epoch}: mAP {map50}, Makro-F1 {f1}, als bestes Modell gespeichert"
+  "第 {epoch} 轮 mAP {map50}、宏平均 F1 {f1}，保存为最好的模型": "Epoche {epoch}: mAP {map50}, Makro-F1 {f1}, als bestes Modell gespeichert",
+  "模型的 {n} 个类别和项目类别对应上": "{n} Modellklassen passen zu den Projektklassen",
+  "- 输入：`[1, 3, {size}, {size}]`，RGB，0~1。原图按比例缩放后居中，四周补 114，补到 {size}×{size}。": "- Eingabe: `[1, 3, {size}, {size}]`, RGB, 0–1. Bild seitenverhältnistreu skalieren, zentrieren und mit 114 auf {size}×{size} auffüllen.",
+  "- 输出是 Ultralytics 原始格式（模型里没有 NMS）：检测 `[1, 4+类别数, N]`；分割另有掩膜原型；关键点每个目标后面跟关键点。后处理可以参考 Ultralytics 官方示例，或推理服务包里的 `onnx_decode.py`。": "- Die Ausgabe ist das rohe Ultralytics-Format (kein NMS im Modell): Detektion `[1, 4+Klassen, N]`; Segmentierung hat zusätzlich Maskenprototypen; Keypoint-Modelle hängen die Keypoints an jedes Objekt an. Zur Nachverarbeitung siehe die offiziellen Ultralytics-Beispiele oder `onnx_decode.py` im Inferenzdienst-Paket.",
+  "找不到官方模型 {name}，请检查名字，或者把权重文件下载到本地后用「本地模型文件」选择": "Offizielles Modell {name} nicht gefunden. Namen prüfen oder die Gewichtsdatei herunterladen und über „Lokale Modelldatei“ wählen",
+  "导出 ONNX…": "ONNX wird exportiert …",
+  "没有安装 Ultralytics 组件，请重新开始训练（会自动安装）": "Die Ultralytics-Komponente ist nicht installiert. Training erneut starten (wird automatisch installiert)",
+  "Ultralytics 的分类模型不支持多标签分类，请选内置模型": "Ultralytics-Klassifikationsmodelle unterstützen keine Multi-Label-Klassifikation; wählen Sie ein integriertes Modell",
+  "模型：{w}": "Modell: {w}",
+  "这个模型是「{m}」任务，和项目的任务类型不一致": "Dies ist ein „{m}“-Modell und passt nicht zur Aufgabe des Projekts",
+  "已停止训练": "Training gestoppt",
+  "训练没有产出模型": "Das Training hat kein Modell erzeugt",
+  "评估没有完成：{e}": "Bewertung nicht abgeschlossen: {e}"
 }

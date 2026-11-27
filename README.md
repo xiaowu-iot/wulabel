@@ -8,7 +8,7 @@
 
 [English](README.en.md) · [官网](https://wulabel.xiaowuiot.com) · [下载](#下载) · [使用教程](https://wulabel.xiaowuiot.com/guide.html) · [版本历史](#版本历史) · [交流群](https://wulabel.xiaowuiot.com/#contact)
 
-[![最新版本](https://img.shields.io/badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-v0.6.4-brightgreen)](https://github.com/xiaowu-iot/wulabel/releases)
+[![最新版本](https://img.shields.io/badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-v0.6.5-brightgreen)](https://github.com/xiaowu-iot/wulabel/releases)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-Apache--2.0-blue)](LICENSE)
 [![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#下载)
 
@@ -28,14 +28,14 @@
 
 ## 下载
 
-最新版 **v0.6.4**（Windows 10 / 11 64 位、macOS 11 及以上、Linux x86_64 和 ARM64；Mac 版 Apple 芯片和 Intel 通用）：
+最新版 **v0.6.5**（Windows 10 / 11 64 位、macOS 11 及以上、Linux x86_64 和 ARM64；Mac 版 Apple 芯片和 Intel 通用）：
 
 | 系统 | 官网下载（国内推荐） | GitHub 下载 |
 |---|---|---|
-| Windows | [Wulabel_0.6.4_x64-setup.exe](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.4_x64-setup.exe) | [Wulabel_0.6.4_x64-setup.exe](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.4/Wulabel_0.6.4_x64-setup.exe) |
-| macOS | [Wulabel_0.6.4_universal.dmg](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.4_universal.dmg) | [Wulabel_0.6.4_universal.dmg](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.4/Wulabel_0.6.4_universal.dmg) |
-| Linux（Ubuntu、Debian、统信 UOS、麒麟等） | [Wulabel_0.6.4_amd64.deb](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.4_amd64.deb) · [Wulabel_0.6.4_amd64.AppImage](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.4_amd64.AppImage) | [.deb](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.4/Wulabel_0.6.4_amd64.deb) · [.AppImage](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.4/Wulabel_0.6.4_amd64.AppImage) |
-| Linux ARM64（飞腾、鲲鹏等） | [Wulabel_0.6.4_arm64.deb](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.4_arm64.deb) · [Wulabel_0.6.4_aarch64.AppImage](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.4_aarch64.AppImage) | [.deb](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.4/Wulabel_0.6.4_arm64.deb) · [.AppImage](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.4/Wulabel_0.6.4_aarch64.AppImage) |
+| Windows | [Wulabel_0.6.5_x64-setup.exe](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.5_x64-setup.exe) | [Wulabel_0.6.5_x64-setup.exe](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.5/Wulabel_0.6.5_x64-setup.exe) |
+| macOS | [Wulabel_0.6.5_universal.dmg](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.5_universal.dmg) | [Wulabel_0.6.5_universal.dmg](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.5/Wulabel_0.6.5_universal.dmg) |
+| Linux（Ubuntu、Debian、统信 UOS、麒麟等） | [Wulabel_0.6.5_amd64.deb](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.5_amd64.deb) · [Wulabel_0.6.5_amd64.AppImage](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.5_amd64.AppImage) | [.deb](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.5/Wulabel_0.6.5_amd64.deb) · [.AppImage](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.5/Wulabel_0.6.5_amd64.AppImage) |
+| Linux ARM64（飞腾、鲲鹏等） | [Wulabel_0.6.5_arm64.deb](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.5_arm64.deb) · [Wulabel_0.6.5_aarch64.AppImage](https://wulabel.xiaowuiot.com/download/Wulabel_0.6.5_aarch64.AppImage) | [.deb](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.5/Wulabel_0.6.5_arm64.deb) · [.AppImage](https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.5/Wulabel_0.6.5_aarch64.AppImage) |
 
 历史版本：[GitHub Releases](https://github.com/xiaowu-iot/wulabel/releases) · [Gitee 发行版](https://gitee.com/xiaowu-iot/wulabel/releases) · [官网](https://wulabel.xiaowuiot.com/#download)
 
@@ -43,7 +43,7 @@
 
 - **Windows**：双击安装。弹出「Windows 已保护你的电脑」时，点「更多信息」→「仍要运行」（安装包还没有代码签名）。
 - **macOS**：打开 .dmg，把 Wulabel 拖进「应用程序」。提示「无法验证开发者」时，在「应用程序」里右键 Wulabel →「打开」；macOS 15 以后到「系统设置 → 隐私与安全性」点「仍要打开」。提示「已损坏」的话，在终端执行 `xattr -cr /Applications/Wulabel.app`。
-- **Linux**：.deb 用 `sudo apt install ./Wulabel_0.6.4_amd64.deb` 安装，装好后在应用菜单里找 Wulabel；也可以用 .AppImage：`chmod +x Wulabel_0.6.4_amd64.AppImage` 后双击运行，不用安装。ARM 电脑（飞腾、鲲鹏）下载文件名带 arm64 / aarch64 的，用法一样。
+- **Linux**：.deb 用 `sudo apt install ./Wulabel_0.6.5_amd64.deb` 安装，装好后在应用菜单里找 Wulabel；也可以用 .AppImage：`chmod +x Wulabel_0.6.5_amd64.AppImage` 后双击运行，不用安装。ARM 电脑（飞腾、鲲鹏）下载文件名带 arm64 / aarch64 的，用法一样。
 - 装好后到「设置」页点「一键安装训练环境」。只标注、不训练可以跳过。
 
 ## 功能一览
@@ -53,7 +53,7 @@
 - **AI 辅助**：SAM 点选出轮廓；文本提示自动找目标；巡瞳 AI 平台识别（专用模型、按项目类别识别、和 AI 聊识别规则）；自己训练的模型预标注（单张或批量）
 - **数据体检**：规则检查：极小框、重复框、重复图片、类别不均衡；模型检查：疑似漏标、标错类别、框不准、多余框，一键去改
 - **数据集版本**：把标注存成快照，对比、导出、用某个版本训练、恢复
-- **训练**：检测：YOLOX（Nano / Tiny / S / M / L）、Faster R-CNN、RetinaNet、FCOS、SSDLite；分割：Mask R-CNN；关键点：Keypoint R-CNN；分类：MobileNetV3、EfficientNet、ResNet50。数据增强、接着训练、训练对比；导入别处训好的 ONNX 模型（YOLOv5 / v8 / v11、YOLOX、RT-DETR 等）做预标注和评估
+- **训练**：检测：YOLOX（Nano / Tiny / S / M / L）、Faster R-CNN、RetinaNet、FCOS、SSDLite；分割：Mask R-CNN；关键点：Keypoint R-CNN；分类：MobileNetV3、EfficientNet、ResNet50；也能直接训 Ultralytics 的 YOLO11、YOLO26、YOLOv8、YOLO12、YOLOv10、YOLOv9、RT-DETR（检测、分割、关键点、分类），可以输入任意模型名或选本地 .pt 接着训，训完自动转 ONNX。数据增强、接着训练、训练对比；导入别处训好的 ONNX 模型（YOLOv5 / v8 / v11、YOLOX、RT-DETR 等，各种任务）做预标注、评估和部署
 - **评估**：mAP、精确率、召回率（分类看准确率、F1）；各类别指标、混淆矩阵、错例浏览；阈值推荐；误报测试；导出交付报告
 - **部署**：接摄像头或视频流实时验证；导出 ONNX、OpenVINO、TensorRT / RKNN 转换包；生成推理服务包（多路拉流、告警规则、Webhook / MQTT 推送）；实时验证和推理服务包支持检测、分割、关键点、分类模型；上传巡瞳 AI 平台
 - **团队协作**：实时协作：你的电脑当主机，成员用浏览器登录就能标，局域网或在线都行；角色、分配任务、按张加锁、审核打回、工作量统计、水印。离线分包：分成几个标注包，标完合并回来
@@ -65,6 +65,7 @@
 
 | 版本 | 日期 | 主要内容 |
 |---|---|---|
+| [v0.6.5](https://github.com/xiaowu-iot/wulabel/releases/tag/v0.6.5) | 2026-11-27 | 训练支持 YOLO11、YOLO26、YOLOv8 等 Ultralytics 模型，也能输入模型名、选本地 .pt / .yaml，训完自动转 ONNX 并评估；分割项目默认用 YOLO11 分割；导入的外部模型支持分割、关键点、分类，也能部署 |
 | [v0.6.4](https://github.com/xiaowu-iot/wulabel/releases/tag/v0.6.4) | 2026-11-25 | 新增多标签分类（检测、分割、关键点项目可一键转换），部署时每个类别用自己的阈值；部署页批量识别文件夹、导出表格、按类别分文件夹；评估错例在图上标出漏、误、错的框；训练前提醒类别太少、预标注没人改过 |
 | [v0.6.3](https://github.com/xiaowu-iot/wulabel/releases/tag/v0.6.3) | 2026-11-25 | 团队协作新增「审核」页：按成员、状态、文件名筛选，批量通过或打回（可撤销），逐张审核和按比例抽检；没有目标的图提交后进待审核 |
 | [v0.6.2](https://github.com/xiaowu-iot/wulabel/releases/tag/v0.6.2) | 2026-11-23 | 修复团队协作时浏览器标注页看不到大图；协作时图片状态改叫「待审核」「已通过」 |
