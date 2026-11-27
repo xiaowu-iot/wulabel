@@ -131,5 +131,17 @@
   "验证集：{n} 张，mAP {map50}": "Validation : {n} images, mAP {map50}",
   "测试集：{n} 张，mAP {map50}": "Test : {n} images, mAP {map50}",
   "probs [N, 类别数]，每个类别各自的分数（已 sigmoid，多标签：分数达到阈值的类别都算有），类别顺序见 classes": "probs [N, nb de classes], score indépendant par classe (sigmoid appliquée ; multi-étiquettes : toute classe atteignant le seuil est présente), ordre des classes dans classes",
-  "第 {epoch} 轮 mAP {map50}、宏平均 F1 {f1}，保存为最好的模型": "Époque {epoch} : mAP {map50}, F1 macro {f1}, enregistré comme meilleur modèle"
+  "第 {epoch} 轮 mAP {map50}、宏平均 F1 {f1}，保存为最好的模型": "Époque {epoch} : mAP {map50}, F1 macro {f1}, enregistré comme meilleur modèle",
+  "模型的 {n} 个类别和项目类别对应上": "{n} classes du modèle correspondent à celles du projet",
+  "- 输入：`[1, 3, {size}, {size}]`，RGB，0~1。原图按比例缩放后居中，四周补 114，补到 {size}×{size}。": "- Entrée : `[1, 3, {size}, {size}]`, RGB, 0–1. Redimensionnez l’image en gardant ses proportions, centrez-la et complétez avec 114 jusqu’à {size}×{size}.",
+  "- 输出是 Ultralytics 原始格式（模型里没有 NMS）：检测 `[1, 4+类别数, N]`；分割另有掩膜原型；关键点每个目标后面跟关键点。后处理可以参考 Ultralytics 官方示例，或推理服务包里的 `onnx_decode.py`。": "- La sortie est au format brut Ultralytics (pas de NMS dans le modèle) : détection `[1, 4+classes, N]` ; la segmentation ajoute des prototypes de masque ; les modèles de points clés ajoutent les points à chaque objet. Pour le post-traitement, voir les exemples officiels Ultralytics ou `onnx_decode.py` dans le paquet du service d’inférence.",
+  "找不到官方模型 {name}，请检查名字，或者把权重文件下载到本地后用「本地模型文件」选择": "Modèle officiel {name} introuvable. Vérifiez le nom, ou téléchargez le fichier de poids et choisissez-le via « Fichier de modèle local »",
+  "导出 ONNX…": "Export ONNX…",
+  "没有安装 Ultralytics 组件，请重新开始训练（会自动安装）": "Le composant Ultralytics n’est pas installé. Relancez l’entraînement (il sera installé automatiquement)",
+  "Ultralytics 的分类模型不支持多标签分类，请选内置模型": "Les modèles de classification Ultralytics ne prennent pas en charge la classification multi-étiquettes ; choisissez un modèle intégré",
+  "模型：{w}": "Modèle : {w}",
+  "这个模型是「{m}」任务，和项目的任务类型不一致": "Ce modèle est de type « {m} », ce qui ne correspond pas à la tâche du projet",
+  "已停止训练": "Entraînement arrêté",
+  "训练没有产出模型": "L’entraînement n’a produit aucun modèle",
+  "评估没有完成：{e}": "L’évaluation n’a pas abouti : {e}"
 }

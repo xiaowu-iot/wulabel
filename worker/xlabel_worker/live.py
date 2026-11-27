@@ -149,6 +149,22 @@ def infer(model, ck: dict, task: str, rgb, device: torch.device, conf: float):
     return boxes, polys, kpts, []
 
 
+def infer_onnx(model, task: str, rgb, conf: float):
+    """ONNX 模型（Ultralytics 等引擎训练后导出的、导入的）一帧推理，返回格式和 infer 一样"""
+    res = model.m.predict(rgb, conf)
+    if task == "classify":
+        return [], [], [], [[d["cls"], round(d["score"], 3)] for d in res[: 3 if not model.m.multi else None]]
+    boxes, polys, kpts = [], [], []
+    for d in res:
+        x0, y0, x1, y1 = d["box"]
+        boxes.append([round(x0, 1), round(y0, 1), round(x1 - x0, 1), round(y1 - y0, 1), d["cls"], round(d["score"], 3)])
+        if task == "segment":
+            polys.append([round(v, 1) for v in d.get("polygon") or []])
+        if task == "pose":
+            kpts.append([round(v, 1) if j % 3 < 2 else int(v) for j, v in enumerate(d.get("keypoints") or [])])
+    return boxes, polys, kpts, []
+
+
 def run(cfg: dict) -> None:
     src = str(cfg["source"]).strip()
     conf = float(cfg.get("conf", 0.4))
@@ -160,7 +176,15 @@ def run(cfg: dict) -> None:
     )
     # 启动阶段告诉界面在做什么：加载模型、连接视频源（连 RTSP 可能要好几秒）
     emit("stage", step="model")
-    model, ck = models.load(Path(cfg["weights"]), device)
+    weights = Path(cfg["weights"])
+    onnx = weights.suffix.lower() == ".onnx"
+    if onnx:
+        from . import onnx_model
+
+        model, ck = onnx_model.load(weights)
+        device = torch.device("cuda" if "CUDA" in model.m.provider else "cpu")
+    else:
+        model, ck = models.load(weights, device)
 
     emit("stage", step="open")
     g = Grabber(src)
@@ -170,7 +194,7 @@ def run(cfg: dict) -> None:
     w = int(g.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(g.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frames = int(g.cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0) if not g.stream else 0
-    task = models.task_of(ck["model"])
+    task = model.task if onnx else models.task_of(ck["model"])
     emit("open", width=w, height=h, fps=g.fps, frames=frames, classes=ck["classes"], device=str(device), task=task)
     g.start()
 
@@ -215,7 +239,10 @@ def run(cfg: dict) -> None:
             last_seq = seq
             t0 = time.time()
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            boxes, polys, kpts, tags = infer(model, ck, task, rgb, device, state["conf"])
+            if onnx:
+                boxes, polys, kpts, tags = infer_onnx(model, task, rgb, state["conf"])
+            else:
+                boxes, polys, kpts, tags = infer(model, ck, task, rgb, device, state["conf"])
             ms = (time.time() - t0) * 1000
             fh, fw = frame.shape[:2]
             scale = min(1.0, preview_w / fw)

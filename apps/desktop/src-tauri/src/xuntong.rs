@@ -51,6 +51,9 @@ pub fn upload_model(p: &Project, rt: &Runtime, run_id: i64, name: &str, log: &(d
     if run.engine == training::EXTERNAL {
         return Err(msg(t!("导入的外部模型不能上传，请上传在 Wulabel 里训练的模型")));
     }
+    if run.engine != training::TORCHVISION {
+        return Err(msg(t!("巡瞳平台目前只支持 Wulabel 内置模型（YOLOX 等）训练的模型")));
+    }
     let task = p.meta.task.as_str();
     if task != "detect" {
         return Err(msg(t!("巡瞳平台目前只支持目标检测模型")));

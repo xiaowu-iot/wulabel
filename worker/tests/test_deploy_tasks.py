@@ -89,43 +89,44 @@ class DeployTasksTest(unittest.TestCase):
             def run(self, _names, _feed):
                 return self.outputs
 
+        m = svc.OnnxModel.__new__(svc.OnnxModel)
+        m.kind, m.classes, m.max_side, m.size, m.input = "wulabel", ["甲", "乙"], 320, 224, "image"
+        m.no_batch, m.multi, m.kpt_shape = True, False, None
         det = svc.Detector.__new__(svc.Detector)
-        det.classes = ["甲", "乙"]
-        det.max_side = 320
-        det.size = 224
-        det.input = "image"
+        det.m, det.classes, det.multi = m, m.classes, False
         det.lock = threading.Lock()
+
+        def use(task, outputs, values):
+            det.task = m.task = task
+            m.out_names = outputs
+            m.sess = Fake(values)
 
         mask = np.zeros((1, 1, 240, 320), dtype=np.float32)
         mask[0, 0, 20:80, 30:120] = 0.9
         base = [np.array([[30, 20, 120, 80]], np.float32), np.array([2]), np.array([0.8], np.float32)]
 
-        det.task, det.outputs = "segment", ["boxes", "labels", "scores", "masks"]
-        det.sess = Fake(base + [mask])
+        use("segment", ["boxes", "labels", "scores", "masks"], base + [mask])
         d = det.detect(bgr, 0.5)[0]
         self.assertEqual(d["label"], "乙")
         xs, ys = d["polygon"][0::2], d["polygon"][1::2]
         self.assertGreaterEqual(len(xs), 4)
         self.assertTrue(28 <= min(xs) and max(xs) <= 121 and 18 <= min(ys) and max(ys) <= 81)
 
-        det.task, det.outputs = "pose", ["boxes", "labels", "scores", "keypoints", "keypoints_scores"]
         kp = np.array([[[40, 30, 1], [60, 50, 1], [80, 70, 1]]], np.float32)
-        det.sess = Fake(base + [kp, np.array([[3.0, -1.0, 2.0]], np.float32)])
+        use("pose", ["boxes", "labels", "scores", "keypoints", "keypoints_scores"], base + [kp, np.array([[3.0, -1.0, 2.0]], np.float32)])
         d = det.detect(bgr, 0.5)[0]
         self.assertEqual(d["keypoints"], [40.0, 30.0, 2, 0, 0, 0, 80.0, 70.0, 2])
 
-        det.task, det.outputs = "classify", ["probs"]
-        det.sess = Fake([np.array([[0.2, 0.8]], np.float32)])
+        use("classify", ["probs"], [np.array([[0.2, 0.8]], np.float32)])
         dets = det.detect(bgr, 0.5)
         self.assertEqual(dets, [{"label": "乙", "score": 0.8}])
         self.assertTrue(svc.in_region(dets[0].get("box"), [[0, 0], [0.1, 0], [0.1, 0.1]], 320, 240))
         self.assertEqual(svc.draw(bgr, dets).shape, bgr.shape)
 
         # 多标签分类：分数够的类别都返回
-        det.multi = True
-        det.sess = Fake([np.array([[0.6, 0.7]], np.float32)])
+        m.multi = True
+        m.sess = Fake([np.array([[0.6, 0.7]], np.float32)])
         self.assertEqual([d["label"] for d in det.detect(bgr, 0.5)], ["乙", "甲"])
-        det.multi = False
 
 
 if __name__ == "__main__":

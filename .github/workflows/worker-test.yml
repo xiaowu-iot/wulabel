@@ -25,6 +25,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install numpy pillow onnx onnxruntime opencv-python-headless
+          # Ultralytics：测 YOLOv8 / 11 的导出格式和训练引擎；装完换回 headless 版 OpenCV，避免两个 cv2 冲突
+          pip install ultralytics
+          pip uninstall -y opencv-python || true
+          pip install --force-reinstall --no-deps opencv-python-headless
 
       - name: 运行测试
         working-directory: worker

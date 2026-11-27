@@ -247,6 +247,11 @@ def free_memory() -> None:
 
 
 def run(cfg: dict) -> None:
+    # Ultralytics 系模型（YOLOv8 / 11 等）走单独的训练引擎
+    if cfg.get("engine") == "ultralytics":
+        from . import ul_train
+
+        return ul_train.run(cfg)
     out = Path(cfg["out"])
     while True:
         batch = int(cfg.get("batch", 4))

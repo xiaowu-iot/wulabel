@@ -43,6 +43,16 @@ pub struct TrainConfig {
     /// 数据增强参数（原样交给 worker，见 worker 的 augment.py）；为空用默认
     #[serde(default)]
     pub aug: Option<serde_json::Value>,
+    /// 训练引擎：torchvision（内置模型，默认）或 ultralytics（YOLOv8 / 11 等；model 是模型名或本地 .pt / .yaml 路径）
+    #[serde(default = "default_engine")]
+    pub engine: String,
+    /// Ultralytics 的「更多参数」：一行一个 key=value，原样交给训练
+    #[serde(default)]
+    pub extra: Option<String>,
+}
+
+fn default_engine() -> String {
+    TORCHVISION.into()
 }
 
 fn default_lr() -> f64 {
@@ -66,6 +76,8 @@ pub struct RunInfo {
     pub config: serde_json::Value,
     pub best_map50: Option<f64>,
     pub created_at: i64,
+    /// 项目任务（detect / segment / classify / multilabel / pose），训练或导入时记下
+    pub task: String,
     pub has_weights: bool,
     pub has_onnx: bool,
     /// 停止、中断或失败的训练，留有断点（resume.pt）：可以从最后一个完整的轮次接着训练
@@ -110,15 +122,33 @@ fn run_dir(p: &Project, name: &str) -> PathBuf {
 
 /// 导入的外部模型（别处训好的 ONNX），训练记录里 engine 记为这个
 pub const EXTERNAL: &str = "external";
+/// 内置模型（torchvision、YOLOX）训练出的是 best.pt；其他引擎（Ultralytics、外部导入）统一用 model.onnx
+pub const TORCHVISION: &str = "torchvision";
+/// Ultralytics 训练引擎（YOLOv8 / 11 / 12 / 26、RT-DETR 等）：原生权重在 native/weights/，训完导出 model.onnx
+pub const ULTRALYTICS: &str = "ultralytics";
+
+/// Ultralytics 训练的原生权重（接着训练、断点续训用）
+fn native_weights(dir: &Path, file: &str) -> PathBuf {
+    dir.join("native").join("weights").join(file)
+}
+
+/// 这条训练记录的模型文件：内置模型是 best.pt，其余都是 model.onnx
+pub fn model_path(dir: &Path, engine: &str) -> PathBuf {
+    if engine == TORCHVISION {
+        dir.join("best.pt")
+    } else {
+        dir.join("model.onnx")
+    }
+}
 
 fn row_to_info(p: &Project, r: &rusqlite::Row) -> rusqlite::Result<RunInfo> {
     let dir: String = r.get(1)?;
     let abs = run_dir(p, &dir);
     let config: String = r.get(4)?;
     let engine: String = r.get(2)?;
-    let external = engine == EXTERNAL;
     let status: String = r.get(3)?;
-    let can_resume = !external && matches!(status.as_str(), "stopped" | "interrupted" | "failed") && abs.join("resume.pt").exists();
+    let can_resume = matches!(status.as_str(), "stopped" | "interrupted" | "failed")
+        && ((engine == TORCHVISION && abs.join("resume.pt").exists()) || (engine == ULTRALYTICS && native_weights(&abs, "last.pt").exists()));
     Ok(RunInfo {
         id: r.get(0)?,
         name: dir.clone(),
@@ -127,14 +157,15 @@ fn row_to_info(p: &Project, r: &rusqlite::Row) -> rusqlite::Result<RunInfo> {
         config: serde_json::from_str(&config).unwrap_or(serde_json::Value::Null),
         best_map50: r.get(5)?,
         created_at: r.get(6)?,
-        has_weights: abs.join("best.pt").exists() || (external && abs.join("model.onnx").exists()),
+        task: r.get::<_, Option<String>>(7)?.unwrap_or_default(),
+        has_weights: model_path(&abs, &engine).exists(),
         has_onnx: abs.join("model.onnx").exists(),
         can_resume,
         engine,
     })
 }
 
-const RUN_COLS: &str = "id, dir, engine, status, config_json, best_metric, created_at";
+const RUN_COLS: &str = "id, dir, engine, status, config_json, best_metric, created_at, task";
 
 pub fn list_runs(p: &Project) -> AppResult<Vec<RunInfo>> {
     let conn = p.conn.lock();
@@ -228,10 +259,30 @@ pub fn start(
     if jobs.running().is_some() {
         return Err(msg(t!("已经有训练在进行中")));
     }
-    if cfg.epochs == 0 || cfg.batch == 0 || cfg.img_size < 128 {
+    let ultra = cfg.engine == ULTRALYTICS;
+    if !ultra && cfg.engine != TORCHVISION {
         return Err(msg(t!("训练参数不对")));
     }
-    let mut cmd = rt.worker(&["train"])?; // 先确认环境存在
+    // Ultralytics 的批大小可以填 0：按显存自动选
+    if cfg.epochs == 0 || (cfg.batch == 0 && !ultra) || cfg.img_size < 128 {
+        return Err(msg(t!("训练参数不对")));
+    }
+    let cmd = rt.worker(&["train"])?; // 先确认环境存在
+    if ultra {
+        if p.meta.task == "multilabel" {
+            return Err(msg(t!("Ultralytics 的分类模型不支持多标签分类，请选内置模型")));
+        }
+        let m = cfg.model.trim();
+        if m.is_empty() {
+            return Err(msg(t!("这个模型和项目的任务类型不匹配，请重新选择模型")));
+        }
+        // 选的是本地文件（带路径）时，文件要在
+        if (m.contains('/') || m.contains('\\')) && !Path::new(m).is_file() {
+            return Err(msg(t!("模型文件不存在")));
+        }
+        // 第一次用：装上 Ultralytics 组件（右下角显示安装进度）
+        rt.ensure_ultralytics(&|_| {})?;
+    }
     let name = {
         let mut n = now_name();
         let mut i = 1;
@@ -243,7 +294,8 @@ pub fn start(
     };
     // 多标签分类用的也是分类模型（训练时按数据集换成多标签的训练方式）
     let task = if p.meta.task == "multilabel" { "classify" } else { p.meta.task.as_str() };
-    if model_task(&cfg.model) != task {
+    // Ultralytics 的模型任务由 worker 加载模型后检查（本地 .pt 只有加载了才知道）
+    if !ultra && model_task(&cfg.model) != task {
         return Err(msg(t!("这个模型和项目的任务类型不匹配，请重新选择模型")));
     }
     // 接着上次训练：上次要有模型文件，模型结构要一样
@@ -253,14 +305,26 @@ pub fn start(
             if r.engine == EXTERNAL {
                 return Err(msg(t!("导入的外部模型不能接着训练")));
             }
-            let w = PathBuf::from(&r.dir).join("best.pt");
-            if !w.exists() {
-                return Err(msg(t!("那次训练没有产出模型，不能接着训")));
-            }
-            if r.config["model"].as_str() != Some(cfg.model.as_str()) {
+            if r.engine != cfg.engine {
                 return Err(msg(t!("接着训练要用和那次相同的模型")));
             }
-            Some((r.name, w))
+            if ultra {
+                // Ultralytics：从那次的 best.pt 接着训，类别变了会自动换输出层
+                let w = native_weights(Path::new(&r.dir), "best.pt");
+                if !w.exists() {
+                    return Err(msg(t!("那次训练没有产出模型，不能接着训")));
+                }
+                Some((r.name, w))
+            } else {
+                let w = PathBuf::from(&r.dir).join("best.pt");
+                if !w.exists() {
+                    return Err(msg(t!("那次训练没有产出模型，不能接着训")));
+                }
+                if r.config["model"].as_str() != Some(cfg.model.as_str()) {
+                    return Err(msg(t!("接着训练要用和那次相同的模型")));
+                }
+                Some((r.name, w))
+            }
         }
         None => None,
     };
@@ -294,10 +358,29 @@ pub fn start(
         let _ = fs::remove_dir_all(&dir);
         return Err(msg(t!("训练集是空的：在训练页「查看和调整」里把一些图移到训练集")));
     }
+    // Ultralytics 训练检测、分割、关键点用 YOLO 格式（再导一份，划分和上面一样）；分类直接用分类文件夹。COCO 那份留给评估
+    let ds_yolo = dir.join("dataset_yolo");
+    if ultra && !crate::project::is_classify(&p.meta.task) {
+        let yopts = ExportOptions { format: Format::Yolo, out_dir: ds_yolo.clone(), only_reviewed: cfg.only_reviewed, ratios: cfg.ratios, copy_files: false };
+        match cfg.version {
+            Some(v) => dataset::export_version(&p, v, &yopts, &|_, _| {}),
+            None => dataset::export(&p, &yopts, &|_, _| {}),
+        }
+        .inspect_err(|_| {
+            let _ = fs::remove_dir_all(&dir);
+        })?;
+    }
     let mut worker_cfg = serde_json::json!({
-        "dataset": ds, "out": dir, "model": cfg.model, "classes": res.classes, "task": p.meta.task,
+        "dataset": ds, "out": dir, "model": cfg.model.trim(), "classes": res.classes, "task": p.meta.task,
         "epochs": cfg.epochs, "img_size": cfg.img_size, "batch": cfg.batch, "lr": cfg.lr, "device": cfg.device,
     });
+    if ultra {
+        worker_cfg["engine"] = serde_json::json!(ULTRALYTICS);
+        worker_cfg["extra"] = serde_json::json!(cfg.extra.clone().unwrap_or_default());
+        if ds_yolo.exists() {
+            worker_cfg["data_yolo"] = serde_json::json!(ds_yolo);
+        }
+    }
     if let Some(a) = &cfg.aug {
         worker_cfg["aug"] = a.clone();
     }
@@ -326,8 +409,8 @@ pub fn start(
     let id = {
         let conn = p.conn.lock();
         conn.execute(
-            "INSERT INTO runs (dir, engine, task, status, config_json, created_at) VALUES (?1, 'torchvision', ?2, 'running', ?3, ?4)",
-            params![name, p.meta.task, saved.to_string(), db::now()],
+            "INSERT INTO runs (dir, engine, task, status, config_json, created_at) VALUES (?1, ?2, ?3, 'running', ?4, ?5)",
+            params![name, cfg.engine, p.meta.task, saved.to_string(), db::now()],
         )?;
         conn.last_insert_rowid()
     };
@@ -529,15 +612,11 @@ pub enum Deploy {
     Live,
 }
 
-/// 内置模型（检测、分割、关键点、分类）都支持全部部署方式；导入的外部模型提前拦住给出清楚提示
-pub fn ensure_deployable(p: &Project, id: i64, what: Deploy) -> AppResult<()> {
+/// 内置模型、Ultralytics 等引擎训练的模型、导入的外部模型都支持全部部署方式（后两种本身就是 ONNX），只要有模型文件
+pub fn ensure_deployable(p: &Project, id: i64, _what: Deploy) -> AppResult<()> {
     let run = get_run(p, id)?;
-    if run.engine == EXTERNAL {
-        return Err(msg(if what == Deploy::Onnx {
-            t!("导入的外部模型本身就是 ONNX，直接用原来的模型文件部署即可")
-        } else {
-            t!("导入的外部模型暂不支持实时验证和推理服务包，可以用来预标注、评估和误报测试")
-        }));
+    if !run.has_weights {
+        return Err(msg(t!("这次训练没有产出模型")));
     }
     Ok(())
 }
@@ -546,11 +625,15 @@ pub fn export_onnx(p: &Project, rt: &Runtime, id: i64, log: &(dyn Fn(String) + S
     ensure_deployable(p, id, Deploy::Onnx)?;
     let run = get_run(p, id)?;
     let dir = PathBuf::from(&run.dir);
+    let out = dir.join("model.onnx");
+    // Ultralytics 等引擎和外部导入的本身就是 ONNX
+    if run.engine != TORCHVISION {
+        return Ok(out.to_string_lossy().into_owned());
+    }
     let w = dir.join("best.pt");
     if !w.exists() {
         return Err(msg(t!("这次训练没有产出模型")));
     }
-    let out = dir.join("model.onnx");
     let mut c = rt.worker(&["export"])?;
     c.arg(&w).arg(&out);
     crate::runtime::run_logged(c, &|line| {
@@ -767,7 +850,7 @@ pub fn class_map(p: &Project, classes: &[String]) -> AppResult<Vec<i64>> {
 pub fn weights_of(p: &Project, run_id: i64) -> AppResult<PathBuf> {
     let run = get_run(p, run_id)?;
     let dir = PathBuf::from(&run.dir);
-    let w = if run.engine == EXTERNAL { dir.join("model.onnx") } else { dir.join("best.pt") };
+    let w = model_path(&dir, &run.engine);
     if !w.exists() {
         return Err(msg(t!("这次训练没有产出模型")));
     }
@@ -945,6 +1028,8 @@ mod tests {
             version: None,
             base_run: None,
             aug: None,
+            engine: TORCHVISION.into(),
+            extra: None,
         };
         let id = start(p.clone(), &rt, jobs.clone(), cfg, Arc::new(move |_, e| ev2.lock().push(e)), &|_, _| {}).unwrap();
         assert!(start(p.clone(), &rt, jobs.clone(), TrainConfig { epochs: 1, ..serde_json::from_value(get_run(&p, id).unwrap().config).unwrap() }, Arc::new(|_, _| {}), &|_, _| {}).is_err(), "同时只能一个训练");

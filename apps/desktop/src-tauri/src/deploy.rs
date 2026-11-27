@@ -16,12 +16,9 @@ use crate::runtime::Runtime;
 use crate::training;
 use crate::t;
 
+/// 模型文件：内置模型的 best.pt，或 Ultralytics 等引擎、外部导入的 model.onnx
 fn weights(p: &Project, run_id: i64) -> AppResult<PathBuf> {
-    let w = PathBuf::from(training::get_run(p, run_id)?.dir).join("best.pt");
-    if !w.exists() {
-        return Err(msg(t!("这次训练没有产出模型")));
-    }
-    Ok(w)
+    training::weights_of(p, run_id)
 }
 
 fn now_stamp() -> String {
@@ -243,6 +240,7 @@ pub fn export_formats(
 // ---------- 推理服务包 ----------
 
 const SERVICE_FILES: [&str; 5] = ["service.py", "requirements.txt", "run.bat", "run.sh", "README.md"];
+const DECODER: &str = "onnx_decode.py";
 
 /// 生成推理服务包：模型（ONNX）+ 服务程序 + 配置 + 说明
 pub fn build_service(
@@ -263,6 +261,9 @@ pub fn build_service(
             return Err(msg(t!("安装文件不完整，缺少服务模板 {f}", f = f)));
         }
     }
+    if !rt.worker_dir.join("xlabel_worker").join(DECODER).exists() {
+        return Err(msg(t!("安装文件不完整，缺少服务模板 {f}", f = DECODER)));
+    }
     check_out(out)?;
     log(t!("导出模型（ONNX）…"));
     step(0, STEPS, t!("导出模型（ONNX）…"));
@@ -279,6 +280,8 @@ pub fn build_service(
     for f in SERVICE_FILES {
         fs::copy(template.join(f), out.join(f))?;
     }
+    // 模型解码（检测、分割、关键点、分类，Wulabel 和 Ultralytics 等格式）和训练时用的是同一份代码
+    fs::copy(rt.worker_dir.join("xlabel_worker").join(DECODER), out.join(DECODER))?;
     // 界面不是中文时，说明、启动脚本和服务提示换成对应语言（worker/service-i18n/，没有的语言用英文）
     let lang = crate::i18n::lang();
     if lang != "zh" {
@@ -299,7 +302,7 @@ pub fn build_service(
     let mut cfg = config.clone();
     cfg["model"] = serde_json::json!("model.onnx");
     // 关键点模型：告警截图按项目的骨架连线画
-    if training::model_task(training::get_run(p, run_id)?.config["model"].as_str().unwrap_or("")) == "pose" {
+    if training::get_run(p, run_id)?.task == "pose" {
         cfg["skeleton"] = serde_json::json!(crate::keypoints::get(p)?.skeleton);
     }
     fs::write(out.join("config.json"), serde_json::to_string_pretty(&cfg)?)?;
@@ -318,6 +321,7 @@ mod tests {
         for f in SERVICE_FILES {
             assert!(dir.join(f).exists(), "缺少 {f}");
         }
+        assert!(dir.join("../xlabel_worker").join(DECODER).exists(), "缺少 {DECODER}");
         // run.bat 必须是 CRLF，否则部分 Windows 环境执行异常
         let bat = fs::read(dir.join("run.bat")).unwrap();
         assert!(bat.windows(2).any(|w| w == b"\r\n"));
