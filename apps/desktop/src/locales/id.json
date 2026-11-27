@@ -1777,5 +1777,9 @@
   "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Simpan tangkapan layar video di samping tiap video (subfolder \"Tangkapan pengenalan\")",
   "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "Boleh di dalam folder yang dikenali; lain kali hasilnya otomatis dilewati.",
   "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "Untuk video, yang disalin adalah tangkapan layar tiap kelas (nama file diawali nomor pesanan), bukan videonya.",
-  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Tangkapan layar video ada di folder \"Tangkapan pengenalan\" di samping tiap video, satu per kelas yang ditemukan (frame dengan skor tertinggi), dengan kelas dan skor tertulis di kotak."
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Tangkapan layar video ada di folder \"Tangkapan pengenalan\" di samping tiap video, satu per kelas yang ditemukan (frame dengan skor tertinggi), dengan kelas dan skor tertulis di kotak.",
+  "批量识别视频的截图像标注页一样画框，框旁边写着类别和分数。": "Tangkapan layar video dari pengenalan massal kini digambar kotaknya seperti di halaman anotasi, dengan kelas dan skor di samping tiap kotak.",
+  "批量识别新增选项：视频截图放回视频所在的文件夹（子文件夹「识别截图」），不用再手动拷回去。": "Opsi baru pengenalan massal: simpan tangkapan layar video di samping tiap video (subfolder \"Tangkapan pengenalan\"), tanpa perlu menyalin ulang secara manual.",
+  "批量识别的结果文件夹可以放在要识别的文件夹里面，下次识别时自动跳过。": "Folder hasil pengenalan massal kini boleh berada di dalam folder yang dikenali; lain kali otomatis dilewati.",
+  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Perbaikan: saat \"salin per kelas\" dicentang, pengenalan massal menyalin video utuh. Sekarang yang disalin adalah tangkapan layar tiap kelas, dengan nomor pesanan di depan nama file."
 }

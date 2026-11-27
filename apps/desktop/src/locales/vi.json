@@ -1777,5 +1777,9 @@
   "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Lưu ảnh chụp video cạnh từng video (thư mục con \"Ảnh chụp nhận diện\")",
   "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "Có thể đặt trong thư mục cần nhận diện; lần sau sẽ tự bỏ qua kết quả.",
   "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "Với video, sẽ sao chép ảnh chụp của từng lớp (tên tệp có mã đơn hàng phía trước), không sao chép video.",
-  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Ảnh chụp video nằm trong thư mục \"Ảnh chụp nhận diện\" cạnh từng video, mỗi lớp tìm thấy một ảnh (khung hình có điểm cao nhất), trên khung có ghi lớp và điểm."
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Ảnh chụp video nằm trong thư mục \"Ảnh chụp nhận diện\" cạnh từng video, mỗi lớp tìm thấy một ảnh (khung hình có điểm cao nhất), trên khung có ghi lớp và điểm.",
+  "批量识别视频的截图像标注页一样画框，框旁边写着类别和分数。": "Ảnh chụp video khi nhận diện hàng loạt giờ vẽ khung giống trang gán nhãn, bên cạnh khung ghi lớp và điểm.",
+  "批量识别新增选项：视频截图放回视频所在的文件夹（子文件夹「识别截图」），不用再手动拷回去。": "Tùy chọn mới của nhận diện hàng loạt: lưu ảnh chụp video cạnh từng video (thư mục con \"Ảnh chụp nhận diện\"), không phải sao chép lại bằng tay.",
+  "批量识别的结果文件夹可以放在要识别的文件夹里面，下次识别时自动跳过。": "Thư mục kết quả của nhận diện hàng loạt giờ có thể nằm trong thư mục cần nhận diện; lần sau sẽ tự bỏ qua.",
+  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Sửa lỗi: khi bật \"sao chép theo lớp\", nhận diện hàng loạt sao chép nguyên video. Giờ sẽ sao chép ảnh chụp của từng lớp, tên tệp có mã đơn hàng phía trước."
 }

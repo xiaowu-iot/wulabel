@@ -1777,5 +1777,9 @@
   "视频截图放回视频所在的文件夹（子文件夹「识别截图」）": "Guardar las capturas de video junto a cada video (subcarpeta «Capturas de reconocimiento»)",
   "可以放在要识别的文件夹里面，下次识别时会自动跳过结果。": "Puede estar dentro de la carpeta que reconoces; la próxima vez los resultados se omiten automáticamente.",
   "视频复制的是对应类别的截图（文件名前面加单号），不复制视频本身。": "En los videos se copia la captura de cada clase (con el número de pedido delante del nombre), no el video.",
-  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Las capturas de video están en la carpeta «Capturas de reconocimiento» junto a cada video, una por clase encontrada (el fotograma con mayor puntuación), con la clase y la puntuación escritas en el cuadro."
+  "视频的截图放在每个视频所在文件夹的「识别截图」里，每个识别出的类别一张（分数最高的那一帧），框上写着类别和分数。": "Las capturas de video están en la carpeta «Capturas de reconocimiento» junto a cada video, una por clase encontrada (el fotograma con mayor puntuación), con la clase y la puntuación escritas en el cuadro.",
+  "批量识别视频的截图像标注页一样画框，框旁边写着类别和分数。": "Las capturas de video del reconocimiento por lotes ahora tienen los cuadros dibujados como en la página de anotación, con la clase y la puntuación junto a cada cuadro.",
+  "批量识别新增选项：视频截图放回视频所在的文件夹（子文件夹「识别截图」），不用再手动拷回去。": "Nueva opción del reconocimiento por lotes: guardar las capturas de video junto a cada video (subcarpeta «Capturas de reconocimiento»), sin tener que copiarlas a mano.",
+  "批量识别的结果文件夹可以放在要识别的文件夹里面，下次识别时自动跳过。": "La carpeta de resultados del reconocimiento por lotes ahora puede estar dentro de la carpeta que se reconoce; la próxima vez se omite automáticamente.",
+  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Corregido: con «copiar por clase» marcado, el reconocimiento por lotes copiaba los videos completos. Ahora copia la captura de cada clase, con el número de pedido delante del nombre."
 }
