@@ -19,5 +19,21 @@
   "JSON 需要 image 字段（base64 图片）": "JSON cần trường image (ảnh base64)",
   "图片解码失败": "Giải mã ảnh thất bại",
   "推理服务已启动：%d 路视频，HTTP 接口 http://%s:%d": "Dịch vụ suy luận đã khởi động: %d luồng video, API HTTP http://%s:%d",
-  "已停止": "Đã dừng"
+  "已停止": "Đã dừng",
+  "文件夹模式：监控 %s，结果放在 %s": "Chế độ thư mục: theo dõi %s, kết quả lưu ở %s",
+  "文件夹模式扫描出错": "Lỗi khi quét ở chế độ thư mục",
+  "要监控的文件夹不存在：%s": "Không tìm thấy thư mục cần theo dõi: %s",
+  "识别出错：%s": "Lỗi nhận diện: %s",
+  "读不了这个文件": "Không đọc được tệp này",
+  "；": "; ",
+  "{name}（{n} 帧）": "{name} ({n} khung hình)",
+  "没有目标": "Không có đối tượng",
+  "识别结果": "ket-qua",
+  "时间": "Thời gian",
+  "文件": "Tệp",
+  "文件夹": "Thư mục",
+  "结果": "Kết quả",
+  "最高分": "Điểm cao nhất",
+  "截图": "Ảnh chụp",
+  "[文件夹] %s：%s": "[Thư mục] %s: %s"
 }

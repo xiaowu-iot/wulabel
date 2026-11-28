@@ -19,5 +19,21 @@
   "JSON 需要 image 字段（base64 图片）": "JSON body needs an image field (base64 image)",
   "图片解码失败": "Failed to decode image",
   "推理服务已启动：%d 路视频，HTTP 接口 http://%s:%d": "Inference service started: %d stream(s), HTTP API at http://%s:%d",
-  "已停止": "Stopped"
+  "已停止": "Stopped",
+  "文件夹模式：监控 %s，结果放在 %s": "Folder mode: watching %s, results in %s",
+  "文件夹模式扫描出错": "Folder mode scan error",
+  "要监控的文件夹不存在：%s": "Folder to watch not found: %s",
+  "识别出错：%s": "Recognition error: %s",
+  "读不了这个文件": "Can't read this file",
+  "；": "; ",
+  "{name}（{n} 帧）": "{name} ({n} frames)",
+  "没有目标": "No objects",
+  "识别结果": "results",
+  "时间": "Time",
+  "文件": "File",
+  "文件夹": "Folder",
+  "结果": "Result",
+  "最高分": "Top score",
+  "截图": "Screenshot",
+  "[文件夹] %s：%s": "[Folder] %s: %s"
 }

@@ -1,7 +1,8 @@
 //! 自定义协议 xl://，前端用它加载当前项目的图片和缩略图：
 //!   /thumb/{id}  缩略图
 //!   /image/{id}  原图
-//! 只按图片 id 取文件，前端无法借此读取任意路径。
+//!   /review/{i}  最近一次批量识别的第 i 张视频截图（复核宫格用）
+//! 只按图片 id、截图序号取文件，前端无法借此读取任意路径。
 //! Windows 上实际地址是 http://xl.localhost/...
 
 use std::fs;
@@ -60,7 +61,12 @@ fn serve(state: &AppState, path: &str) -> AppResult<Response<Vec<u8>>> {
     let mut parts = path.trim_matches('/').splitn(2, '/');
     let kind = parts.next().unwrap_or("");
     let id: i64 = parts.next().and_then(|s| s.parse().ok()).ok_or_else(|| msg(t!("地址格式不对")))?;
-    let (bytes, content_type) = image_bytes(&project, kind, id)?;
+    let (bytes, content_type) = if kind == "review" {
+        let file = usize::try_from(id).ok().and_then(crate::batch::review_file).ok_or_else(|| msg(t!("地址格式不对")))?;
+        (fs::read(&file)?, mime(&file))
+    } else {
+        image_bytes(&project, kind, id)?
+    };
     Ok(Response::builder()
         .header(header::CONTENT_TYPE, content_type)
         // 同一个 id 的内容不会变（按哈希去重），可以放心缓存

@@ -71,6 +71,8 @@ export interface ImportResult {
   failed: string[];
   /** 中途停止时没导入的张数 */
   stopped?: number;
+  /** 批量识别的截图：用里面的原图入库、识别结果写成预标注的张数 */
+  prelabeled?: number;
 }
 
 /** 转成多标签分类项目的结果 */
@@ -96,6 +98,10 @@ export interface BatchOptions {
   videoMinFrames?: number;
   /** 视频截图放回视频所在的文件夹（子文件夹「识别截图」） */
   shotsBeside?: boolean;
+  /** 截图上画框和类别（关掉就存原图；截图里都带着原图和识别结果） */
+  drawBoxes?: boolean;
+  /** 跳过上次识别过、之后没改过的文件，表格里沿用上次的结果 */
+  skipDone?: boolean;
 }
 export interface BatchResult {
   images: number;
@@ -110,6 +116,19 @@ export interface BatchResult {
   /** 拿不准（检测是没有目标）的图的路径 */
   uncertain: string[];
   stopped: boolean;
+  /** 视频截图的路径（加进项目去标用） */
+  shots: string[];
+  /** 什么都没识别出来的视频（相对要识别的文件夹） */
+  unrecognized: string[];
+  /** 这些视频里取的几帧原图 */
+  unrecognizedFrames: string[];
+  /** 上次识别过、没改过，这次跳过的文件数 */
+  skipped: number;
+  /** 分数偏低（刚过阈值）的图片和视频截图，最容易认错 */
+  low: string[];
+  /** 按单号汇总的表格、网页报告 */
+  summary: string;
+  report: string;
 }
 
 export interface ImportProgress {
@@ -150,6 +169,13 @@ export interface StreamInfo {
   durationSecs: number | null;
   isLive: boolean;
   codec: string;
+}
+
+/** 一次导入 */
+export interface ImportBatch {
+  batch: number;
+  count: number;
+  createdAt: number;
 }
 
 export interface LastImport {
@@ -707,7 +733,12 @@ export const api = {
     invoke<ConvertResult>("convert_to_multilabel", { parent, name, emptyLabel }),
   lastImport: () => invoke<LastImport | null>("last_import"),
   deleteImages: (scope: "ids" | "last" | "all", ids?: number[]) => invoke<number>("delete_images", { scope, ids }),
-  listImageIds: (status: string | null) => invoke<number[]>("list_image_ids", { status }),
+  listImageIds: (status: string | null, label: number | null = null, batch: number | null = null) =>
+    invoke<number[]>("list_image_ids", { status, label, batch }),
+  /** 最近 50 次导入：批次号、张数、时间 */
+  listImportBatches: () => invoke<ImportBatch[]>("list_import_batches"),
+  /** 选中的图的原图复制到一个文件夹：[复制了几张, 失败的] */
+  exportImages: (ids: number[], out: string) => invoke<[number, string[]]>("export_images", { ids, out }),
   loadAnnotations: (imageId: number) => invoke<ImageAnnotations>("load_annotations", { imageId }),
   saveAnnotations: (imageId: number, annotations: Annotation[]) =>
     invoke<ImageStatus>("save_annotations", { imageId, annotations }),
@@ -789,8 +820,9 @@ export const api = {
   ) => invoke<ExportResult>("export_version", { id, options, anonymize }),
   keypointTemplate: () => invoke<KeypointTemplate>("keypoint_template"),
   saveKeypointTemplate: (template: KeypointTemplate) => invoke<void>("save_keypoint_template", { template }),
-  listImages: (status: string | null, offset: number, limit: number) =>
-    invoke<ImagePage>("list_images", { status, offset, limit }),
+  /** label：只看有这个类别的图；-1 一个标注都没有，-2 有预标注还没确认 */
+  listImages: (status: string | null, offset: number, limit: number, label: number | null = null, batch: number | null = null) =>
+    invoke<ImagePage>("list_images", { status, offset, limit, label, batch }),
   projectStats: () => invoke<Stats>("project_stats"),
 
   // ---------- 实时协作 ----------
@@ -853,6 +885,8 @@ export const api = {
   xtAccount: () => invoke<XtAccount | null>("xt_account"),
   xtLogout: () => invoke<void>("xt_logout"),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
+  /** 用系统默认程序打开批量识别的网页报告、表格 */
+  openFile: (path: string) => invoke<void>("open_file", { path }),
   xtPullAlarms: (options: { days: number; model: string | null; max: number; withBoxes: boolean }) =>
     invoke<XtPullResult>("xt_pull_alarms", { options }),
   /** 正在跑的体检进度，没在跑是 null（离开体检页再回来时用） */
@@ -1121,6 +1155,8 @@ function projectKey(path: string) {
 // 协作成员在浏览器里：图片从主机的接口取，带上登录令牌
 export const thumbUrl = (projectPath: string, id: number) =>
   isRemote ? `api/thumb/${id}?t=${encodeURIComponent(getToken())}` : `${BASE}/thumb/${id}?p=${projectKey(projectPath)}`;
+/** 最近一次批量识别的第 i 张视频截图（复核宫格用）；v 防缓存，每次识别不一样 */
+export const reviewUrl = (i: number, v: number) => `${BASE}/review/${i}?v=${v}`;
 export const imageUrl = (projectPath: string, id: number) =>
   isRemote ? `api/image/${id}?t=${encodeURIComponent(getToken())}` : `${BASE}/image/${id}?p=${projectKey(projectPath)}`;
 

@@ -19,5 +19,21 @@
   "JSON 需要 image 字段（base64 图片）": "El JSON necesita un campo image (imagen en base64)",
   "图片解码失败": "No se pudo decodificar la imagen",
   "推理服务已启动：%d 路视频，HTTP 接口 http://%s:%d": "Servicio de inferencia iniciado: %d transmisión(es), API HTTP en http://%s:%d",
-  "已停止": "Detenido"
+  "已停止": "Detenido",
+  "文件夹模式：监控 %s，结果放在 %s": "Modo carpeta: vigilando %s, resultados en %s",
+  "文件夹模式扫描出错": "Error al escanear en modo carpeta",
+  "要监控的文件夹不存在：%s": "No existe la carpeta a vigilar: %s",
+  "识别出错：%s": "Error de reconocimiento: %s",
+  "读不了这个文件": "No se puede leer este archivo",
+  "；": "; ",
+  "{name}（{n} 帧）": "{name} ({n} fotogramas)",
+  "没有目标": "Sin objetos",
+  "识别结果": "resultados",
+  "时间": "Hora",
+  "文件": "Archivo",
+  "文件夹": "Carpeta",
+  "结果": "Resultado",
+  "最高分": "Puntuación máx.",
+  "截图": "Captura",
+  "[文件夹] %s：%s": "[Carpeta] %s: %s"
 }

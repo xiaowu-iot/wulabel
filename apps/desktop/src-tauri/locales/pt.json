@@ -485,5 +485,14 @@
   "{name}（{n} 帧）": "{name} ({n} quadros)",
   "这个文件夹里没有图片或视频": "Não há imagens nem vídeos nesta pasta",
   "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "A pasta de resultados não pode ser a própria pasta a reconhecer. Escolha outra (uma subpasta dentro dela serve).",
-  "识别截图": "Capturas do reconhecimento"
+  "识别截图": "Capturas do reconhecimento",
+  "单号（文件夹）": "Nº do pedido (pasta)",
+  "文件数": "Arquivos",
+  "识别出的类别": "Classes encontradas",
+  "{name}（{n} 个文件）": "{name} ({n} arquivos)",
+  "按单号汇总": "Resumo por pedido",
+  "识别报告": "Relatório de reconhecimento",
+  "共 {n} 个文件，{g} 个单号（文件夹）": "{n} arquivos no total, {g} pedidos (pastas)",
+  "{n} 个文件": "{n} arquivos",
+  "打不开这个文件：{path}": "Não foi possível abrir este arquivo: {path}"
 }

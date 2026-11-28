@@ -485,5 +485,14 @@
   "{name}（{n} 帧）": "{name} ({n} images)",
   "这个文件夹里没有图片或视频": "Aucune image ni vidéo dans ce dossier",
   "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "Le dossier de résultats ne peut pas être le dossier à reconnaître. Choisissez-en un autre (un sous-dossier convient).",
-  "识别截图": "Captures de reconnaissance"
+  "识别截图": "Captures de reconnaissance",
+  "单号（文件夹）": "N° de commande (dossier)",
+  "文件数": "Fichiers",
+  "识别出的类别": "Classes trouvées",
+  "{name}（{n} 个文件）": "{name} ({n} fichiers)",
+  "按单号汇总": "Synthèse par commande",
+  "识别报告": "Rapport de reconnaissance",
+  "共 {n} 个文件，{g} 个单号（文件夹）": "{n} fichiers au total, {g} commandes (dossiers)",
+  "{n} 个文件": "{n} fichiers",
+  "打不开这个文件：{path}": "Impossible d'ouvrir ce fichier : {path}"
 }

@@ -39,7 +39,8 @@ NVIDIA 그래픽카드로 GPU 추론을 하려면: `requirements.txt`의 `onnxru
   },
   "webhook": { "url": "http://플랫폼/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // 선택: 폴더 모드
 }
 ```
 
@@ -88,6 +89,17 @@ Webhook에서 `with_image`를 켜면 `image_base64` 필드(박스를 그린 JPEG
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## 폴더 모드
+
+설정에 `watch.dir`를 적으면 켜집니다. 서비스가 `interval`초마다 이 폴더(하위 폴더 포함)를 확인해 새로 넣은 이미지와 영상을 자동으로 인식하며, 카메라를 연결하지 않아도 됩니다.
+
+- 파일은 놓인 지 `settle`초가 지나고 크기가 더 이상 바뀌지 않아야 인식합니다. 아직 복사 중인 파일을 절반만 인식하는 일은 없습니다.
+- 영상은 `every`초마다 한 프레임을 봅니다. 인식된 클래스마다 박스를 그린 스크린샷을 한 장(점수가 가장 높은 프레임) 저장하며, 파일이 있는 하위 폴더(예: 주문 번호)별로 `out`(기본은 서비스 패키지 안의 `watch_results/`)에 둡니다.
+- 파일마다 `watch_results/인식결과.csv`에 한 행을 추가합니다: 시간, 파일, 폴더, 결과, 최고 점수, 스크린샷.
+- 경보 규칙(클래스, 신뢰도, 시간대)에 걸린 것은 평소처럼 Webhook / MQTT로 푸시하며, 메시지에 `file`, `folder` 두 항목이 더 들어갑니다.
+- 인식한 파일은 `watch_results/.wulabel-watch.json`에 기록되므로 서비스를 다시 시작해도 다시 인식하지 않습니다. 파일이 바뀌면 다시 인식합니다. Wulabel 일괄 인식의 결과 폴더는 자동으로 건너뜁니다.
+- `GET /health`의 `watch`에서 몇 개 파일을 인식했는지, 마지막 파일이 무엇인지 볼 수 있습니다.
+
 ## 현장 데이터 회수
 
 신뢰도가 `low`~`high` 사이로 모델이 확신하지 못한 프레임은 `reflux/`에 저장됩니다(스트림마다 `interval`초에 최대 한 장).
@@ -101,5 +113,6 @@ service.py                서비스 프로그램
 config.json               설정
 alerts/                   경보 스냅샷
 reflux/                   회수 이미지
+watch_results/            폴더 모드 스크린샷과 표
 logs/service.log          실행 로그
 ```

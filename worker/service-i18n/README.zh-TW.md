@@ -39,7 +39,8 @@
   },
   "webhook": { "url": "http://你的平台/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // 選填：資料夾模式
 }
 ```
 
@@ -88,6 +89,17 @@ Webhook 開啟 `with_image` 時，會多一個 `image_base64` 欄位（畫好框
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## 資料夾模式
+
+設定裡寫了 `watch.dir` 就會開啟：服務每 `interval` 秒掃描一次這個資料夾（包括子資料夾），新放進來的圖片和影片自動辨識一遍，不用接攝影機。
+
+- 檔案要放好 `settle` 秒、大小不再變化才辨識，還在複製的不會辨識一半。
+- 影片每隔 `every` 秒取一個影格；辨識出的每個類別存一張帶框截圖（分數最高的那個影格），依檔案所在的子資料夾（例如單號）放在 `out`（預設是服務包裡的 `watch_results/`）。
+- 每個檔案在 `watch_results/辨識結果.csv` 裡追加一列：時間、檔案、資料夾、結果、最高分、截圖。
+- 符合警報規則（類別、信心值、時段）的照常推播 Webhook / MQTT，訊息裡多 `file`、`folder` 兩項。
+- 辨識過的記在 `watch_results/.wulabel-watch.json`，重新啟動服務不會重複辨識；檔案改過會重新辨識。Wulabel 批次辨識的結果資料夾會自動略過。
+- `GET /health` 的 `watch` 裡能看到辨識了幾個檔案、最近一個是哪個。
+
 ## 現場回流
 
 信心值在 `low`～`high` 之間、模型拿不準的畫面，會儲存到 `reflux/`（每路串流每 `interval` 秒最多一張）。
@@ -101,5 +113,6 @@ service.py                服務程式
 config.json               設定
 alerts/                   警報截圖
 reflux/                   回流圖片
+watch_results/            資料夾模式的截圖和表格
 logs/service.log          執行記錄
 ```

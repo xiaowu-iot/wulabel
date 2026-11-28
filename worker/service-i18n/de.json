@@ -19,5 +19,21 @@
   "JSON 需要 image 字段（base64 图片）": "JSON benötigt ein Feld image (Base64-Bild)",
   "图片解码失败": "Bild konnte nicht dekodiert werden",
   "推理服务已启动：%d 路视频，HTTP 接口 http://%s:%d": "Inferenzdienst gestartet: %d Stream(s), HTTP-API unter http://%s:%d",
-  "已停止": "Beendet"
+  "已停止": "Beendet",
+  "文件夹模式：监控 %s，结果放在 %s": "Ordnermodus: überwache %s, Ergebnisse in %s",
+  "文件夹模式扫描出错": "Fehler beim Scannen im Ordnermodus",
+  "要监控的文件夹不存在：%s": "Zu überwachender Ordner nicht gefunden: %s",
+  "识别出错：%s": "Fehler bei der Erkennung: %s",
+  "读不了这个文件": "Datei kann nicht gelesen werden",
+  "；": "; ",
+  "{name}（{n} 帧）": "{name} ({n} Frames)",
+  "没有目标": "Keine Objekte",
+  "识别结果": "Ergebnisse",
+  "时间": "Zeit",
+  "文件": "Datei",
+  "文件夹": "Ordner",
+  "结果": "Ergebnis",
+  "最高分": "Höchster Score",
+  "截图": "Screenshot",
+  "[文件夹] %s：%s": "[Ordner] %s: %s"
 }

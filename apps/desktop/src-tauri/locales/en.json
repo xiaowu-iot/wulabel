@@ -485,5 +485,14 @@
   "{name}（{n} 帧）": "{name} ({n} frames)",
   "这个文件夹里没有图片或视频": "No images or videos in this folder",
   "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "The results folder can't be the folder you're recognizing. Choose another one (a subfolder inside it is fine).",
-  "识别截图": "Recognition screenshots"
+  "识别截图": "Recognition screenshots",
+  "单号（文件夹）": "Order no. (folder)",
+  "文件数": "Files",
+  "识别出的类别": "Classes found",
+  "{name}（{n} 个文件）": "{name} ({n} files)",
+  "按单号汇总": "Summary by order",
+  "识别报告": "Recognition report",
+  "共 {n} 个文件，{g} 个单号（文件夹）": "{n} files, {g} orders (folders)",
+  "{n} 个文件": "{n} files",
+  "打不开这个文件：{path}": "Can't open this file: {path}"
 }

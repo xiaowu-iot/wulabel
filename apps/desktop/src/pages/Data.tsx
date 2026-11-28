@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Checkbox, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Progress, Segmented, Tag, Tooltip } from "antd";
+import { Alert, App, Button, Checkbox, Dropdown, Empty, Input, InputNumber, Modal, Pagination, Progress, Segmented, Select, Tag, Tooltip } from "antd";
 import {
   AimOutlined,
   CheckSquareOutlined,
@@ -29,6 +29,8 @@ import {
   ImportProgress,
   ImportResult,
   isClsTask,
+  ImportBatch,
+  Label,
   LastImport,
   ProjectInfo,
   StreamFrames,
@@ -47,6 +49,7 @@ import { PickModal, QualityModal } from "../components/DataTools";
 import CollabModal from "../components/CollabModal";
 import ConvertModal from "../components/ConvertModal";
 import { XuntongPullModal } from "../components/Xuntong";
+import { fmtTime } from "./Train";
 
 const PAGE_SIZE = 120;
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
@@ -87,6 +90,12 @@ export default function Data({ project }: { project: ProjectInfo }) {
   const annotateQueue = useApp((s) => s.annotateQueue);
   const setAppPage = useApp((s) => s.setPage);
   const [filter, setFilter] = useState("all");
+  // 按类别筛：类别 id；-1 一个标注都没有；-2 有预标注还没确认
+  const [labelFilter, setLabelFilter] = useState<number | null>(null);
+  const [labelList, setLabelList] = useState<Label[]>([]);
+  // 按导入批次筛：只看某次导入的图
+  const [batchFilter, setBatchFilter] = useState<number | null>(null);
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<ImageItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -132,7 +141,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
 
   const load = useCallback(async () => {
     try {
-      const r = await api.listImages(filter, (page - 1) * PAGE_SIZE, PAGE_SIZE);
+      const r = await api.listImages(filter, (page - 1) * PAGE_SIZE, PAGE_SIZE, labelFilter, batchFilter);
       // 删除后当前页可能空了，退回上一页
       if (r.items.length === 0 && page > 1) {
         setPage(page - 1);
@@ -141,10 +150,12 @@ export default function Data({ project }: { project: ProjectInfo }) {
       setItems(r.items);
       setTotal(r.total);
       setLast(await api.lastImport());
+      setLabelList(await api.listLabels());
+      setBatches(await api.listImportBatches());
     } catch (e) {
       message.error(errText(e));
     }
-  }, [filter, page, message]);
+  }, [filter, page, labelFilter, batchFilter, message]);
   // 采集过程中的事件回调里总是调用最新的 load（翻页、筛选变了也对）
   const loadRef = useRef(load);
   loadRef.current = load;
@@ -206,7 +217,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   // 删除等操作的确认框里会写明一共多少张
   useEffect(() => {
     setSelected(new Set());
-  }, [filter]);
+  }, [filter, labelFilter, batchFilter]);
   // Shift 连选只在同一页里
   useEffect(() => {
     anchor.current = null;
@@ -215,7 +226,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   /** 选中当前筛选下的全部图（包括其他页） */
   const selectAll = async () => {
     try {
-      setSelected(new Set(await api.listImageIds(filter === "all" ? null : filter)));
+      setSelected(new Set(await api.listImageIds(filter === "all" ? null : filter, labelFilter, batchFilter)));
     } catch (e) {
       message.error(errText(e));
     }
@@ -260,15 +271,65 @@ export default function Data({ project }: { project: ProjectInfo }) {
     setPage(1);
   };
 
+  /** 选中的图的原图复制到一个文件夹（比如把没有标注的图拷出来发给别人标） */
+  const exportSelected = async () => {
+    const dir = await open({ directory: true, title: t("选择把图片导出到哪个文件夹") });
+    if (typeof dir !== "string") return;
+    setBatchBusy(true);
+    try {
+      const [n, failed] = await api.exportImages([...selected].sort((a, b) => a - b), dir);
+      if (failed.length) {
+        modal.warning({
+          title: t("导出了 {n} 张，{f} 张复制失败", { n, f: failed.length }),
+          width: 640,
+          content: <div style={{ maxHeight: 300, overflow: "auto", fontSize: 12 }}>{failed.map((f) => <div key={f}>{f}</div>)}</div>,
+        });
+      } else {
+        message.success({
+          content: (
+            <span>
+              {t("已导出 {n} 张图片", { n })} <a onClick={() => api.revealPath(dir).catch(() => {})}>{t("打开文件夹")}</a>
+            </span>
+          ),
+          duration: 6,
+        });
+      }
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
+  /** 按类别筛出来的这批图送去标注页，一类一类核对 */
+  const annotateFiltered = async () => {
+    try {
+      const ids = await api.listImageIds(filter === "all" ? null : filter, labelFilter, batchFilter);
+      const name =
+        labelFilter == null
+          ? t("这次导入的图")
+          : labelFilter === -1
+          ? t("没有标注的图")
+          : labelFilter === -2
+            ? t("有预标注还没确认的图")
+            : labelList.find((l) => l.id === labelFilter)?.name ?? "";
+      annotateQueue(ids, name);
+    } catch (e) {
+      message.error(errText(e));
+    }
+  };
+
   useEffect(() => {
     load();
   }, [load]);
 
   const showResult = useCallback(
     (r: ImportResult) => {
-      const base = r.duplicated
+      const base0 = r.duplicated
         ? t("新增 {added} 张，跳过重复 {dup} 张", { added: r.added, dup: r.duplicated })
         : t("新增 {added} 张", { added: r.added });
+      // 批量识别的截图：用的是里面的原图，识别结果成了预标注
+      const base = r.prelabeled ? base0 + t("（{n} 张批量识别截图已换成原图，识别结果作为预标注）", { n: r.prelabeled }) : base0;
       const text = r.stopped ? t("已停止，{text}，还有 {n} 张没导入", { text: base, n: r.stopped }) : base;
       if (r.failed.length === 0) {
         // 导入了新图，顺手给个去标注的入口
@@ -745,7 +806,42 @@ export default function Data({ project }: { project: ProjectInfo }) {
       </div>
 
       <div className="row" style={{ marginBottom: 12, justifyContent: "space-between" }}>
-        <Segmented value={filter} options={review ? FILTERS : SOLO_FILTERS} onChange={(v) => switchFilter(v as string)} />
+        <div className="row" style={{ gap: 8 }}>
+          <Segmented value={filter} options={review ? FILTERS : SOLO_FILTERS} onChange={(v) => switchFilter(v as string)} />
+          <Select
+            style={{ minWidth: 160 }}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            placeholder={t("全部类别")}
+            value={labelFilter ?? undefined}
+            onChange={(v) => {
+              setLabelFilter(v ?? null);
+              setPage(1);
+            }}
+            options={[
+              ...labelList.map((l) => ({ value: l.id, label: l.name })),
+              { value: -2, label: t("有预标注还没确认的") },
+              { value: -1, label: t("没有任何标注的") },
+            ]}
+          />
+          <Select
+            style={{ minWidth: 200 }}
+            allowClear
+            placeholder={t("全部导入批次")}
+            value={batchFilter ?? undefined}
+            onChange={(v) => {
+              setBatchFilter(v ?? null);
+              setPage(1);
+            }}
+            options={batches.map((b) => ({ value: b.batch, label: t("{time} 导入的 {n} 张", { time: fmtTime(b.createdAt), n: b.count }) }))}
+          />
+          {(labelFilter != null || batchFilter != null) && total > 0 && !selecting && (
+            <Button size="small" type="primary" onClick={annotateFiltered}>
+              {t("去标注这批（{n} 张）", { n: total })}
+            </Button>
+          )}
+        </div>
         {selecting ? (
           <div className="row" style={{ gap: 8 }}>
             <span>{t("已选 {n} 张", { n: selected.size })}</span>
@@ -775,6 +871,11 @@ export default function Data({ project }: { project: ProjectInfo }) {
             >
               {t("去标注")}
             </Button>
+            <Tooltip title={t("把选中的图的原图复制到一个文件夹（不带标注）")}>
+              <Button size="small" disabled={selected.size === 0 || batchBusy} onClick={exportSelected}>
+                {t("导出图片")}
+              </Button>
+            </Tooltip>
             <Dropdown
               trigger={["click"]}
               disabled={selected.size === 0 || batchBusy}

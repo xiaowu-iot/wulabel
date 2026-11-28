@@ -39,7 +39,8 @@ Para fazer inferência numa GPU NVIDIA: troque `onnxruntime` por `onnxruntime-gp
   },
   "webhook": { "url": "http://sua-plataforma/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // opcional: modo pasta
 }
 ```
 
@@ -88,6 +89,17 @@ Os campos de cada item em `detections` dependem do modelo. O `task` retornado po
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## Modo pasta
+
+É ativado ao preencher `watch.dir` na configuração: o serviço verifica esta pasta (incluindo subpastas) a cada `interval` segundos e reconhece automaticamente as imagens e vídeos novos colocados nela, sem precisar de câmera.
+
+- Um arquivo só é reconhecido depois de estar no lugar há `settle` segundos e de o tamanho parar de mudar, então um arquivo ainda sendo copiado não é reconhecido pela metade.
+- Dos vídeos, é analisado um quadro a cada `every` segundos; para cada classe reconhecida é salva uma captura com caixas (o quadro com a maior pontuação), organizada pela subpasta onde o arquivo está (por exemplo, número do pedido) dentro de `out` (por padrão, `watch_results/` no pacote de serviço).
+- Cada arquivo acrescenta uma linha em `watch_results/resultados.csv`: hora, arquivo, pasta, resultado, pontuação máxima, captura.
+- O que passar nas regras de alarme (classes, confiança, horário) é enviado por Webhook / MQTT normalmente, com dois campos a mais na mensagem: `file` e `folder`.
+- Os arquivos reconhecidos ficam registrados em `watch_results/.wulabel-watch.json`, então reiniciar o serviço não faz reconhecê-los de novo; um arquivo alterado é reconhecido outra vez. As pastas de resultados do reconhecimento em lote do Wulabel são puladas automaticamente.
+- Em `watch` no `GET /health` dá para ver quantos arquivos foram reconhecidos e qual foi o último.
+
 ## Retorno do campo
 
 Quadros em que o modelo fica em dúvida (confiança entre `low` e `high`) são salvos em `reflux/` (no máximo um por stream a cada `interval` segundos).
@@ -101,5 +113,6 @@ service.py                programa do serviço
 config.json               configuração
 alerts/                   capturas de alarmes
 reflux/                   imagens de campo
+watch_results/            capturas e planilha do modo pasta
 logs/service.log          log
 ```

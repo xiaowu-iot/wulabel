@@ -39,7 +39,8 @@ Pour l'inférence sur un GPU NVIDIA : remplacez `onnxruntime` par `onnxruntime-g
   },
   "webhook": { "url": "http://votre-plateforme/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // facultatif : mode dossier
 }
 ```
 
@@ -88,6 +89,17 @@ Les champs de chaque élément de `detections` dépendent du modèle. Le champ `
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## Mode dossier
+
+Il s'active dès que `watch.dir` est renseigné dans la configuration : le service parcourt ce dossier (sous-dossiers compris) toutes les `interval` secondes et reconnaît automatiquement les nouvelles images et vidéos qu'on y dépose, sans caméra.
+
+- Un fichier n'est reconnu qu'après être resté en place `settle` secondes sans que sa taille change : un fichier en cours de copie n'est pas reconnu à moitié.
+- Pour les vidéos, une image est analysée toutes les `every` secondes ; pour chaque classe reconnue, une capture avec les boîtes est enregistrée (l'image au score le plus élevé), rangée selon le sous-dossier du fichier (par exemple le numéro de commande) dans `out` (par défaut `watch_results/` dans le package).
+- Chaque fichier ajoute une ligne à `watch_results/resultats.csv` : heure, fichier, dossier, résultat, score max, capture.
+- Ce qui passe les règles d'alerte (classes, confiance, plages horaires) est envoyé par Webhook / MQTT comme d'habitude, avec deux champs en plus dans le message : `file` et `folder`.
+- Les fichiers reconnus sont notés dans `watch_results/.wulabel-watch.json` : après un redémarrage du service, ils ne sont pas reconnus une seconde fois ; un fichier modifié est reconnu à nouveau. Les dossiers de résultats de la reconnaissance par lot de Wulabel sont ignorés automatiquement.
+- `watch` dans `GET /health` indique combien de fichiers ont été reconnus et lequel est le dernier.
+
 ## Retour du terrain
 
 Les images sur lesquelles le modèle hésite (confiance entre `low` et `high`) sont enregistrées dans `reflux/` (au plus une par flux toutes les `interval` secondes).
@@ -101,5 +113,6 @@ service.py                programme du service
 config.json               configuration
 alerts/                   captures d'alerte
 reflux/                   images du terrain
+watch_results/            captures et tableau du mode dossier
 logs/service.log          journal
 ```

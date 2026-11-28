@@ -39,7 +39,8 @@
   },
   "webhook": { "url": "http://你的平台/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/退货视频", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // 可选：文件夹模式
 }
 ```
 
@@ -88,6 +89,17 @@ Webhook 开启 `with_image` 时，会多一个 `image_base64` 字段（带框的
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## 文件夹模式
+
+配置里写了 `watch.dir` 就会打开：服务每 `interval` 秒扫描一次这个文件夹（包括子文件夹），新放进来的图片和视频自动识别一遍，不用接摄像头。
+
+- 文件要放好 `settle` 秒、大小不再变化才识别，还在复制的不会识别一半。
+- 视频每隔 `every` 秒取一帧；识别出的每个类别存一张带框截图（分数最高的那一帧），按文件所在的子文件夹（比如单号）放在 `out`（默认服务包里的 `watch_results/`）。
+- 每个文件在 `watch_results/识别结果.csv` 里追加一行：时间、文件、文件夹、结果、最高分、截图。
+- 过了告警规则（类别、置信度、时段）的照常推送 Webhook / MQTT，消息里多 `file`、`folder` 两项。
+- 识别过的记在 `watch_results/.wulabel-watch.json`，重启服务不会重复识别；文件改过会重新识别。Wulabel 批量识别的结果文件夹会自动跳过。
+- `GET /health` 的 `watch` 里能看到识别了几个文件、最近一个是哪个。
+
 ## 现场回流
 
 置信度在 `low`～`high` 之间、模型拿不准的画面，会保存到 `reflux/`（每路视频每 `interval` 秒最多一张）。
@@ -101,5 +113,6 @@ service.py                服务程序
 config.json               配置
 alerts/                   告警截图
 reflux/                   回流图片
+watch_results/            文件夹模式的截图和表格
 logs/service.log          运行日志
 ```

@@ -39,7 +39,8 @@ Inferenz auf einer NVIDIA-GPU: Ersetzen Sie in `requirements.txt` `onnxruntime` 
   },
   "webhook": { "url": "http://ihre-plattform/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // optional: Ordnermodus
 }
 ```
 
@@ -88,6 +89,17 @@ Die Felder jedes Eintrags in `detections` hängen vom Modell ab. Das Feld `task`
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## Ordnermodus
+
+Ist in der Konfiguration `watch.dir` gesetzt, ist er aktiv: Der Dienst durchsucht diesen Ordner (samt Unterordnern) alle `interval` Sekunden und erkennt neu hineingelegte Bilder und Videos automatisch, ganz ohne Kamera.
+
+- Eine Datei wird erst erkannt, wenn sie seit `settle` Sekunden dort liegt und sich ihre Größe nicht mehr ändert. Dateien, die gerade noch kopiert werden, werden also nicht halb erkannt.
+- Aus Videos wird alle `every` Sekunden ein Frame genommen. Für jede erkannte Klasse wird ein Screenshot mit Boxen gespeichert (der Frame mit dem höchsten Score), sortiert nach dem Unterordner der Datei (z. B. Bestellnummer) unter `out` (standardmäßig `watch_results/` im Servicepaket).
+- Jede Datei bekommt eine Zeile in `watch_results/Ergebnisse.csv`: Zeit, Datei, Ordner, Ergebnis, höchster Score, Screenshot.
+- Was die Alarmregeln erfüllt (Klassen, Konfidenz, Zeitfenster), wird wie gewohnt per Webhook / MQTT gesendet; die Nachricht enthält zusätzlich `file` und `folder`.
+- Erkannte Dateien werden in `watch_results/.wulabel-watch.json` vermerkt, nach einem Neustart des Dienstes wird also nichts doppelt erkannt; geänderte Dateien werden neu erkannt. Ergebnisordner der Wulabel-Stapelerkennung werden automatisch übersprungen.
+- Unter `watch` in `GET /health` siehst du, wie viele Dateien erkannt wurden und welche zuletzt.
+
 ## Felddaten-Rückfluss
 
 Bilder, bei denen sich das Modell unsicher ist (Konfidenz zwischen `low` und `high`), werden in `reflux/` gespeichert (höchstens eines pro Stream alle `interval` Sekunden).
@@ -101,5 +113,6 @@ service.py                Dienstprogramm
 config.json               Konfiguration
 alerts/                   Alarm-Schnappschüsse
 reflux/                   Bilder aus dem Feld
+watch_results/            Screenshots und Tabelle des Ordnermodus
 logs/service.log          Log
 ```

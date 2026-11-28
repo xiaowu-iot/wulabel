@@ -26,6 +26,8 @@ pub struct ImportResult {
     pub failed: Vec<String>,
     /// 中途停止时没导入的张数
     pub stopped: usize,
+    /// 批量识别的截图：用里面的原图入库、识别结果写成预标注的张数
+    pub prelabeled: usize,
 }
 
 /// 数据页「停止导入」：置位后还没处理的图不再导入，已处理的照常入库
@@ -154,6 +156,29 @@ fn unique_name(dir: &Path, src: &Path, taken: &mut HashSet<String>) -> String {
     name
 }
 
+/// 数据页「导出图片」：把选中的图（原图，不带标注）复制到一个文件夹，重名的加序号。
+/// 返回复制了几张；原图找不到的跳过，写在 failed 里
+pub fn copy_out(project: &Project, ids: &[i64], out: &Path) -> AppResult<(usize, Vec<String>)> {
+    fs::create_dir_all(out)?;
+    let paths: Vec<String> = {
+        let conn = project.conn.lock();
+        let mut stmt = conn.prepare("SELECT path FROM images WHERE id = ?1")?;
+        ids.iter().filter_map(|id| stmt.query_row([id], |r| r.get::<_, String>(0)).ok()).collect()
+    };
+    let mut taken = HashSet::new();
+    let mut n = 0;
+    let mut failed = Vec::new();
+    for stored in paths {
+        let src = project.resolve(&stored);
+        let name = unique_name(out, &src, &mut taken);
+        match fs::copy(&src, out.join(&name)) {
+            Ok(_) => n += 1,
+            Err(e) => failed.push(format!("{}：{e}", src.display())),
+        }
+    }
+    Ok((n, failed))
+}
+
 /// 存储路径：项目内用相对路径（整个文件夹拷走也能打开），项目外用绝对路径
 fn stored_path(project: &Project, src: &Path) -> String {
     let abs = src.canonicalize().unwrap_or_else(|_| src.to_path_buf());
@@ -175,16 +200,6 @@ pub fn import(
     import_mapped(project, files, copy, on_progress).map(|(r, _)| r)
 }
 
-/// 同 import，可以用 STOP_IMPORT 中途停止（数据页导入图片用）
-pub fn import_stoppable(
-    project: &Project,
-    files: &[PathBuf],
-    copy: bool,
-    on_progress: &(dyn Fn(usize, usize) + Sync),
-) -> AppResult<ImportResult> {
-    import_inner(project, files, copy, None, Some(&STOP_IMPORT), WRITE_CHUNK, on_progress).map(|(r, _)| r)
-}
-
 /// 同 import，另外返回「源文件 → 图片 id」（重复的图对应已有的 id），导入带标注的数据集时用
 pub fn import_mapped(
     project: &Project,
@@ -193,6 +208,17 @@ pub fn import_mapped(
     on_progress: &(dyn Fn(usize, usize) + Sync),
 ) -> AppResult<(ImportResult, HashMap<PathBuf, i64>)> {
     import_batch(project, files, copy, None, on_progress)
+}
+
+/// 同 import_batch，可以用 STOP_IMPORT 中途停止（数据页导入、带批量识别截图时分两次导入共用一个批次）
+pub(crate) fn import_batch_stoppable(
+    project: &Project,
+    files: &[PathBuf],
+    copy: bool,
+    batch: Option<i64>,
+    on_progress: &(dyn Fn(usize, usize) + Sync),
+) -> AppResult<(ImportResult, HashMap<PathBuf, i64>)> {
+    import_inner(project, files, copy, batch, Some(&STOP_IMPORT), WRITE_CHUNK, on_progress)
 }
 
 /// 下一个导入批次号
@@ -259,7 +285,7 @@ fn import_inner(
         batch,
         now: db::now(),
         seen: HashMap::new(),
-        result: ImportResult { added: 0, duplicated: 0, failed: Vec::new(), stopped: 0 },
+        result: ImportResult { added: 0, duplicated: 0, failed: Vec::new(), stopped: 0, prelabeled: 0 },
         map: HashMap::new(),
     };
     let mut base = total;
@@ -478,20 +504,36 @@ fn insert_rows(
     Ok(out)
 }
 
-pub fn list(project: &Project, status: Option<&str>, offset: u32, limit: u32) -> AppResult<ImagePage> {
+/// 按类别筛图的 SQL 条件（{n} 换成参数序号）
+pub(crate) const LABEL_COND: &str = "(?{n} IS NULL
+           OR (?{n} = -1 AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id))
+           OR (?{n} = -2 AND images.status = 'todo' AND EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id AND a.source IN ('model', 'text', 'ai')))
+           OR (?{n} > 0 AND EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id AND a.label_id = ?{n})))";
+
+/// 按导入批次筛图的 SQL 条件
+pub(crate) const BATCH_COND: &str = "(?{n} IS NULL OR images.batch = ?{n})";
+
+/// 数据页的图片列表。label：只看有这个类别标注的图；-1 是一个标注都没有的，-2 是有预标注还没确认的。batch：只看某次导入的
+pub fn list(project: &Project, status: Option<&str>, label: Option<i64>, batch: Option<i64>, offset: u32, limit: u32) -> AppResult<ImagePage> {
     let conn = project.conn.lock();
     let status = status.filter(|s| !s.is_empty() && *s != "all");
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM images WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed')))",
-        [status],
+        &format!(
+            "SELECT COUNT(*) FROM images WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {} AND {}",
+            LABEL_COND.replace("{n}", "2"),
+            BATCH_COND.replace("{n}", "3")
+        ),
+        params![status, label, batch],
         |r| r.get(0),
     )?;
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT id, path, width, height, status, split FROM images
-         WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) ORDER BY id LIMIT ?2 OFFSET ?3",
-    )?;
+         WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {} AND {} ORDER BY id LIMIT ?2 OFFSET ?3",
+        LABEL_COND.replace("{n}", "4"),
+        BATCH_COND.replace("{n}", "5")
+    ))?;
     let items = stmt
-        .query_map(params![status, limit.min(1000), offset], |r| {
+        .query_map(params![status, limit.min(1000), offset, label, batch], |r| {
             let path: String = r.get(1)?;
             let name = Path::new(&path)
                 .file_name()
@@ -515,6 +557,27 @@ pub fn list(project: &Project, status: Option<&str>, offset: u32, limit: u32) ->
 pub struct LastImport {
     pub count: i64,
     pub created_at: i64,
+}
+
+/// 一次导入：批次号、张数、导入时间
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBatch {
+    pub batch: i64,
+    pub count: i64,
+    pub created_at: i64,
+}
+
+/// 最近 50 次导入（数据页按导入批次筛选用；批次 0 是旧数据，不算）
+pub fn list_batches(project: &Project) -> AppResult<Vec<ImportBatch>> {
+    let conn = project.conn.lock();
+    let mut stmt = conn.prepare(
+        "SELECT batch, COUNT(*), MAX(created_at) FROM images WHERE batch > 0 GROUP BY batch ORDER BY batch DESC LIMIT 50",
+    )?;
+    let rows = stmt
+        .query_map([], |r| Ok(ImportBatch { batch: r.get(0)?, count: r.get(1)?, created_at: r.get::<_, Option<i64>>(2)?.unwrap_or(0) }))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// 最近一次导入的批次（批次 0 是旧数据，不算）
@@ -633,6 +696,28 @@ mod tests {
     }
 
     #[test]
+    fn copy_out_selected() {
+        let base = temp_dir("copyout");
+        let src = base.join("src");
+        fs::create_dir_all(&src).unwrap();
+        make_image(&src.join("a.png"), 40, 30, 10);
+        make_image(&src.join("b.png"), 40, 30, 200);
+        let project = Project::create(&base, "p", "detect").unwrap();
+        import(&project, &collect(&[src.clone()]), true, &|_, _| {}).unwrap();
+        let out = base.join("out");
+        // 目标文件夹里已经有同名文件：加序号，不覆盖
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("a.png"), b"old").unwrap();
+        let (n, failed) = copy_out(&project, &[1, 2, 99], &out).unwrap();
+        assert_eq!(n, 2);
+        assert!(failed.is_empty());
+        assert_eq!(fs::read(out.join("a.png")).unwrap(), b"old");
+        assert!(out.join("a_1.png").exists() && out.join("b.png").exists());
+        drop(project);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
     fn create_import_list() {
         let base = temp_dir("import");
         let src = base.join("src");
@@ -652,7 +737,7 @@ mod tests {
         assert_eq!(r.duplicated, 1);
         assert_eq!(r.failed.len(), 1);
 
-        let page = list(&project, None, 0, 100).unwrap();
+        let page = list(&project, None, None, None, 0, 100).unwrap();
         assert_eq!(page.total, 2);
         let b = page.items.iter().find(|i| i.name == "b.jpg").unwrap();
         assert_eq!((b.width, b.height), (800, 600));

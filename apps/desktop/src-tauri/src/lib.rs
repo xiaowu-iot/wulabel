@@ -2,6 +2,7 @@ mod ai;
 mod annotations;
 mod assist;
 mod batch;
+mod batch_report;
 mod collab;
 mod commands;
 mod convert;
@@ -24,6 +25,7 @@ mod review;
 mod report;
 mod runtime;
 mod share;
+mod shotfile;
 mod state;
 mod team;
 mod track;
@@ -132,6 +134,8 @@ pub fn run() {
             commands::last_import_ids,
             commands::delete_images,
             commands::list_image_ids,
+            commands::list_import_batches,
+            commands::export_images,
             commands::load_annotations,
             commands::save_annotations,
             commands::set_image_status,
@@ -227,6 +231,7 @@ pub fn run() {
             commands::xt_account,
             commands::xt_logout,
             commands::open_url,
+            commands::open_file,
             feedback::submit_feedback,
             feedback::feedback_logs,
             i18n::set_language,

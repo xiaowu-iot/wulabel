@@ -7,10 +7,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use crate::batch_report::{self, Record};
 use crate::dataset::safe_dir;
 use crate::error::{msg, AppResult};
 use crate::project::Project;
@@ -22,6 +23,14 @@ use crate::video::{self, Extractor};
 static STOP: AtomicBool = AtomicBool::new(false);
 /// 视频抽帧的 ffmpeg，点停止时杀掉
 static EXTRACTOR: LazyLock<Extractor> = LazyLock::new(Extractor::default);
+
+/// 最近一次批量识别的视频截图。界面上「复核」宫格按序号取图（xl://…/review/{序号}），前端不能借此读任意路径
+static REVIEW: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Default::default);
+
+/// 复核宫格第 i 张截图的路径
+pub fn review_file(i: usize) -> Option<PathBuf> {
+    REVIEW.lock().ok()?.get(i).cloned()
+}
 
 /// 让正在跑的批量识别在这一批结束后停下（已经识别的照样写进表格）
 pub fn stop() {
@@ -60,6 +69,19 @@ pub struct BatchOptions {
     /// 视频截图放回视频所在的文件夹（子文件夹「识别截图」），不放结果文件夹
     #[serde(default)]
     pub shots_beside: bool,
+    /// 截图上画框和类别；关掉就存原图。不管画不画，截图文件里都带着原图和识别结果（见 shotfile）
+    #[serde(default = "yes")]
+    pub draw_boxes: bool,
+    /// 跳过上次已经识别过、之后没改过的文件（结果文件夹里记着），表格里沿用上次的结果
+    #[serde(default)]
+    pub skip_done: bool,
+}
+
+/// 最高分低于「阈值 + 这个数」的结果单独列出来：刚过阈值的最容易认错，最值得人看一眼
+const LOW_MARGIN: f64 = 0.15;
+
+fn yes() -> bool {
+    true
 }
 
 /// 结果文件夹里放一个这个文件，下次识别时整个文件夹跳过（结果可以放在要识别的文件夹里面）
@@ -104,6 +126,26 @@ pub struct BatchResult {
     /// 拿不准（检测是没有目标）的图，可以加进项目去标
     pub uncertain: Vec<String>,
     pub stopped: bool,
+    /// 视频截图的路径，「加进项目去标」用（导入时用里面的原图，识别结果当预标注）
+    pub shots: Vec<String>,
+    /// 什么都没识别出来的视频（相对要识别的文件夹）：可能有模型没学过的新情况
+    pub unrecognized: Vec<String>,
+    /// 这些视频里均匀取的几帧原图，「加进项目去标」用
+    pub unrecognized_frames: Vec<String>,
+    /// 上次识别过、没改过，这次跳过的文件数
+    pub skipped: usize,
+    /// 分数偏低（刚过阈值）的图片和视频截图：最容易认错，优先复核
+    pub low: Vec<String>,
+    /// 按单号汇总的表格、网页报告
+    pub summary: String,
+    pub report: String,
+}
+
+/// 没识别出东西的视频，均匀取几帧（第 1/4、1/2、3/4 处）
+fn sample_frames(n: usize) -> Vec<usize> {
+    let mut ks: Vec<usize> = [n / 4, n / 2, n * 3 / 4].into_iter().filter(|&k| k < n).collect();
+    ks.dedup();
+    ks
 }
 
 /// 一张图识别出的类别：(类别序号, 最高分, 个数)。分类每个类别个数是 1；视频的个数是检出的帧数
@@ -286,15 +328,7 @@ fn save_shot(src: &Path, dst: &Path, boxes: &[[f64; 4]]) -> AppResult<()> {
     img.save_with_format(dst, image::ImageFormat::Jpeg).map_err(|e| msg(e.to_string()))
 }
 
-fn csv_field(s: &str) -> String {
-    if s.contains(|c| matches!(c, ',' | '"' | '\n' | '\r')) {
-        format!("\"{}\"", s.replace('"', "\"\""))
-    } else {
-        s.to_string()
-    }
-}
-
-/// 写表格、按类别复制图片和视频
+/// 按类别复制图片和视频，整理出每个文件的记录（表格、汇总、网页报告由 batch_report 写）
 pub fn write_outputs(
     input: &Path,
     out: &Path,
@@ -302,84 +336,59 @@ pub fn write_outputs(
     rows: &[Row],
     sort: bool,
     detect: bool,
-) -> AppResult<(PathBuf, Vec<(String, usize)>)> {
+) -> AppResult<(Vec<Record>, Vec<(String, usize)>)> {
     fs::create_dir_all(out)?;
     let name_of = |c: usize| classes.get(c).cloned().unwrap_or_else(|| c.to_string());
     let none = if detect { t!("没有目标") } else { t!("拿不准") };
-    // 表格：文件、所在文件夹、结果、最高分，再每个类别一列（分类是分数，检测是个数，视频检测是检出的帧数）
-    let mut csv = String::from("\u{feff}");
-    let mut head = vec![t!("文件"), t!("文件夹"), t!("结果"), t!("最高分")];
-    head.extend(classes.iter().cloned());
-    csv += &head.iter().map(|h| csv_field(h)).collect::<Vec<_>>().join(",");
-    csv += "\r\n";
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     let mut empty = 0;
+    let mut records = Vec::new();
     for row in rows {
         let file = &row.file;
-        let rel = file.strip_prefix(input).unwrap_or(file).to_string_lossy().replace('\\', "/");
-        let mut line = vec![csv_field(&rel), csv_field(&rel_folder(input, file))];
-        match &row.hits {
-            None => {
-                line.push(csv_field(&t!("识别出错")));
-                line.push(String::new());
-                line.extend(classes.iter().map(|_| String::new()));
+        let (size, mtime) = batch_report::stamp(file);
+        records.push(Record {
+            rel: file.strip_prefix(input).unwrap_or(file).to_string_lossy().replace('\\', "/"),
+            folder: rel_folder(input, file),
+            video: row.video,
+            size,
+            mtime,
+            hits: row.hits.as_ref().map(|h| h.iter().map(|&(c, s, n)| (name_of(c), s, n)).collect()),
+            shots: row.shots.iter().map(|s| s.1.to_string_lossy().into_owned()).collect(),
+            path: file.to_string_lossy().into_owned(),
+        });
+        let Some(h) = &row.hits else { continue };
+        if h.is_empty() {
+            empty += 1;
+        }
+        for &(c, _, _) in h {
+            *counts.entry(name_of(c)).or_default() += 1;
+        }
+        if sort && row.video {
+            // 视频复制的是每个类别的截图，名字前面加上单号（所在子文件夹，最外层的用视频名）
+            let folder = rel_folder(input, file).replace('/', "_");
+            let tag = if folder.is_empty() { stem(file) } else { folder };
+            for (c, shot) in &row.shots {
+                let dir = out.join(safe_dir(&name_of(*c)));
+                fs::create_dir_all(&dir)?;
+                let name = shot.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let _ = fs::copy(shot, dir.join(format!("{}_{name}", safe_dir(&tag))));
             }
-            Some(h) => {
-                let text = if h.is_empty() {
-                    none.clone()
-                } else if row.video {
-                    h.iter().map(|&(c, _, n)| t!("{name}（{n} 帧）", name = name_of(c), n = n)).collect::<Vec<_>>().join("；")
-                } else if detect {
-                    h.iter().map(|&(c, _, n)| format!("{}×{}", name_of(c), n)).collect::<Vec<_>>().join("；")
-                } else {
-                    h.iter().map(|&(c, _, _)| name_of(c)).collect::<Vec<_>>().join("；")
-                };
-                line.push(csv_field(&text));
-                line.push(h.first().map(|x| format!("{:.3}", x.1)).unwrap_or_default());
-                for c in 0..classes.len() {
-                    line.push(match h.iter().find(|x| x.0 == c) {
-                        Some(&(_, s, n)) => if detect { n.to_string() } else { format!("{s:.3}") },
-                        None => String::new(),
-                    });
-                }
-                if h.is_empty() {
-                    empty += 1;
-                }
-                for &(c, _, _) in h {
-                    *counts.entry(name_of(c)).or_default() += 1;
-                }
-                if sort && row.video {
-                    // 视频复制的是每个类别的截图，名字前面加上单号（所在子文件夹，最外层的用视频名）
-                    let folder = rel_folder(input, file).replace('/', "_");
-                    let tag = if folder.is_empty() { stem(file) } else { folder };
-                    for (c, shot) in &row.shots {
-                        let dir = out.join(safe_dir(&name_of(*c)));
-                        fs::create_dir_all(&dir)?;
-                        let name = shot.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                        let _ = fs::copy(shot, dir.join(format!("{}_{name}", safe_dir(&tag))));
-                    }
-                } else if sort {
-                    let dirs: Vec<String> = if h.is_empty() { vec![none.clone()] } else { h.iter().map(|&(c, _, _)| name_of(c)).collect() };
-                    for d in dirs {
-                        let dir = out.join(safe_dir(&d));
-                        fs::create_dir_all(&dir)?;
-                        fs::copy(file, dir.join(flat_name(input, file)))
-                            .map_err(|e| msg(t!("复制图片失败 {path}：{e}", path = file.display(), e = e)))?;
-                    }
-                }
+        } else if sort {
+            let dirs: Vec<String> = if h.is_empty() { vec![none.clone()] } else { h.iter().map(|&(c, _, _)| name_of(c)).collect() };
+            for d in dirs {
+                let dir = out.join(safe_dir(&d));
+                fs::create_dir_all(&dir)?;
+                fs::copy(file, dir.join(flat_name(input, file)))
+                    .map_err(|e| msg(t!("复制图片失败 {path}：{e}", path = file.display(), e = e)))?;
             }
         }
-        csv += &line.join(",");
-        csv += "\r\n";
     }
-    let path = out.join(format!("{}.csv", t!("识别结果")));
-    fs::write(&path, csv)?;
     let mut list: Vec<(String, usize)> = counts.into_iter().collect();
     list.sort_by(|a, b| b.1.cmp(&a.1));
     if empty > 0 {
         list.push((none, empty));
     }
-    Ok((path, list))
+    Ok((records, list))
 }
 
 /// 识别用到的东西：模型、阈值，以及模型返回的类别名
@@ -440,10 +449,21 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
     files.retain(|f| !in_result_dir(&input, f, &mut skip_cache));
     let mut videos = video::collect(&[input.clone()]);
     videos.retain(|f| !in_result_dir(&input, f, &mut skip_cache));
+    // 跳过上次识别过、之后没改过的文件（识别出错的照样重来）
+    let prev = if opts.skip_done { batch_report::load(&out) } else { batch_report::Saved::default() };
+    let done_before: HashMap<&str, &Record> = prev.records.iter().filter(|r| r.hits.is_some()).map(|r| (r.rel.as_str(), r)).collect();
+    let is_done = |f: &PathBuf| {
+        let rel = f.strip_prefix(&input).unwrap_or(f).to_string_lossy().replace('\\', "/");
+        done_before.get(rel.as_str()).is_some_and(|r| (r.size, r.mtime) == batch_report::stamp(f))
+    };
+    let before = files.len() + videos.len();
+    files.retain(|f| !is_done(f));
+    videos.retain(|f| !is_done(f));
+    let skipped = before - files.len() - videos.len();
     // 项目里类别的颜色，截图上画框用
     let colors: HashMap<String, String> =
         crate::annotations::list_labels(p).map(|ls| ls.into_iter().map(|l| (l.name, l.color)).collect()).unwrap_or_default();
-    if files.is_empty() && videos.is_empty() {
+    if files.is_empty() && videos.is_empty() && skipped == 0 {
         return Err(msg(t!("这个文件夹里没有图片或视频")));
     }
     let task = p.meta.task.as_str();
@@ -491,6 +511,8 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
     // 2. 视频：抽帧到临时文件夹，一帧帧识别，汇总成一行；每个类别存一张分数最高的截图
     let mut frames = 0usize;
     let mut video_count = 0usize;
+    let mut unrecognized: Vec<String> = Vec::new();
+    let mut unrecognized_frames: Vec<String> = Vec::new();
     if let Some(ff) = ffmpeg.as_ref().filter(|_| !stopped) {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let tmp = std::env::temp_dir().join(format!("wulabel-batch-{}-{nanos}", std::process::id()));
@@ -557,10 +579,16 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
                 for &(c, s, _) in &hits {
                     let k = best[&c];
                     let dst = sd.join(format!("{prefix}{}_{}_{s:.2}.jpg", safe_dir(&name_of(c)), mmss(k as f64 * every)));
-                    // 像标注页一样画框、写类别和分数（推理进程画，能显示中文）；画不了就只画框
                     let items = shot_items(res[k].as_ref(), task, detect, opts.conf, &name_of, &colors);
-                    let req = serde_json::json!({ "cmd": "draw", "src": &paths[k], "dst": &dst, "items": items });
-                    if pr.call(rt, &req, &mut |_| {}).is_err() || !dst.exists() {
+                    let _ = fs::remove_file(&dst);
+                    // 像标注页一样画框、写类别和分数（推理进程画，能显示中文）；画不了就只画框。不画框就存原图
+                    let drawn = opts.draw_boxes && {
+                        let req = serde_json::json!({ "cmd": "draw", "src": &paths[k], "dst": &dst, "items": &items });
+                        pr.call(rt, &req, &mut |_| {}).is_ok() && dst.exists()
+                    };
+                    if !opts.draw_boxes {
+                        let _ = fs::copy(&paths[k], &dst);
+                    } else if !drawn {
                         let boxes: Vec<[f64; 4]> = match (&res[k], detect) {
                             (Some((_, raw)), true) => {
                                 raw.boxes.iter().filter(|b| b[5] >= opts.conf).map(|b| [b[0], b[1], b[2], b[3]]).collect()
@@ -571,7 +599,35 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
                         let _ = save_shot(&paths[k], &dst, &boxes);
                     }
                     if dst.exists() {
+                        // 截图文件后面接上原图和识别结果：拖回 Wulabel 时用原图入库，识别结果当预标注
+                        let (width, height) = image::image_dimensions(&paths[k]).unwrap_or((0, 0));
+                        let info = crate::shotfile::ShotInfo {
+                            task: task.to_string(),
+                            width,
+                            height,
+                            video: v.strip_prefix(&input).unwrap_or(v).to_string_lossy().replace('\\', "/"),
+                            time: k as f64 * every,
+                            items: items.iter().filter_map(|it| serde_json::from_value(it.clone()).ok()).collect(),
+                        };
+                        // 画了框的后面接原图；没画框的截图本身就是原图
+                        let clean = if opts.draw_boxes { fs::read(&paths[k]).ok() } else { None };
+                        let _ = crate::shotfile::append(&dst, clean.as_deref(), &info);
                         shots.push((c, dst));
+                    }
+                }
+                if hits.is_empty() {
+                    // 什么都没识别出来：可能是模型没学过的新情况。取几帧原图放进「没有目标 / 拿不准」文件夹，方便加回项目去标
+                    let none_dir = out.join(safe_dir(&if detect { t!("没有目标") } else { t!("拿不准") }));
+                    let folder = rel_folder(&input, v).replace('/', "_");
+                    let tag = if folder.is_empty() { stem(v) } else { format!("{folder}_{}", stem(v)) };
+                    unrecognized.push(v.strip_prefix(&input).unwrap_or(v).to_string_lossy().replace('\\', "/"));
+                    for k in sample_frames(paths.len()) {
+                        if fs::create_dir_all(&none_dir).is_ok() {
+                            let dst = none_dir.join(format!("{}_{}.jpg", safe_dir(&tag), mmss(k as f64 * every)));
+                            if fs::copy(&paths[k], &dst).is_ok() {
+                                unrecognized_frames.push(dst.to_string_lossy().into_owned());
+                            }
+                        }
                     }
                 }
                 Some(hits)
@@ -589,7 +645,34 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
         .filter(|r| !r.video && r.hits.as_ref().is_some_and(|h| h.is_empty()))
         .map(|r| r.file.to_string_lossy().into_owned())
         .collect();
-    let (csv, counts) = write_outputs(&input, &out, &ctx.classes, &rows, opts.sort, detect)?;
+    // 分数偏低（刚过阈值）的：图片本身、视频的截图
+    let low_line = (opts.conf + LOW_MARGIN).min(0.95);
+    let low: Vec<String> = rows
+        .iter()
+        .filter(|r| r.hits.as_ref().and_then(|h| h.first()).is_some_and(|x| x.1 < low_line))
+        .flat_map(|r| {
+            if r.video {
+                r.shots.iter().map(|s| s.1.to_string_lossy().into_owned()).collect::<Vec<_>>()
+            } else {
+                vec![r.file.to_string_lossy().into_owned()]
+            }
+        })
+        .collect();
+    if let Ok(mut r) = REVIEW.lock() {
+        *r = rows.iter().flat_map(|r| r.shots.iter().map(|s| s.1.clone())).collect();
+    }
+    let (records, counts) = write_outputs(&input, &out, &ctx.classes, &rows, opts.sort, detect)?;
+    // 表格、汇总、网页报告：这次识别的 + 上次识别过、这次跳过的
+    let classes = if ctx.classes.is_empty() { prev.classes.clone() } else { ctx.classes.clone() };
+    let mut all: Vec<Record> = Vec::new();
+    if opts.skip_done {
+        let fresh: std::collections::HashSet<&str> = records.iter().map(|r| r.rel.as_str()).collect();
+        all.extend(prev.records.iter().filter(|r| !fresh.contains(r.rel.as_str())).cloned());
+    }
+    all.extend(records);
+    all.sort_by(|a, b| a.rel.cmp(&b.rel));
+    let written = batch_report::write_all(&out, &classes, &all, detect)?;
+    let csv = written.csv;
     Ok(BatchResult {
         images,
         videos: video_count,
@@ -600,6 +683,13 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
         counts,
         uncertain,
         stopped,
+        shots: rows.iter().flat_map(|r| r.shots.iter().map(|s| s.1.to_string_lossy().into_owned())).collect(),
+        unrecognized,
+        unrecognized_frames,
+        skipped,
+        low,
+        summary: written.summary.to_string_lossy().into_owned(),
+        report: written.report.to_string_lossy().into_owned(),
     })
 }
 
@@ -650,6 +740,14 @@ mod tests {
     }
 
     #[test]
+    fn samples_frames_evenly() {
+        assert_eq!(sample_frames(0), Vec::<usize>::new());
+        assert_eq!(sample_frames(1), vec![0]);
+        assert_eq!(sample_frames(2), vec![0, 1]);
+        assert_eq!(sample_frames(30), vec![7, 15, 22]);
+    }
+
+    #[test]
     fn skips_result_folders() {
         let base = temp("batch-skip");
         let input = base.join("in");
@@ -695,7 +793,12 @@ mod tests {
             row(&v, Some(vec![(0, 0.8, 3)]), true, vec![(0, shot.clone())]),
         ];
         let out = base.join("out");
-        let (csv, counts) = write_outputs(&input, &out, &classes, &rows, true, false).unwrap();
+        let (records, counts) = write_outputs(&input, &out, &classes, &rows, true, false).unwrap();
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[3].folder, "SF1");
+        assert_eq!(records[3].hits, Some(vec![("扇叶损坏".to_string(), 0.8, 3)]));
+        assert_eq!(records[3].shots.len(), 1);
+        let csv = batch_report::write_all(&out, &classes, &records, false).unwrap().csv;
         let text = fs::read_to_string(&csv).unwrap();
         let lines: Vec<&str> = text.trim_start_matches('\u{feff}').lines().collect();
         assert_eq!(lines.len(), 5);

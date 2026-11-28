@@ -485,5 +485,14 @@
   "{name}（{n} 帧）": "{name} ({n} fotogramas)",
   "这个文件夹里没有图片或视频": "No hay imágenes ni videos en esta carpeta",
   "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "La carpeta de resultados no puede ser la misma que la carpeta a reconocer. Elige otra (puede ser una subcarpeta dentro de ella).",
-  "识别截图": "Capturas de reconocimiento"
+  "识别截图": "Capturas de reconocimiento",
+  "单号（文件夹）": "N.º de pedido (carpeta)",
+  "文件数": "Archivos",
+  "识别出的类别": "Clases encontradas",
+  "{name}（{n} 个文件）": "{name} ({n} archivos)",
+  "按单号汇总": "Resumen por pedido",
+  "识别报告": "Informe de reconocimiento",
+  "共 {n} 个文件，{g} 个单号（文件夹）": "{n} archivos en total, {g} pedidos (carpetas)",
+  "{n} 个文件": "{n} archivos",
+  "打不开这个文件：{path}": "No se puede abrir este archivo: {path}"
 }

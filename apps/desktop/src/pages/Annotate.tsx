@@ -250,6 +250,9 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [fitSignal, setFitSignal] = useState(0);
   const [showNames, setShowNames] = useState(true);
+  // 只显示某一类的框（一类一类核对时用，配合数据页按类别筛选）；null 显示全部
+  const [onlyLabel, setOnlyLabel] = useState<number | null>(null);
+  const shown = (labelId: number | null | undefined) => onlyLabel == null || labelId === onlyLabel;
   const [keysOpen, setKeysOpen] = useState(false);
   const [scale, setScale] = useState(1);
   const [newLabel, setNewLabel] = useState("");
@@ -1864,8 +1867,14 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
             src={imageUrl(project.path, imageId)}
             imgW={meta.width}
             imgH={meta.height}
-            boxes={isCls ? [] : [...boxes, ...poses.map((p) => ({ key: p.key, labelId: p.labelId, x: p.x, y: p.y, w: p.w, h: p.h, source: p.source, score: p.score }))]}
-            polys={polys}
+            boxes={
+              isCls
+                ? []
+                : [...boxes, ...poses.map((p) => ({ key: p.key, labelId: p.labelId, x: p.x, y: p.y, w: p.w, h: p.h, source: p.source, score: p.score }))].filter((b) =>
+                    shown(b.labelId),
+                  )
+            }
+            polys={polys.filter((x) => shown(x.labelId))}
             colorOf={colorOf}
             nameOf={nameOf}
             selected={selected}
@@ -1887,7 +1896,7 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
                   : (filter === "queue" && imageId != null && queue?.marks?.[imageId]) || undefined
                 : undefined
             }
-            kpts={poses.map((p) => ({ key: p.key, labelId: p.labelId, kpts: p.kpts }))}
+            kpts={poses.filter((p) => shown(p.labelId)).map((p) => ({ key: p.key, labelId: p.labelId, kpts: p.kpts }))}
             skeleton={template?.skeleton}
             placing={placing}
             onPlaceKpt={onPlaceKpt}
@@ -2276,6 +2285,17 @@ export default function Annotate({ project }: { project: ProjectInfo }) {
                 <Switch size="small" checked={showNames} onChange={setShowNames} />
               </span>
             </div>
+            <Select
+              size="small"
+              style={{ width: "100%", marginBottom: 6 }}
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder={t("画面上显示全部类别")}
+              value={onlyLabel ?? undefined}
+              onChange={(v) => setOnlyLabel(v ?? null)}
+              options={labels.map((l) => ({ value: l.id, label: t("只显示「{name}」", { name: l.name }) }))}
+            />
             {objects.length === 0 && (
               <div className="dim">
                 {isSeg ? t("还没有轮廓，按 R 在目标边缘逐点点击，或按 S 智能选取") : isPose ? t("还没有目标，按 R 画框后逐个点关键点") : t("还没有框，按 R 在图上拖动画框")}

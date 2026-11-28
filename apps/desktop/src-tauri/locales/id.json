@@ -485,5 +485,14 @@
   "{name}（{n} 帧）": "{name} ({n} frame)",
   "这个文件夹里没有图片或视频": "Tidak ada gambar atau video di folder ini",
   "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "Folder hasil tidak boleh sama dengan folder yang dikenali. Pilih folder lain (subfolder di dalamnya boleh).",
-  "识别截图": "Tangkapan pengenalan"
+  "识别截图": "Tangkapan pengenalan",
+  "单号（文件夹）": "Nomor pesanan (folder)",
+  "文件数": "Jumlah file",
+  "识别出的类别": "Kelas yang dikenali",
+  "{name}（{n} 个文件）": "{name} ({n} file)",
+  "按单号汇总": "Ringkasan per pesanan",
+  "识别报告": "Laporan pengenalan",
+  "共 {n} 个文件，{g} 个单号（文件夹）": "Total {n} file, {g} nomor pesanan (folder)",
+  "{n} 个文件": "{n} file",
+  "打不开这个文件：{path}": "Tidak bisa membuka file ini: {path}"
 }

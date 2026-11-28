@@ -39,7 +39,8 @@ Untuk inferensi dengan GPU NVIDIA: ganti `onnxruntime` menjadi `onnxruntime-gpu`
   },
   "webhook": { "url": "http://platform-anda/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // opsional: mode folder
 }
 ```
 
@@ -88,6 +89,17 @@ Field setiap item di `detections` bergantung pada model. Field `task` yang dikem
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## Mode folder
+
+Aktif jika `watch.dir` diisi di konfigurasi: layanan memindai folder ini (termasuk subfolder) setiap `interval` detik dan otomatis mengenali gambar dan video baru yang dimasukkan, tanpa perlu kamera.
+
+- File baru dikenali setelah berada di tempatnya selama `settle` detik dan ukurannya tidak berubah lagi, jadi file yang masih disalin tidak dikenali setengah jalan.
+- Dari video diambil satu frame setiap `every` detik; untuk setiap kelas yang dikenali disimpan satu tangkapan layar berkotak (frame dengan skor tertinggi), dikelompokkan menurut subfolder tempat file berada (misalnya nomor pesanan) di `out` (bawaannya `watch_results/` di paket layanan).
+- Setiap file menambah satu baris di `watch_results/hasil.csv`: waktu, file, folder, hasil, skor tertinggi, tangkapan layar.
+- Yang memenuhi aturan alarm (kelas, keyakinan, jam aktif) tetap dikirim lewat Webhook / MQTT seperti biasa, dan pesannya mendapat dua isian tambahan: `file` dan `folder`.
+- File yang sudah dikenali dicatat di `watch_results/.wulabel-watch.json`, jadi setelah layanan dijalankan ulang tidak dikenali dua kali; file yang berubah akan dikenali lagi. Folder hasil pengenalan massal Wulabel otomatis dilewati.
+- Bagian `watch` di `GET /health` menunjukkan berapa file yang sudah dikenali dan file mana yang terakhir.
+
 ## Data balik dari lapangan
 
 Frame yang membuat model ragu (keyakinan antara `low` dan `high`) disimpan ke `reflux/` (paling banyak satu per stream setiap `interval` detik).
@@ -101,5 +113,6 @@ service.py                program layanan
 config.json               konfigurasi
 alerts/                   tangkapan alarm
 reflux/                   gambar dari lapangan
+watch_results/            tangkapan layar dan tabel mode folder
 logs/service.log          log
 ```

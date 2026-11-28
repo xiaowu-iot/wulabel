@@ -19,5 +19,21 @@
   "JSON 需要 image 字段（base64 图片）": "JSON memerlukan field image (gambar base64)",
   "图片解码失败": "Gagal mendekode gambar",
   "推理服务已启动：%d 路视频，HTTP 接口 http://%s:%d": "Layanan inferensi dimulai: %d stream, API HTTP di http://%s:%d",
-  "已停止": "Dihentikan"
+  "已停止": "Dihentikan",
+  "文件夹模式：监控 %s，结果放在 %s": "Mode folder: memantau %s, hasil di %s",
+  "文件夹模式扫描出错": "Galat saat memindai di mode folder",
+  "要监控的文件夹不存在：%s": "Folder yang dipantau tidak ditemukan: %s",
+  "识别出错：%s": "Galat pengenalan: %s",
+  "读不了这个文件": "Tidak bisa membaca file ini",
+  "；": "; ",
+  "{name}（{n} 帧）": "{name} ({n} frame)",
+  "没有目标": "Tanpa objek",
+  "识别结果": "hasil",
+  "时间": "Waktu",
+  "文件": "File",
+  "文件夹": "Folder",
+  "结果": "Hasil",
+  "最高分": "Skor tertinggi",
+  "截图": "Tangkapan layar",
+  "[文件夹] %s：%s": "[Folder] %s: %s"
 }

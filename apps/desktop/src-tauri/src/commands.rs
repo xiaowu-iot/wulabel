@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -116,7 +116,7 @@ pub async fn import_images(
             return Err(msg(t!("没有找到图片（支持 jpg、png、bmp、webp、tif）")));
         }
         let last = std::sync::atomic::AtomicUsize::new(0);
-        images::import_stoppable(&project, &files, copy, &|done, total| {
+        crate::shotfile::import(&project, &files, copy, &|done, total| {
             // 每 1% 或最后一张推一次进度，避免事件太多
             let step = (total / 100).max(1);
             if done == total || done >= last.load(std::sync::atomic::Ordering::Relaxed) + step {
@@ -468,11 +468,13 @@ pub async fn stop_extract(ext: State<'_, video::Extractor>) -> AppResult<()> {
 pub async fn list_images(
     state: State<'_, AppState>,
     status: Option<String>,
+    label: Option<i64>,
+    batch: Option<i64>,
     offset: u32,
     limit: u32,
 ) -> AppResult<ImagePage> {
     let project = state.current()?;
-    images::list(&project, status.as_deref(), offset, limit)
+    images::list(&project, status.as_deref(), label, batch, offset, limit)
 }
 
 #[tauri::command]
@@ -1241,9 +1243,29 @@ pub async fn convert_to_multilabel(
 
 // ---------- 标注 ----------
 
+/// 数据页「导出图片」：选中的图的原图复制到 out，返回 (复制了几张, 失败的)
 #[tauri::command]
-pub async fn list_image_ids(state: State<'_, AppState>, status: Option<String>) -> AppResult<Vec<i64>> {
-    annotations::list_ids(&*state.current()?, status.as_deref())
+pub async fn export_images(state: State<'_, AppState>, ids: Vec<i64>, out: String) -> AppResult<(usize, Vec<String>)> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || images::copy_out(&project, &ids, Path::new(&out)))
+        .await
+        .map_err(|e| msg(t!("导出任务异常：{e}", e = e)))?
+}
+
+#[tauri::command]
+pub async fn list_image_ids(
+    state: State<'_, AppState>,
+    status: Option<String>,
+    label: Option<i64>,
+    batch: Option<i64>,
+) -> AppResult<Vec<i64>> {
+    annotations::list_ids(&*state.current()?, status.as_deref(), label, batch)
+}
+
+/// 最近 50 次导入，数据页按导入批次筛选用
+#[tauri::command]
+pub async fn list_import_batches(state: State<'_, AppState>) -> AppResult<Vec<images::ImportBatch>> {
+    images::list_batches(&*state.current()?)
 }
 
 #[tauri::command]
@@ -1765,4 +1787,21 @@ pub async fn xt_logout(app: AppHandle) -> AppResult<()> {
 #[tauri::command]
 pub async fn open_url(url: String) -> AppResult<()> {
     crate::xuntong::open_url(&url)
+}
+
+/// 用系统默认程序打开批量识别的结果文件（网页报告、表格），只允许这两种
+#[tauri::command]
+pub async fn open_file(path: String) -> AppResult<()> {
+    let p = Path::new(&path);
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !["html", "csv"].contains(&ext.as_str()) || !p.is_file() {
+        return Err(msg(t!("打不开这个文件：{path}", path = path)));
+    }
+    #[cfg(target_os = "windows")]
+    let r = crate::runtime::command("rundll32").arg("url.dll,FileProtocolHandler").arg(p).spawn();
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(p).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let r = std::process::Command::new("xdg-open").arg(p).spawn();
+    r.map(|_| ()).map_err(|e| msg(t!("打不开这个文件：{path}", path = e)))
 }
