@@ -24,6 +24,7 @@ mod review;
 mod report;
 mod runtime;
 mod share;
+mod shotfile;
 mod state;
 mod team;
 mod track;

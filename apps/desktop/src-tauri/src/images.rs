@@ -26,6 +26,8 @@ pub struct ImportResult {
     pub failed: Vec<String>,
     /// 中途停止时没导入的张数
     pub stopped: usize,
+    /// 批量识别的截图：用里面的原图入库、识别结果写成预标注的张数
+    pub prelabeled: usize,
 }
 
 /// 数据页「停止导入」：置位后还没处理的图不再导入，已处理的照常入库
@@ -175,16 +177,6 @@ pub fn import(
     import_mapped(project, files, copy, on_progress).map(|(r, _)| r)
 }
 
-/// 同 import，可以用 STOP_IMPORT 中途停止（数据页导入图片用）
-pub fn import_stoppable(
-    project: &Project,
-    files: &[PathBuf],
-    copy: bool,
-    on_progress: &(dyn Fn(usize, usize) + Sync),
-) -> AppResult<ImportResult> {
-    import_inner(project, files, copy, None, Some(&STOP_IMPORT), WRITE_CHUNK, on_progress).map(|(r, _)| r)
-}
-
 /// 同 import，另外返回「源文件 → 图片 id」（重复的图对应已有的 id），导入带标注的数据集时用
 pub fn import_mapped(
     project: &Project,
@@ -193,6 +185,17 @@ pub fn import_mapped(
     on_progress: &(dyn Fn(usize, usize) + Sync),
 ) -> AppResult<(ImportResult, HashMap<PathBuf, i64>)> {
     import_batch(project, files, copy, None, on_progress)
+}
+
+/// 同 import_batch，可以用 STOP_IMPORT 中途停止（数据页导入、带批量识别截图时分两次导入共用一个批次）
+pub(crate) fn import_batch_stoppable(
+    project: &Project,
+    files: &[PathBuf],
+    copy: bool,
+    batch: Option<i64>,
+    on_progress: &(dyn Fn(usize, usize) + Sync),
+) -> AppResult<(ImportResult, HashMap<PathBuf, i64>)> {
+    import_inner(project, files, copy, batch, Some(&STOP_IMPORT), WRITE_CHUNK, on_progress)
 }
 
 /// 下一个导入批次号
@@ -259,7 +262,7 @@ fn import_inner(
         batch,
         now: db::now(),
         seen: HashMap::new(),
-        result: ImportResult { added: 0, duplicated: 0, failed: Vec::new(), stopped: 0 },
+        result: ImportResult { added: 0, duplicated: 0, failed: Vec::new(), stopped: 0, prelabeled: 0 },
         map: HashMap::new(),
     };
     let mut base = total;
@@ -478,20 +481,31 @@ fn insert_rows(
     Ok(out)
 }
 
-pub fn list(project: &Project, status: Option<&str>, offset: u32, limit: u32) -> AppResult<ImagePage> {
+/// 按类别筛图的 SQL 条件（{n} 换成参数序号）
+pub(crate) const LABEL_COND: &str = "(?{n} IS NULL
+           OR (?{n} = -1 AND NOT EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id))
+           OR (?{n} = -2 AND images.status = 'todo' AND EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id AND a.source IN ('model', 'text', 'ai')))
+           OR (?{n} > 0 AND EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id AND a.label_id = ?{n})))";
+
+/// 数据页的图片列表。label：只看有这个类别标注的图；-1 是一个标注都没有的，-2 是有预标注还没确认的
+pub fn list(project: &Project, status: Option<&str>, label: Option<i64>, offset: u32, limit: u32) -> AppResult<ImagePage> {
     let conn = project.conn.lock();
     let status = status.filter(|s| !s.is_empty() && *s != "all");
     let total: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM images WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed')))",
-        [status],
+        &format!(
+            "SELECT COUNT(*) FROM images WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {}",
+            LABEL_COND.replace("{n}", "2")
+        ),
+        params![status, label],
         |r| r.get(0),
     )?;
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare(&format!(
         "SELECT id, path, width, height, status, split FROM images
-         WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) ORDER BY id LIMIT ?2 OFFSET ?3",
-    )?;
+         WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {} ORDER BY id LIMIT ?2 OFFSET ?3",
+        LABEL_COND.replace("{n}", "4")
+    ))?;
     let items = stmt
-        .query_map(params![status, limit.min(1000), offset], |r| {
+        .query_map(params![status, limit.min(1000), offset, label], |r| {
             let path: String = r.get(1)?;
             let name = Path::new(&path)
                 .file_name()

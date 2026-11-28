@@ -486,8 +486,9 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
   const { message } = App.useApp();
   const refreshStats = useApp((s) => s.refreshStats);
   const annotateQueue = useApp((s) => s.annotateQueue);
-  const [adding, setAdding] = useState(false);
-  const [added, setAdded] = useState<{ text: string; ids: number[] } | null>(null);
+  // 加进项目的结果，key 区分是哪个按钮（拿不准的图 / 视频截图 / 没识别出来的视频）
+  const [added, setAdded] = useState<{ key: string; text: string; ids: number[] } | null>(null);
+  const [addingKey, setAddingKey] = useState<string | null>(null);
   const [input, setInput] = useState(prefs.get("batchInput", ""));
   const [output, setOutput] = useState(prefs.get("batchOutput", ""));
   const [conf, setConf] = useState(recConf ?? 0.5);
@@ -495,6 +496,7 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
   const [every, setEvery] = useState(Number(prefs.get("batchVideoEvery", "1")) || 1);
   const [minFrames, setMinFrames] = useState(Number(prefs.get("batchVideoMin", "1")) || 1);
   const [beside, setBeside] = useState(prefs.get("batchShotsBeside", "0") === "1");
+  const [drawBoxes, setDrawBoxes] = useState(prefs.get("batchDrawBoxes", "1") === "1");
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<ImportProgress | null>(null);
   const [res, setRes] = useState<BatchResult | null>(null);
@@ -516,13 +518,14 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
     prefs.set("batchVideoEvery", String(every));
     prefs.set("batchVideoMin", String(minFrames));
     prefs.set("batchShotsBeside", beside ? "1" : "0");
+    prefs.set("batchDrawBoxes", drawBoxes ? "1" : "0");
     setBusy(true);
     setRes(null);
     setAdded(null);
     setProg(null);
     const un = await listen<ImportProgress>("batch-progress", (e) => setProg(e.payload));
     try {
-      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {}, videoEvery: every, videoMinFrames: minFrames, shotsBeside: beside });
+      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {}, videoEvery: every, videoMinFrames: minFrames, shotsBeside: beside, drawBoxes });
       setRes(r);
       if (r.stopped)
         message.info(
@@ -539,21 +542,38 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
   };
 
   // 拿不准的图加进项目：标好再训练，模型越用越准
-  const addUncertain = async () => {
+  // 图加进项目：标好再训练，模型越用越准。批量识别的截图导入时用里面的原图，识别结果当预标注
+  const addToProject = async (key: string, paths: string[]) => {
     if (!res) return;
-    setAdding(true);
+    setAddingKey(key);
     setAdded(null);
     try {
-      const r = await api.importImages(res.uncertain, true);
+      const r = await api.importImages(paths, true);
       await refreshStats();
-      const text = t("导入 {added} 张，跳过重复 {dup} 张", { added: r.added, dup: r.duplicated });
-      setAdded({ text, ids: r.added > 0 ? await lastImportIds().catch(() => []) : [] });
+      let text = t("导入 {added} 张，跳过重复 {dup} 张", { added: r.added, dup: r.duplicated });
+      if (r.prelabeled) text += t("，{n} 张带着识别结果作为预标注", { n: r.prelabeled });
+      setAdded({ key, text, ids: r.added > 0 ? await lastImportIds().catch(() => []) : [] });
     } catch (e) {
       message.error(errText(e));
     } finally {
-      setAdding(false);
+      setAddingKey(null);
     }
   };
+
+  /** 一行「加进项目」按钮 + 导入结果 + 去标注这批 */
+  const addRow = (key: string, paths: string[], label: string, queueTitle: string) => (
+    <Space wrap>
+      <Button size="small" type="primary" icon={<ImportOutlined />} loading={addingKey === key} disabled={addingKey != null} onClick={() => addToProject(key, paths)}>
+        {label}
+      </Button>
+      {added?.key === key && <span className="dim">{added.text}</span>}
+      {added?.key === key && added.ids.length > 0 && (
+        <Button size="small" onClick={() => annotateQueue(added.ids, queueTitle)}>
+          {t("去标注这批")}
+        </Button>
+      )}
+    </Space>
+  );
 
   return (
     <div className="card" style={{ maxWidth: 760 }}>
@@ -582,6 +602,14 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
             <Checkbox checked={beside} onChange={(e) => setBeside(e.target.checked)}>
               {t("视频截图放回视频所在的文件夹（子文件夹「识别截图」）")}
             </Checkbox>
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <Checkbox checked={drawBoxes} onChange={(e) => setDrawBoxes(e.target.checked)}>
+              {t("截图上画框和类别")}
+            </Checkbox>
+          </div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            {t("截图文件里都带着不画框的原图和识别结果：挑出认错的截图拖进数据页，导入的是原图，识别结果自动变成预标注，在上面改就行。")}
           </div>
         </Form.Item>
         <Form.Item label={t("结果放在")} extra={t("可以放在要识别的文件夹里面，下次识别时会自动跳过结果。")}>
@@ -672,22 +700,55 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
               </Space>
               {res.uncertain.length > 0 && (
                 <div style={{ marginTop: 10 }}>
-                  <Space wrap>
-                    <Button size="small" type="primary" icon={<ImportOutlined />} loading={adding} onClick={addUncertain}>
-                      {isCls
-                        ? t("把拿不准的 {n} 张加进项目去标", { n: res.uncertain.length })
-                        : t("把没找到目标的 {n} 张加进项目去标", { n: res.uncertain.length })}
-                    </Button>
-                    {added && <span className="dim">{added.text}</span>}
-                    {added && added.ids.length > 0 && (
-                      <Button size="small" onClick={() => annotateQueue(added.ids, t("批量识别拿不准的图"))}>
-                        {t("去标注这批")}
-                      </Button>
-                    )}
-                  </Space>
+                  {addRow(
+                    "uncertain",
+                    res.uncertain,
+                    isCls ? t("把拿不准的 {n} 张加进项目去标", { n: res.uncertain.length }) : t("把没找到目标的 {n} 张加进项目去标", { n: res.uncertain.length }),
+                    t("批量识别拿不准的图"),
+                  )}
+                </div>
+              )}
+              {res.shots.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  {addRow("shots", res.shots, t("把 {n} 张视频截图加进项目去标", { n: res.shots.length }), t("批量识别的视频截图"))}
                   <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
-                    {t("标好后重新训练，模型会越用越准。")}
+                    {t("导入的是不画框的原图，识别结果作为预标注；只想改认错的，就在文件夹里挑出那几张截图拖进数据页。")}
                   </div>
+                </div>
+              )}
+              {res.unrecognized.length > 0 && (
+                <Alert
+                  style={{ marginTop: 10 }}
+                  type="warning"
+                  showIcon
+                  message={t("{n} 个视频什么都没识别出来，可能有模型没学过的新情况", { n: res.unrecognized.length })}
+                  description={
+                    <div>
+                      <div style={{ fontSize: 12, maxHeight: 96, overflow: "auto", margin: "2px 0 8px" }}>
+                        {res.unrecognized.slice(0, 50).map((v) => (
+                          <div key={v}>{v}</div>
+                        ))}
+                        {res.unrecognized.length > 50 && <div>…</div>}
+                      </div>
+                      {res.unrecognizedFrames.length > 0 &&
+                        addRow(
+                          "unrecognized",
+                          res.unrecognizedFrames,
+                          t("把这些视频的 {n} 帧加进项目去标", { n: res.unrecognizedFrames.length }),
+                          t("没识别出来的视频"),
+                        )}
+                      <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                        {t("每个视频取了几帧原图，放在结果文件夹的「{name}」里。有新类别的话，在标注页加上类别再标。", {
+                          name: isCls ? t("拿不准") : t("没有目标"),
+                        })}
+                      </div>
+                    </div>
+                  }
+                />
+              )}
+              {(res.uncertain.length > 0 || res.shots.length > 0 || res.unrecognized.length > 0) && (
+                <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>
+                  {t("标好后重新训练，模型会越用越准。")}
                 </div>
               )}
             </div>

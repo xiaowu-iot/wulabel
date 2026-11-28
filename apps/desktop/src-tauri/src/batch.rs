@@ -60,6 +60,13 @@ pub struct BatchOptions {
     /// 视频截图放回视频所在的文件夹（子文件夹「识别截图」），不放结果文件夹
     #[serde(default)]
     pub shots_beside: bool,
+    /// 截图上画框和类别；关掉就存原图。不管画不画，截图文件里都带着原图和识别结果（见 shotfile）
+    #[serde(default = "yes")]
+    pub draw_boxes: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 /// 结果文件夹里放一个这个文件，下次识别时整个文件夹跳过（结果可以放在要识别的文件夹里面）
@@ -104,6 +111,19 @@ pub struct BatchResult {
     /// 拿不准（检测是没有目标）的图，可以加进项目去标
     pub uncertain: Vec<String>,
     pub stopped: bool,
+    /// 视频截图的路径，「加进项目去标」用（导入时用里面的原图，识别结果当预标注）
+    pub shots: Vec<String>,
+    /// 什么都没识别出来的视频（相对要识别的文件夹）：可能有模型没学过的新情况
+    pub unrecognized: Vec<String>,
+    /// 这些视频里均匀取的几帧原图，「加进项目去标」用
+    pub unrecognized_frames: Vec<String>,
+}
+
+/// 没识别出东西的视频，均匀取几帧（第 1/4、1/2、3/4 处）
+fn sample_frames(n: usize) -> Vec<usize> {
+    let mut ks: Vec<usize> = [n / 4, n / 2, n * 3 / 4].into_iter().filter(|&k| k < n).collect();
+    ks.dedup();
+    ks
 }
 
 /// 一张图识别出的类别：(类别序号, 最高分, 个数)。分类每个类别个数是 1；视频的个数是检出的帧数
@@ -491,6 +511,8 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
     // 2. 视频：抽帧到临时文件夹，一帧帧识别，汇总成一行；每个类别存一张分数最高的截图
     let mut frames = 0usize;
     let mut video_count = 0usize;
+    let mut unrecognized: Vec<String> = Vec::new();
+    let mut unrecognized_frames: Vec<String> = Vec::new();
     if let Some(ff) = ffmpeg.as_ref().filter(|_| !stopped) {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let tmp = std::env::temp_dir().join(format!("wulabel-batch-{}-{nanos}", std::process::id()));
@@ -557,10 +579,16 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
                 for &(c, s, _) in &hits {
                     let k = best[&c];
                     let dst = sd.join(format!("{prefix}{}_{}_{s:.2}.jpg", safe_dir(&name_of(c)), mmss(k as f64 * every)));
-                    // 像标注页一样画框、写类别和分数（推理进程画，能显示中文）；画不了就只画框
                     let items = shot_items(res[k].as_ref(), task, detect, opts.conf, &name_of, &colors);
-                    let req = serde_json::json!({ "cmd": "draw", "src": &paths[k], "dst": &dst, "items": items });
-                    if pr.call(rt, &req, &mut |_| {}).is_err() || !dst.exists() {
+                    let _ = fs::remove_file(&dst);
+                    // 像标注页一样画框、写类别和分数（推理进程画，能显示中文）；画不了就只画框。不画框就存原图
+                    let drawn = opts.draw_boxes && {
+                        let req = serde_json::json!({ "cmd": "draw", "src": &paths[k], "dst": &dst, "items": &items });
+                        pr.call(rt, &req, &mut |_| {}).is_ok() && dst.exists()
+                    };
+                    if !opts.draw_boxes {
+                        let _ = fs::copy(&paths[k], &dst);
+                    } else if !drawn {
                         let boxes: Vec<[f64; 4]> = match (&res[k], detect) {
                             (Some((_, raw)), true) => {
                                 raw.boxes.iter().filter(|b| b[5] >= opts.conf).map(|b| [b[0], b[1], b[2], b[3]]).collect()
@@ -571,7 +599,35 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
                         let _ = save_shot(&paths[k], &dst, &boxes);
                     }
                     if dst.exists() {
+                        // 截图文件后面接上原图和识别结果：拖回 Wulabel 时用原图入库，识别结果当预标注
+                        let (width, height) = image::image_dimensions(&paths[k]).unwrap_or((0, 0));
+                        let info = crate::shotfile::ShotInfo {
+                            task: task.to_string(),
+                            width,
+                            height,
+                            video: v.strip_prefix(&input).unwrap_or(v).to_string_lossy().replace('\\', "/"),
+                            time: k as f64 * every,
+                            items: items.iter().filter_map(|it| serde_json::from_value(it.clone()).ok()).collect(),
+                        };
+                        // 画了框的后面接原图；没画框的截图本身就是原图
+                        let clean = if opts.draw_boxes { fs::read(&paths[k]).ok() } else { None };
+                        let _ = crate::shotfile::append(&dst, clean.as_deref(), &info);
                         shots.push((c, dst));
+                    }
+                }
+                if hits.is_empty() {
+                    // 什么都没识别出来：可能是模型没学过的新情况。取几帧原图放进「没有目标 / 拿不准」文件夹，方便加回项目去标
+                    let none_dir = out.join(safe_dir(&if detect { t!("没有目标") } else { t!("拿不准") }));
+                    let folder = rel_folder(&input, v).replace('/', "_");
+                    let tag = if folder.is_empty() { stem(v) } else { format!("{folder}_{}", stem(v)) };
+                    unrecognized.push(v.strip_prefix(&input).unwrap_or(v).to_string_lossy().replace('\\', "/"));
+                    for k in sample_frames(paths.len()) {
+                        if fs::create_dir_all(&none_dir).is_ok() {
+                            let dst = none_dir.join(format!("{}_{}.jpg", safe_dir(&tag), mmss(k as f64 * every)));
+                            if fs::copy(&paths[k], &dst).is_ok() {
+                                unrecognized_frames.push(dst.to_string_lossy().into_owned());
+                            }
+                        }
                     }
                 }
                 Some(hits)
@@ -600,6 +656,9 @@ pub fn run(p: &Project, rt: &Runtime, pr: &Predictor, opts: &BatchOptions, progr
         counts,
         uncertain,
         stopped,
+        shots: rows.iter().flat_map(|r| r.shots.iter().map(|s| s.1.to_string_lossy().into_owned())).collect(),
+        unrecognized,
+        unrecognized_frames,
     })
 }
 
@@ -647,6 +706,14 @@ mod tests {
         assert_eq!(mmss(65.4), "01m05s");
         assert_eq!(rel_folder(input, Path::new("in/SF512/a.mp4")), "SF512");
         assert_eq!(rel_folder(input, Path::new("in/a.jpg")), "");
+    }
+
+    #[test]
+    fn samples_frames_evenly() {
+        assert_eq!(sample_frames(0), Vec::<usize>::new());
+        assert_eq!(sample_frames(1), vec![0]);
+        assert_eq!(sample_frames(2), vec![0, 1]);
+        assert_eq!(sample_frames(30), vec![7, 15, 22]);
     }
 
     #[test]

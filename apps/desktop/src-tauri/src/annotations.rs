@@ -261,7 +261,8 @@ pub fn set_status_many(p: &Project, ids: &[i64], status: &str) -> AppResult<Vec<
 }
 
 /// 标注页翻图用：按筛选条件返回全部图片 id
-pub fn list_ids(p: &Project, status: Option<&str>) -> AppResult<Vec<i64>> {
+/// 某个状态（可再按类别筛，见 images::LABEL_COND）的全部图片 id
+pub fn list_ids(p: &Project, status: Option<&str>, label: Option<i64>) -> AppResult<Vec<i64>> {
     let status = status.filter(|s| !s.is_empty() && *s != "all");
     let conn = p.conn.lock();
     if status == Some("rejected") {
@@ -271,10 +272,11 @@ pub fn list_ids(p: &Project, status: Option<&str>) -> AppResult<Vec<i64>> {
         return Ok(ids);
     }
     // done：已标注和已审核（不用审核流程时两者都算「已标注」）
-    let mut stmt = conn.prepare(
-        "SELECT id FROM images WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) ORDER BY id",
-    )?;
-    let ids = stmt.query_map([status], |r| r.get(0))?.collect::<Result<Vec<i64>, _>>()?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id FROM images WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {} ORDER BY id",
+        crate::images::LABEL_COND.replace("{n}", "2")
+    ))?;
+    let ids = stmt.query_map(params![status, label], |r| r.get(0))?.collect::<Result<Vec<i64>, _>>()?;
     Ok(ids)
 }
 
@@ -475,8 +477,8 @@ mod tests {
         set_status(&p, 1, "reviewed").unwrap();
         assert_eq!(save(&p, 1, &[]).unwrap(), "reviewed");
 
-        assert_eq!(list_ids(&p, Some("reviewed")).unwrap(), vec![1]);
-        assert_eq!(list_ids(&p, None).unwrap(), vec![1, 2]);
+        assert_eq!(list_ids(&p, Some("reviewed"), None).unwrap(), vec![1]);
+        assert_eq!(list_ids(&p, None, None).unwrap(), vec![1, 2]);
         assert!(set_status(&p, 1, "done").is_err());
         drop(p);
         let _ = fs::remove_dir_all(base);
@@ -515,6 +517,31 @@ mod tests {
         assert_eq!(load(&p, 1).unwrap().status, "todo");
         assert_eq!(load(&p, 2).unwrap().annotations.len(), 1);
         assert_eq!(list_labels(&p).unwrap().len(), 1);
+        drop(p);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn filter_by_label() {
+        let (base, p) = setup("bylabel");
+        let a = add_label(&p, "底部标签缺失", "#3d8bfd").unwrap();
+        let b = add_label(&p, "全新商品", "#2fb67c").unwrap();
+        // 图 1：人工标了 a；图 2：只有模型预标注 b
+        save(&p, 1, &[bbox(a.id, 1.0, 1.0, 5.0, 5.0)]).unwrap();
+        let mut pred = bbox(b.id, 1.0, 1.0, 5.0, 5.0);
+        pred.source = "model".into();
+        save_predictions(&p, 2, &[pred]).unwrap();
+        assert_eq!(list_ids(&p, None, Some(a.id)).unwrap(), vec![1]);
+        assert_eq!(list_ids(&p, None, Some(b.id)).unwrap(), vec![2]);
+        // 有预标注还没确认的
+        assert_eq!(list_ids(&p, None, Some(-2)).unwrap(), vec![2]);
+        assert_eq!(list_ids(&p, Some("todo"), Some(b.id)).unwrap(), vec![2]);
+        assert!(list_ids(&p, Some("done"), Some(b.id)).unwrap().is_empty());
+        // 一个标注都没有：删掉图 1 的标注
+        save(&p, 1, &[]).unwrap();
+        assert_eq!(list_ids(&p, None, Some(-1)).unwrap(), vec![1]);
+        let page = images::list(&p, None, Some(b.id), 0, 50).unwrap();
+        assert_eq!((page.total, page.items.len()), (1, 1));
         drop(p);
         let _ = fs::remove_dir_all(base);
     }

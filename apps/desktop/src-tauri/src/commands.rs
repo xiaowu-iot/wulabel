@@ -116,7 +116,7 @@ pub async fn import_images(
             return Err(msg(t!("没有找到图片（支持 jpg、png、bmp、webp、tif）")));
         }
         let last = std::sync::atomic::AtomicUsize::new(0);
-        images::import_stoppable(&project, &files, copy, &|done, total| {
+        crate::shotfile::import(&project, &files, copy, &|done, total| {
             // 每 1% 或最后一张推一次进度，避免事件太多
             let step = (total / 100).max(1);
             if done == total || done >= last.load(std::sync::atomic::Ordering::Relaxed) + step {
@@ -468,11 +468,12 @@ pub async fn stop_extract(ext: State<'_, video::Extractor>) -> AppResult<()> {
 pub async fn list_images(
     state: State<'_, AppState>,
     status: Option<String>,
+    label: Option<i64>,
     offset: u32,
     limit: u32,
 ) -> AppResult<ImagePage> {
     let project = state.current()?;
-    images::list(&project, status.as_deref(), offset, limit)
+    images::list(&project, status.as_deref(), label, offset, limit)
 }
 
 #[tauri::command]
@@ -1242,8 +1243,8 @@ pub async fn convert_to_multilabel(
 // ---------- 标注 ----------
 
 #[tauri::command]
-pub async fn list_image_ids(state: State<'_, AppState>, status: Option<String>) -> AppResult<Vec<i64>> {
-    annotations::list_ids(&*state.current()?, status.as_deref())
+pub async fn list_image_ids(state: State<'_, AppState>, status: Option<String>, label: Option<i64>) -> AppResult<Vec<i64>> {
+    annotations::list_ids(&*state.current()?, status.as_deref(), label)
 }
 
 #[tauri::command]

@@ -71,6 +71,8 @@ export interface ImportResult {
   failed: string[];
   /** 中途停止时没导入的张数 */
   stopped?: number;
+  /** 批量识别的截图：用里面的原图入库、识别结果写成预标注的张数 */
+  prelabeled?: number;
 }
 
 /** 转成多标签分类项目的结果 */
@@ -96,6 +98,8 @@ export interface BatchOptions {
   videoMinFrames?: number;
   /** 视频截图放回视频所在的文件夹（子文件夹「识别截图」） */
   shotsBeside?: boolean;
+  /** 截图上画框和类别（关掉就存原图；截图里都带着原图和识别结果） */
+  drawBoxes?: boolean;
 }
 export interface BatchResult {
   images: number;
@@ -110,6 +114,12 @@ export interface BatchResult {
   /** 拿不准（检测是没有目标）的图的路径 */
   uncertain: string[];
   stopped: boolean;
+  /** 视频截图的路径（加进项目去标用） */
+  shots: string[];
+  /** 什么都没识别出来的视频（相对要识别的文件夹） */
+  unrecognized: string[];
+  /** 这些视频里取的几帧原图 */
+  unrecognizedFrames: string[];
 }
 
 export interface ImportProgress {
@@ -707,7 +717,7 @@ export const api = {
     invoke<ConvertResult>("convert_to_multilabel", { parent, name, emptyLabel }),
   lastImport: () => invoke<LastImport | null>("last_import"),
   deleteImages: (scope: "ids" | "last" | "all", ids?: number[]) => invoke<number>("delete_images", { scope, ids }),
-  listImageIds: (status: string | null) => invoke<number[]>("list_image_ids", { status }),
+  listImageIds: (status: string | null, label: number | null = null) => invoke<number[]>("list_image_ids", { status, label }),
   loadAnnotations: (imageId: number) => invoke<ImageAnnotations>("load_annotations", { imageId }),
   saveAnnotations: (imageId: number, annotations: Annotation[]) =>
     invoke<ImageStatus>("save_annotations", { imageId, annotations }),
@@ -789,8 +799,9 @@ export const api = {
   ) => invoke<ExportResult>("export_version", { id, options, anonymize }),
   keypointTemplate: () => invoke<KeypointTemplate>("keypoint_template"),
   saveKeypointTemplate: (template: KeypointTemplate) => invoke<void>("save_keypoint_template", { template }),
-  listImages: (status: string | null, offset: number, limit: number) =>
-    invoke<ImagePage>("list_images", { status, offset, limit }),
+  /** label：只看有这个类别的图；-1 一个标注都没有，-2 有预标注还没确认 */
+  listImages: (status: string | null, offset: number, limit: number, label: number | null = null) =>
+    invoke<ImagePage>("list_images", { status, offset, limit, label }),
   projectStats: () => invoke<Stats>("project_stats"),
 
   // ---------- 实时协作 ----------
