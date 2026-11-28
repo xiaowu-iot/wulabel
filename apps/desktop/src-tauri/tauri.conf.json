@@ -54,7 +54,10 @@
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU1QzNDMTg3RDUwOTcyNzIKUldSeWNnblZoOEhEVlQwakI3NjAwc2kxREVBOXY5WWtsdFYvem1RRkhDM1hiMmx0NzV4K2NtbFoK",
-      "endpoints": ["https://feedback.xiaowuiot.com/updater/{{target}}/{{arch}}/{{current_version}}?bundle={{bundle_type}}"],
+      "endpoints": [
+        "https://feedback.xiaowuiot.com/updater/{{target}}/{{arch}}/{{current_version}}?bundle={{bundle_type}}",
+        "https://github.com/xiaowu-iot/wulabel/releases/latest/download/latest.json"
+      ],
       "windows": { "installMode": "passive" }
     }
   }

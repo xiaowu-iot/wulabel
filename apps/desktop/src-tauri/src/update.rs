@@ -4,7 +4,8 @@
 //! 服务端据此统计大概有多少台电脑在用、各在用哪个版本。不带图片、项目和任何个人信息。
 //! 用户可以在设置里关掉自动检查。
 
-use std::time::Duration;
+use std::io::Read;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +13,13 @@ use crate::t;
 
 // 和反馈服务是同一个后端（server/feedback/）。自建部署改成你自己的地址即可。
 const UPDATE_ENDPOINT: &str = "https://feedback.xiaowuiot.com/update";
+/// 服务器连不上时，从 GitHub 最新发行版里的清单看有没有新版本（打包时自动生成）
+const GITHUB_LATEST: &str = "https://github.com/xiaowu-iot/wulabel/releases/latest/download/latest.json";
+const GITHUB_RELEASES: &str = "https://github.com/xiaowu-iot/wulabel/releases/latest";
+/// 同一个安装包的几个下载地方：Gitee 发行版（国内快）、GitHub 发行版、官网
+const GITEE_DL: &str = "https://gitee.com/xiaowu-iot/wulabel/releases/download/";
+const GITHUB_DL: &str = "https://github.com/xiaowu-iot/wulabel/releases/download/";
+const SITE_DL: &str = "https://wulabel.xiaowuiot.com/download/";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,8 +84,14 @@ pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
 
     let text = match result {
         Ok(resp) => resp.into_string().map_err(|e| e.to_string())?,
-        Err(ureq::Error::Status(code, _)) => return Err(t!("检查更新失败（{code}）", code = code)),
-        Err(e) => return Err(t!("网络连接失败：{e}", e = e)),
+        // 服务器连不上：看 GitHub 上的最新版本
+        Err(e) => {
+            let msg = match &e {
+                ureq::Error::Status(code, _) => t!("检查更新失败（{code}）", code = code),
+                _ => t!("网络连接失败：{e}", e = e),
+            };
+            return tauri::async_runtime::spawn_blocking(move || github_latest(current).ok_or(msg)).await.map_err(|e| e.to_string())?;
+        }
     };
     let r: UpdateResp = serde_json::from_str(&text).map_err(|_| t!("检查更新失败：服务端返回的内容不对"))?;
     let latest = r.latest.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| current.clone());
@@ -94,6 +108,70 @@ pub async fn check_update(app: tauri::AppHandle) -> Result<UpdateInfo, String> {
     })
 }
 
+#[derive(Deserialize)]
+struct LatestJson {
+    version: String,
+    #[serde(default)]
+    notes: String,
+}
+
+/// GitHub 最新发行版的版本号和说明（自动更新清单 latest.json）；连不上返回 None
+fn github_latest(current: String) -> Option<UpdateInfo> {
+    let text = ureq::get(GITHUB_LATEST).timeout(Duration::from_secs(10)).call().ok()?.into_string().ok()?;
+    let j: LatestJson = serde_json::from_str(&text).ok()?;
+    Some(UpdateInfo {
+        newer: version_gt(&j.version, &current),
+        current,
+        latest: j.version.trim_start_matches('v').to_string(),
+        url: GITHUB_RELEASES.to_string(),
+        notes: j.notes,
+        download_url: String::new(),
+        sha256: String::new(),
+    })
+}
+
+/// 同一个安装包在 Gitee、GitHub、官网上的地址。官网上 Mac 更新包的名字带版本号（Wulabel_0.6.8_universal.app.tar.gz），发行版里不带
+fn mirror_urls(url: &str, version: &str) -> Vec<String> {
+    let name = url.rsplit('/').next().unwrap_or("");
+    if name.is_empty() {
+        return vec![url.to_string()];
+    }
+    let mac_site = format!("Wulabel_{version}_universal.app.tar.gz");
+    let mac_rel = "Wulabel_universal.app.tar.gz";
+    let rel_name = if name == mac_site { mac_rel.to_string() } else { name.to_string() };
+    let site_name = if rel_name == mac_rel { mac_site } else { rel_name.clone() };
+    let tag = format!("v{}", version.trim_start_matches('v'));
+    vec![format!("{GITEE_DL}{tag}/{rel_name}"), format!("{GITHUB_DL}{tag}/{rel_name}"), format!("{SITE_DL}{site_name}")]
+}
+
+/// 几个地址同时试着下前 256KB，用最快的那个；都不行返回 None（照原地址下）
+fn fastest(urls: &[String]) -> Option<String> {
+    const PROBE: u64 = 256 * 1024;
+    let probe = |u: &String| -> Option<(Duration, String)> {
+        let t0 = Instant::now();
+        let resp = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(5))
+            .timeout(Duration::from_secs(12))
+            .build()
+            .get(u)
+            .set("Range", &format!("bytes=0-{}", PROBE - 1))
+            .call()
+            .ok()?;
+        // 要登录、文件不存在时有的网站返回网页
+        if resp.content_type().starts_with("text/") {
+            return None;
+        }
+        let mut buf = Vec::new();
+        resp.into_reader().take(PROBE).read_to_end(&mut buf).ok()?;
+        (buf.len() as u64 >= 64 * 1024).then(|| (t0.elapsed(), u.clone()))
+    };
+    let results: Vec<Option<(Duration, String)>> = std::thread::scope(|s| {
+        let hs: Vec<_> = urls.iter().map(|u| s.spawn(move || probe(u))).collect();
+        hs.into_iter().map(|h| h.join().ok().flatten()).collect()
+    });
+    results.into_iter().flatten().min_by_key(|r| r.0).map(|r| r.1)
+}
+
 /// 官网链接换成界面语言的版本（中文在根目录，其他语言在 /<语言>/ 下）
 fn localize_site(url: String) -> String {
     const SITE: &str = "https://wulabel.xiaowuiot.com/";
@@ -106,10 +184,9 @@ fn localize_site(url: String) -> String {
     url
 }
 
-/// 只从官网和 GitHub 发行版下载安装包
+/// 只从官网、GitHub 和 Gitee 发行版下载安装包
 fn trusted_url(url: &str) -> bool {
-    url.starts_with("https://wulabel.xiaowuiot.com/download/")
-        || url.starts_with("https://github.com/xiaowu-iot/wulabel/releases/download/")
+    url.starts_with(SITE_DL) || url.starts_with(GITHUB_DL) || url.starts_with(GITEE_DL)
 }
 
 #[derive(Serialize, Clone)]
@@ -127,9 +204,18 @@ pub async fn auto_update(app: tauri::AppHandle) -> Result<bool, String> {
     use tauri_plugin_updater::UpdaterExt;
 
     let updater = app.updater().map_err(|e| t!("自动更新不可用：{e}", e = e))?;
-    let Some(update) = updater.check().await.map_err(|e| t!("检查更新失败：{e}", e = e))? else {
+    let Some(mut update) = updater.check().await.map_err(|e| t!("检查更新失败：{e}", e = e))? else {
         return Ok(false);
     };
+    // 安装包从 Gitee、GitHub、官网里这台电脑下得最快的一个下载（签名照样校验，哪里下的都一样安全）
+    if trusted_url(update.download_url.as_str()) {
+        let urls = mirror_urls(update.download_url.as_str(), &update.version);
+        if let Ok(Some(best)) = tauri::async_runtime::spawn_blocking(move || fastest(&urls)).await {
+            if let Ok(u) = best.parse() {
+                update.download_url = u;
+            }
+        }
+    }
     let a = app.clone();
     let mut downloaded = 0u64;
     update
@@ -225,7 +311,29 @@ pub async fn install_update(app: tauri::AppHandle, url: String, sha256: String) 
 
 #[cfg(test)]
 mod tests {
-    use super::version_gt;
+    use super::{mirror_urls, trusted_url, version_gt};
+
+    #[test]
+    fn mirrors_for_each_source() {
+        // 官网的 Windows 安装包：三个地方都是同名
+        let m = mirror_urls("https://wulabel.xiaowuiot.com/download/Wulabel_0.6.9_x64-setup.exe", "0.6.9");
+        assert_eq!(
+            m,
+            vec![
+                "https://gitee.com/xiaowu-iot/wulabel/releases/download/v0.6.9/Wulabel_0.6.9_x64-setup.exe",
+                "https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.9/Wulabel_0.6.9_x64-setup.exe",
+                "https://wulabel.xiaowuiot.com/download/Wulabel_0.6.9_x64-setup.exe",
+            ]
+        );
+        // Mac 更新包：官网带版本号，发行版不带
+        let m = mirror_urls("https://github.com/xiaowu-iot/wulabel/releases/download/v0.6.9/Wulabel_universal.app.tar.gz", "0.6.9");
+        assert!(m[0].ends_with("/v0.6.9/Wulabel_universal.app.tar.gz"));
+        assert_eq!(m[2], "https://wulabel.xiaowuiot.com/download/Wulabel_0.6.9_universal.app.tar.gz");
+        let m = mirror_urls("https://wulabel.xiaowuiot.com/download/Wulabel_0.6.9_universal.app.tar.gz", "0.6.9");
+        assert!(m[1].ends_with("/v0.6.9/Wulabel_universal.app.tar.gz"));
+        assert!(m.iter().all(|u| trusted_url(u)));
+        assert!(!trusted_url("https://example.com/Wulabel_0.6.9_x64-setup.exe"));
+    }
 
     #[test]
     fn compare_versions() {
