@@ -32,7 +32,7 @@ class FakeDet:
     classes = ["扇叶损坏"]
 
     def detect(self, bgr, min_score=0.05):
-        if bgr[..., 2].mean() > 150:
+        if bgr[..., 2].mean() > 150 and bgr[..., 0].mean() < 100:
             h, w = bgr.shape[:2]
             return [{"label": "扇叶损坏", "score": 0.9, "box": [1, 1, w / 2, h / 2]}]
         return []
