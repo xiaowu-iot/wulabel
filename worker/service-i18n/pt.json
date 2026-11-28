@@ -19,5 +19,21 @@
   "JSON 需要 image 字段（base64 图片）": "O JSON precisa de um campo image (imagem em base64)",
   "图片解码失败": "Falha ao decodificar a imagem",
   "推理服务已启动：%d 路视频，HTTP 接口 http://%s:%d": "Serviço de inferência iniciado: %d stream(s), API HTTP em http://%s:%d",
-  "已停止": "Parado"
+  "已停止": "Parado",
+  "文件夹模式：监控 %s，结果放在 %s": "Modo pasta: monitorando %s, resultados em %s",
+  "文件夹模式扫描出错": "Erro ao verificar no modo pasta",
+  "要监控的文件夹不存在：%s": "A pasta a monitorar não existe: %s",
+  "识别出错：%s": "Erro no reconhecimento: %s",
+  "读不了这个文件": "Não foi possível ler este arquivo",
+  "；": "; ",
+  "{name}（{n} 帧）": "{name} ({n} quadros)",
+  "没有目标": "Sem objetos",
+  "识别结果": "resultados",
+  "时间": "Hora",
+  "文件": "Arquivo",
+  "文件夹": "Pasta",
+  "结果": "Resultado",
+  "最高分": "Pontuação máx.",
+  "截图": "Captura",
+  "[文件夹] %s：%s": "[Pasta] %s: %s"
 }

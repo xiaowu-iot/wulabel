@@ -485,5 +485,14 @@
   "{name}（{n} 帧）": "{name} ({n} Frames)",
   "这个文件夹里没有图片或视频": "In diesem Ordner sind keine Bilder oder Videos",
   "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "Der Ergebnisordner darf nicht der zu erkennende Ordner selbst sein. Wähle einen anderen (ein Unterordner darin geht).",
-  "识别截图": "Erkennungs-Screenshots"
+  "识别截图": "Erkennungs-Screenshots",
+  "单号（文件夹）": "Bestellnummer (Ordner)",
+  "文件数": "Dateien",
+  "识别出的类别": "Erkannte Klassen",
+  "{name}（{n} 个文件）": "{name} ({n} Dateien)",
+  "按单号汇总": "Übersicht nach Bestellnummer",
+  "识别报告": "Erkennungsbericht",
+  "共 {n} 个文件，{g} 个单号（文件夹）": "Insgesamt {n} Dateien, {g} Bestellnummern (Ordner)",
+  "{n} 个文件": "{n} Dateien",
+  "打不开这个文件：{path}": "Diese Datei lässt sich nicht öffnen: {path}"
 }

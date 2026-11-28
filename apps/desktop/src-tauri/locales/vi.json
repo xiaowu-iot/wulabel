@@ -485,5 +485,14 @@
   "{name}（{n} 帧）": "{name} ({n} khung hình)",
   "这个文件夹里没有图片或视频": "Thư mục này không có ảnh hoặc video",
   "结果文件夹不能就是要识别的文件夹，请另选一个（可以是它里面的子文件夹）": "Thư mục kết quả không được trùng với thư mục cần nhận diện. Hãy chọn thư mục khác (thư mục con bên trong cũng được).",
-  "识别截图": "Ảnh chụp nhận diện"
+  "识别截图": "Ảnh chụp nhận diện",
+  "单号（文件夹）": "Mã đơn hàng (thư mục)",
+  "文件数": "Số tệp",
+  "识别出的类别": "Các lớp nhận diện được",
+  "{name}（{n} 个文件）": "{name} ({n} tệp)",
+  "按单号汇总": "Tổng hợp theo mã đơn hàng",
+  "识别报告": "Báo cáo nhận diện",
+  "共 {n} 个文件，{g} 个单号（文件夹）": "Tổng {n} tệp, {g} mã đơn hàng (thư mục)",
+  "{n} 个文件": "{n} tệp",
+  "打不开这个文件：{path}": "Không mở được tệp này: {path}"
 }
