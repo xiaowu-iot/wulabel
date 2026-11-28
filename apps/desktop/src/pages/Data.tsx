@@ -29,6 +29,7 @@ import {
   ImportProgress,
   ImportResult,
   isClsTask,
+  ImportBatch,
   Label,
   LastImport,
   ProjectInfo,
@@ -48,6 +49,7 @@ import { PickModal, QualityModal } from "../components/DataTools";
 import CollabModal from "../components/CollabModal";
 import ConvertModal from "../components/ConvertModal";
 import { XuntongPullModal } from "../components/Xuntong";
+import { fmtTime } from "./Train";
 
 const PAGE_SIZE = 120;
 const IMAGE_EXTS = ["jpg", "jpeg", "png", "bmp", "webp", "tif", "tiff"];
@@ -91,6 +93,9 @@ export default function Data({ project }: { project: ProjectInfo }) {
   // 按类别筛：类别 id；-1 一个标注都没有；-2 有预标注还没确认
   const [labelFilter, setLabelFilter] = useState<number | null>(null);
   const [labelList, setLabelList] = useState<Label[]>([]);
+  // 按导入批次筛：只看某次导入的图
+  const [batchFilter, setBatchFilter] = useState<number | null>(null);
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [page, setPage] = useState(1);
   const [items, setItems] = useState<ImageItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -136,7 +141,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
 
   const load = useCallback(async () => {
     try {
-      const r = await api.listImages(filter, (page - 1) * PAGE_SIZE, PAGE_SIZE, labelFilter);
+      const r = await api.listImages(filter, (page - 1) * PAGE_SIZE, PAGE_SIZE, labelFilter, batchFilter);
       // 删除后当前页可能空了，退回上一页
       if (r.items.length === 0 && page > 1) {
         setPage(page - 1);
@@ -146,10 +151,11 @@ export default function Data({ project }: { project: ProjectInfo }) {
       setTotal(r.total);
       setLast(await api.lastImport());
       setLabelList(await api.listLabels());
+      setBatches(await api.listImportBatches());
     } catch (e) {
       message.error(errText(e));
     }
-  }, [filter, page, labelFilter, message]);
+  }, [filter, page, labelFilter, batchFilter, message]);
   // 采集过程中的事件回调里总是调用最新的 load（翻页、筛选变了也对）
   const loadRef = useRef(load);
   loadRef.current = load;
@@ -211,7 +217,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   // 删除等操作的确认框里会写明一共多少张
   useEffect(() => {
     setSelected(new Set());
-  }, [filter, labelFilter]);
+  }, [filter, labelFilter, batchFilter]);
   // Shift 连选只在同一页里
   useEffect(() => {
     anchor.current = null;
@@ -220,7 +226,7 @@ export default function Data({ project }: { project: ProjectInfo }) {
   /** 选中当前筛选下的全部图（包括其他页） */
   const selectAll = async () => {
     try {
-      setSelected(new Set(await api.listImageIds(filter === "all" ? null : filter, labelFilter)));
+      setSelected(new Set(await api.listImageIds(filter === "all" ? null : filter, labelFilter, batchFilter)));
     } catch (e) {
       message.error(errText(e));
     }
@@ -298,9 +304,11 @@ export default function Data({ project }: { project: ProjectInfo }) {
   /** 按类别筛出来的这批图送去标注页，一类一类核对 */
   const annotateFiltered = async () => {
     try {
-      const ids = await api.listImageIds(filter === "all" ? null : filter, labelFilter);
+      const ids = await api.listImageIds(filter === "all" ? null : filter, labelFilter, batchFilter);
       const name =
-        labelFilter === -1
+        labelFilter == null
+          ? t("这次导入的图")
+          : labelFilter === -1
           ? t("没有标注的图")
           : labelFilter === -2
             ? t("有预标注还没确认的图")
@@ -817,7 +825,18 @@ export default function Data({ project }: { project: ProjectInfo }) {
               { value: -1, label: t("没有任何标注的") },
             ]}
           />
-          {labelFilter != null && total > 0 && !selecting && (
+          <Select
+            style={{ minWidth: 200 }}
+            allowClear
+            placeholder={t("全部导入批次")}
+            value={batchFilter ?? undefined}
+            onChange={(v) => {
+              setBatchFilter(v ?? null);
+              setPage(1);
+            }}
+            options={batches.map((b) => ({ value: b.batch, label: t("{time} 导入的 {n} 张", { time: fmtTime(b.createdAt), n: b.count }) }))}
+          />
+          {(labelFilter != null || batchFilter != null) && total > 0 && !selecting && (
             <Button size="small" type="primary" onClick={annotateFiltered}>
               {t("去标注这批（{n} 张）", { n: total })}
             </Button>

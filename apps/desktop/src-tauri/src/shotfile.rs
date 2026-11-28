@@ -301,7 +301,7 @@ mod tests {
         let p = Project::create(&base, "p", "detect").unwrap();
         let r = import(&p, &[shot.clone(), normal.clone()], true, &|_, _| {}).unwrap();
         assert_eq!((r.added, r.prelabeled), (2, 1));
-        let page = images::list(&p, None, None, 0, 10).unwrap();
+        let page = images::list(&p, None, None, None, 0, 10).unwrap();
         assert_eq!(page.total, 2);
         // 截图那张：类别自动新建，框是模型预标注，图仍是未标注
         let id = page.items.iter().find(|x| x.name.contains("扇叶损坏")).unwrap().id;

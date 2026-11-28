@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Progress,
   Segmented,
   Select,
@@ -29,7 +30,7 @@ import {
 } from "@ant-design/icons";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-import { api, BatchResult, DeployStep, errText, FormatResult, ImportProgress, isClsTask, Label, lastImportIds, ProjectInfo, RunInfo } from "../api";
+import { api, BatchResult, DeployStep, errText, FormatResult, ImportProgress, isClsTask, Label, lastImportIds, ProjectInfo, reviewUrl, RunInfo } from "../api";
 import { prefs, useApp } from "../store";
 import { t } from "../i18n";
 import { xuntongEnabled } from "../features";
@@ -497,9 +498,14 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
   const [minFrames, setMinFrames] = useState(Number(prefs.get("batchVideoMin", "1")) || 1);
   const [beside, setBeside] = useState(prefs.get("batchShotsBeside", "0") === "1");
   const [drawBoxes, setDrawBoxes] = useState(prefs.get("batchDrawBoxes", "1") === "1");
+  const [skipDone, setSkipDone] = useState(prefs.get("batchSkipDone", "0") === "1");
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<ImportProgress | null>(null);
   const [res, setRes] = useState<BatchResult | null>(null);
+  // 在软件里复核视频截图：标出认错的（序号），一键加进项目去标
+  const [reviewing, setReviewing] = useState(false);
+  const [wrong, setWrong] = useState<Set<number>>(new Set());
+  const [resStamp, setResStamp] = useState(0);
   const isCls = isClsTask(project.task);
   const clsRec = project.task === "multilabel" ? classRec : null;
   const [useCls, setUseCls, cc] = useClassConf(clsRec);
@@ -519,14 +525,17 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
     prefs.set("batchVideoMin", String(minFrames));
     prefs.set("batchShotsBeside", beside ? "1" : "0");
     prefs.set("batchDrawBoxes", drawBoxes ? "1" : "0");
+    prefs.set("batchSkipDone", skipDone ? "1" : "0");
     setBusy(true);
     setRes(null);
     setAdded(null);
     setProg(null);
     const un = await listen<ImportProgress>("batch-progress", (e) => setProg(e.payload));
     try {
-      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {}, videoEvery: every, videoMinFrames: minFrames, shotsBeside: beside, drawBoxes });
+      const r = await api.batchPredict({ runId: run.id, input, output, conf, sort, classConf: cc ?? {}, videoEvery: every, videoMinFrames: minFrames, shotsBeside: beside, drawBoxes, skipDone });
       setRes(r);
+      setWrong(new Set());
+      setResStamp(Date.now());
       if (r.stopped)
         message.info(
           r.videos
@@ -614,6 +623,14 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
         </Form.Item>
         <Form.Item label={t("结果放在")} extra={t("可以放在要识别的文件夹里面，下次识别时会自动跳过结果。")}>
           <FolderPicker value={output} onChange={setOutput} title={t("选择结果放在哪个文件夹")} />
+          <div style={{ marginTop: 6 }}>
+            <Checkbox checked={skipDone} onChange={(e) => setSkipDone(e.target.checked)}>
+              {t("跳过已经识别过的文件")}
+            </Checkbox>
+            <div className="dim" style={{ fontSize: 12 }}>
+              {t("结果文件夹里记着识别过哪些文件；没改过的不再识别，表格和报告里沿用上次的结果。适合每天往同一个文件夹里加新单号。")}
+            </div>
+          </div>
         </Form.Item>
         <Form.Item
           label={t("置信度阈值")}
@@ -669,12 +686,12 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
           type={res.failed ? "warning" : "success"}
           showIcon
           message={
-            res.videos
+            (res.videos
               ? t("识别了 {n} 张图片、{v} 个视频（看了 {fr} 帧）", { n: res.images, v: res.videos, fr: res.frames }) +
                 (res.failed ? t("，其中 {f} 个读不了或出错（表格里标为「识别出错」）", { f: res.failed }) : "")
               : res.failed
                 ? t("识别了 {n} 张，其中 {f} 张读不了或出错（表格里标为「识别出错」）", { n: res.images, f: res.failed })
-                : t("识别了 {n} 张", { n: res.images })
+                : t("识别了 {n} 张", { n: res.images })) + (res.skipped ? t("，跳过已识别过的 {n} 个", { n: res.skipped }) : "")
           }
           description={
             <div>
@@ -697,6 +714,12 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
                 <Button size="small" onClick={() => api.revealPath(res.csv).catch(() => {})}>
                   {t("找到表格")}
                 </Button>
+                <Button size="small" onClick={() => api.openFile(res.report).catch((e) => message.error(errText(e)))}>
+                  {t("打开网页报告")}
+                </Button>
+                <Button size="small" onClick={() => api.openFile(res.summary).catch((e) => message.error(errText(e)))}>
+                  {t("按单号汇总")}
+                </Button>
               </Space>
               {res.uncertain.length > 0 && (
                 <div style={{ marginTop: 10 }}>
@@ -708,8 +731,27 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
                   )}
                 </div>
               )}
+              {res.low.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  {addRow("low", res.low, t("把分数偏低的 {n} 张加进项目复核", { n: res.low.length }), t("分数偏低的识别结果"))}
+                  <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                    {t("最高分刚过阈值的结果最容易认错，优先看这批；视频导入的是原图，识别结果作为预标注。")}
+                  </div>
+                </div>
+              )}
               {res.shots.length > 0 && (
                 <div style={{ marginTop: 10 }}>
+                  <Space wrap style={{ marginBottom: 6 }}>
+                    <Button size="small" type="primary" onClick={() => setReviewing(true)}>
+                      {t("在软件里复核 {n} 张截图", { n: res.shots.length })}
+                    </Button>
+                    {added?.key === "review" && <span className="dim">{added.text}</span>}
+                    {added?.key === "review" && added.ids.length > 0 && (
+                      <Button size="small" onClick={() => annotateQueue(added.ids, t("复核时标错的截图"))}>
+                        {t("去标注这批")}
+                      </Button>
+                    )}
+                  </Space>
                   {addRow("shots", res.shots, t("把 {n} 张视频截图加进项目去标", { n: res.shots.length }), t("批量识别的视频截图"))}
                   <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
                     {t("导入的是不画框的原图，识别结果作为预标注；只想改认错的，就在文件夹里挑出那几张截图拖进数据页。")}
@@ -754,6 +796,71 @@ function BatchTab({ run, project, recConf, classRec }: { run: RunInfo; project: 
             </div>
           }
         />
+      )}
+      {res && (
+        <Modal
+          open={reviewing}
+          title={t("复核视频截图：点一下标为认错，再点取消")}
+          width={980}
+          onCancel={() => setReviewing(false)}
+          footer={
+            <Space>
+              <span className="dim">{t("已标 {n} 张认错", { n: wrong.size })}</span>
+              <Button onClick={() => setWrong(new Set())} disabled={wrong.size === 0}>
+                {t("清除标记")}
+              </Button>
+              <Button
+                type="primary"
+                disabled={wrong.size === 0 || addingKey != null}
+                loading={addingKey === "review"}
+                onClick={async () => {
+                  await addToProject("review", [...wrong].sort((a, b) => a - b).map((i) => res.shots[i]));
+                  setReviewing(false);
+                }}
+              >
+                {t("把认错的 {n} 张加进项目去标", { n: wrong.size })}
+              </Button>
+            </Space>
+          }
+        >
+          <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
+            {t("导入的是不画框的原图，识别结果作为预标注，在上面改对就行。")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 10, maxHeight: "62vh", overflow: "auto" }}>
+            {res.shots.map((p, i) => {
+              const bad = wrong.has(i);
+              const name = p.split(/[\\/]/).slice(-2).join("/");
+              return (
+                <div
+                  key={p}
+                  onClick={() => {
+                    const n = new Set(wrong);
+                    if (bad) n.delete(i);
+                    else n.add(i);
+                    setWrong(n);
+                  }}
+                  style={{
+                    cursor: "pointer",
+                    borderRadius: 8,
+                    overflow: "hidden",
+                    border: bad ? "2px solid var(--ant-color-error, #e5534b)" : "2px solid transparent",
+                    position: "relative",
+                  }}
+                >
+                  <img src={reviewUrl(i, resStamp)} loading="lazy" style={{ width: "100%", display: "block", opacity: bad ? 0.55 : 1 }} />
+                  {bad && (
+                    <Tag color="error" style={{ position: "absolute", top: 6, left: 6, margin: 0 }}>
+                      {t("认错")}
+                    </Tag>
+                  )}
+                  <div className="dim" style={{ fontSize: 11, padding: "2px 4px", wordBreak: "break-all" }}>
+                    {name}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Modal>
       )}
     </div>
   );

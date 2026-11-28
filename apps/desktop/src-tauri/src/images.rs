@@ -510,25 +510,30 @@ pub(crate) const LABEL_COND: &str = "(?{n} IS NULL
            OR (?{n} = -2 AND images.status = 'todo' AND EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id AND a.source IN ('model', 'text', 'ai')))
            OR (?{n} > 0 AND EXISTS (SELECT 1 FROM annotations a WHERE a.image_id = images.id AND a.label_id = ?{n})))";
 
-/// 数据页的图片列表。label：只看有这个类别标注的图；-1 是一个标注都没有的，-2 是有预标注还没确认的
-pub fn list(project: &Project, status: Option<&str>, label: Option<i64>, offset: u32, limit: u32) -> AppResult<ImagePage> {
+/// 按导入批次筛图的 SQL 条件
+pub(crate) const BATCH_COND: &str = "(?{n} IS NULL OR images.batch = ?{n})";
+
+/// 数据页的图片列表。label：只看有这个类别标注的图；-1 是一个标注都没有的，-2 是有预标注还没确认的。batch：只看某次导入的
+pub fn list(project: &Project, status: Option<&str>, label: Option<i64>, batch: Option<i64>, offset: u32, limit: u32) -> AppResult<ImagePage> {
     let conn = project.conn.lock();
     let status = status.filter(|s| !s.is_empty() && *s != "all");
     let total: i64 = conn.query_row(
         &format!(
-            "SELECT COUNT(*) FROM images WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {}",
-            LABEL_COND.replace("{n}", "2")
+            "SELECT COUNT(*) FROM images WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {} AND {}",
+            LABEL_COND.replace("{n}", "2"),
+            BATCH_COND.replace("{n}", "3")
         ),
-        params![status, label],
+        params![status, label, batch],
         |r| r.get(0),
     )?;
     let mut stmt = conn.prepare(&format!(
         "SELECT id, path, width, height, status, split FROM images
-         WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {} ORDER BY id LIMIT ?2 OFFSET ?3",
-        LABEL_COND.replace("{n}", "4")
+         WHERE (?1 IS NULL OR status = ?1 OR (?1 = 'done' AND status IN ('labeled', 'reviewed'))) AND {} AND {} ORDER BY id LIMIT ?2 OFFSET ?3",
+        LABEL_COND.replace("{n}", "4"),
+        BATCH_COND.replace("{n}", "5")
     ))?;
     let items = stmt
-        .query_map(params![status, limit.min(1000), offset, label], |r| {
+        .query_map(params![status, limit.min(1000), offset, label, batch], |r| {
             let path: String = r.get(1)?;
             let name = Path::new(&path)
                 .file_name()
@@ -552,6 +557,27 @@ pub fn list(project: &Project, status: Option<&str>, label: Option<i64>, offset:
 pub struct LastImport {
     pub count: i64,
     pub created_at: i64,
+}
+
+/// 一次导入：批次号、张数、导入时间
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBatch {
+    pub batch: i64,
+    pub count: i64,
+    pub created_at: i64,
+}
+
+/// 最近 50 次导入（数据页按导入批次筛选用；批次 0 是旧数据，不算）
+pub fn list_batches(project: &Project) -> AppResult<Vec<ImportBatch>> {
+    let conn = project.conn.lock();
+    let mut stmt = conn.prepare(
+        "SELECT batch, COUNT(*), MAX(created_at) FROM images WHERE batch > 0 GROUP BY batch ORDER BY batch DESC LIMIT 50",
+    )?;
+    let rows = stmt
+        .query_map([], |r| Ok(ImportBatch { batch: r.get(0)?, count: r.get(1)?, created_at: r.get::<_, Option<i64>>(2)?.unwrap_or(0) }))?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
 }
 
 /// 最近一次导入的批次（批次 0 是旧数据，不算）
@@ -711,7 +737,7 @@ mod tests {
         assert_eq!(r.duplicated, 1);
         assert_eq!(r.failed.len(), 1);
 
-        let page = list(&project, None, None, 0, 100).unwrap();
+        let page = list(&project, None, None, None, 0, 100).unwrap();
         assert_eq!(page.total, 2);
         let b = page.items.iter().find(|i| i.name == "b.jpg").unwrap();
         assert_eq!((b.width, b.height), (800, 600));
