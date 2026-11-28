@@ -39,7 +39,8 @@ NVIDIA の GPU で推論する場合：`requirements.txt` の `onnxruntime` を 
   },
   "webhook": { "url": "http://プラットフォーム/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // 任意：フォルダーモード
 }
 ```
 
@@ -88,6 +89,17 @@ Webhook で `with_image` を有効にすると、`image_base64` フィールド�
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## フォルダーモード
+
+設定に `watch.dir` を書くと有効になります。サービスが `interval` 秒ごとにこのフォルダー（サブフォルダーを含む）を確認し、新しく入れた画像と動画を自動で認識します。カメラをつなぐ必要はありません。
+
+- ファイルは置かれてから `settle` 秒たち、サイズが変わらなくなってから認識します。コピー中のファイルを途中で認識することはありません。
+- 動画は `every` 秒ごとに 1 フレームを取り出します。認識されたクラスごとにボックス付きのスクリーンショットを 1 枚（スコアが最も高いフレーム）保存し、ファイルがあるサブフォルダー（注文番号など）ごとに `out`（既定はサービスパッケージ内の `watch_results/`）に置きます。
+- ファイルごとに `watch_results/認識結果.csv` に 1 行追加します：時刻、ファイル、フォルダー、結果、最高スコア、スクリーンショット。
+- アラートルール（クラス、信頼度、時間帯）に当てはまったものはいつもどおり Webhook / MQTT で送信し、メッセージに `file` と `folder` の 2 項目が加わります。
+- 認識済みのファイルは `watch_results/.wulabel-watch.json` に記録されるので、サービスを再起動しても認識し直しません。ファイルが変更されたら認識し直します。Wulabel の一括認識の結果フォルダーは自動でスキップします。
+- `GET /health` の `watch` で、認識したファイル数と最後に認識したファイルを確認できます。
+
 ## 現場データの還流
 
 信頼度が `low`～`high` の間で、モデルが判断に迷ったフレームは `reflux/` に保存されます（各ストリームで `interval` 秒ごとに最大 1 枚）。
@@ -101,5 +113,6 @@ service.py                サービス本体
 config.json               設定
 alerts/                   アラートのスナップショット
 reflux/                   還流画像
+watch_results/            フォルダーモードのスクリーンショットと表
 logs/service.log          ログ
 ```

@@ -39,7 +39,8 @@ Muốn suy luận bằng GPU NVIDIA: đổi `onnxruntime` thành `onnxruntime-gp
   },
   "webhook": { "url": "http://nen-tang-cua-ban/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // tùy chọn: chế độ thư mục
 }
 ```
 
@@ -88,6 +89,17 @@ Các trường của mỗi mục trong `detections` tùy theo mô hình. Trườ
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## Chế độ thư mục
+
+Điền `watch.dir` trong cấu hình là bật: cứ mỗi `interval` giây dịch vụ quét thư mục này (kể cả thư mục con) một lần, ảnh và video mới bỏ vào sẽ tự động được nhận diện, không cần nối camera.
+
+- Tệp phải nằm yên `settle` giây, kích thước không còn thay đổi mới được nhận diện, tệp đang chép dở sẽ không bị nhận diện nửa chừng.
+- Video cứ mỗi `every` giây lấy một khung hình; mỗi lớp nhận diện được lưu một ảnh chụp có vẽ khung (khung hình có điểm cao nhất), xếp theo thư mục con chứa tệp (ví dụ mã đơn hàng) trong `out` (mặc định là `watch_results/` trong gói dịch vụ).
+- Mỗi tệp thêm một dòng vào `watch_results/ket-qua.csv`: thời gian, tệp, thư mục, kết quả, điểm cao nhất, ảnh chụp.
+- Cái nào đạt quy tắc cảnh báo (lớp, độ tin cậy, khung giờ) vẫn được đẩy qua Webhook / MQTT như bình thường, trong tin nhắn có thêm hai mục `file` và `folder`.
+- Các tệp đã nhận diện được ghi vào `watch_results/.wulabel-watch.json`, khởi động lại dịch vụ cũng không nhận diện lặp lại; tệp nào bị sửa sẽ được nhận diện lại. Thư mục kết quả của nhận diện hàng loạt trong Wulabel được tự động bỏ qua.
+- Mục `watch` của `GET /health` cho biết đã nhận diện bao nhiêu tệp và tệp gần nhất là tệp nào.
+
 ## Dữ liệu hồi lưu từ hiện trường
 
 Những khung hình mà mô hình chưa chắc chắn (độ tin cậy nằm giữa `low` và `high`) sẽ được lưu vào `reflux/` (mỗi luồng tối đa một ảnh mỗi `interval` giây).
@@ -101,5 +113,6 @@ service.py                chương trình dịch vụ
 config.json               cấu hình
 alerts/                   ảnh chụp cảnh báo
 reflux/                   ảnh hồi lưu
+watch_results/            ảnh chụp và bảng của chế độ thư mục
 logs/service.log          nhật ký chạy
 ```

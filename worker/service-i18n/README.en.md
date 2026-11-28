@@ -39,7 +39,8 @@ To run inference on an NVIDIA GPU: replace `onnxruntime` with `onnxruntime-gpu` 
   },
   "webhook": { "url": "http://your-platform/api/alarm", "with_image": false, "headers": {} },
   "mqtt": { "host": "", "port": 1883, "topic": "xlabel/alarm", "username": "", "password": "" },
-  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 }
+  "reflux": { "enabled": true, "low": 0.3, "high": 0.5, "interval": 60 },
+  "watch": { "dir": "D:/videos", "out": "watch_results", "every": 1.0, "interval": 10, "settle": 5 }  // optional: folder mode
 }
 ```
 
@@ -88,6 +89,17 @@ The fields of each item in `detections` depend on the model. The `task` returned
 curl -X POST --data-binary @test.jpg "http://127.0.0.1:8090/predict?conf=0.4"
 ```
 
+## Folder mode
+
+Set `watch.dir` in the configuration to turn it on: the service scans this folder (subfolders included) every `interval` seconds and recognizes new images and videos put into it, with no camera needed.
+
+- A file is only recognized after it has been in place for `settle` seconds and its size stops changing, so a file that's still being copied isn't recognized halfway.
+- Videos are checked one frame every `every` seconds. For each class found, one screenshot with boxes is saved (the frame with the highest score), sorted by the subfolder the file is in (such as order number) under `out` (by default `watch_results/` in the service package).
+- Each file adds a row to `watch_results/results.csv`: time, file, folder, result, top score, screenshot.
+- Anything that passes the alert rules (classes, confidence, active hours) is pushed to Webhook / MQTT as usual, with two extra fields in the message: `file` and `folder`.
+- Recognized files are recorded in `watch_results/.wulabel-watch.json`, so restarting the service doesn't recognize them again; a file that changes is recognized again. Results folders from Wulabel batch recognition are skipped automatically.
+- `watch` in `GET /health` shows how many files have been recognized and which one was last.
+
 ## Field data loop
 
 Frames the model is unsure about (confidence between `low` and `high`) are saved to `reflux/` (at most one per stream every `interval` seconds).
@@ -101,5 +113,6 @@ service.py                service program
 config.json               configuration
 alerts/                   alert snapshots
 reflux/                   field images
+watch_results/            folder mode screenshots and spreadsheet
 logs/service.log          log
 ```
