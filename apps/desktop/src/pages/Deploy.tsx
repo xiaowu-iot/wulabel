@@ -1015,6 +1015,9 @@ interface ServiceForm {
   reflux: boolean;
   refluxLow: number;
   refluxHigh: number;
+  /** 文件夹模式：监控的文件夹（现场电脑上的路径），空着不开 */
+  watchDir: string;
+  watchEvery: number;
 }
 
 const DEFAULT_FORM: ServiceForm = {
@@ -1037,6 +1040,8 @@ const DEFAULT_FORM: ServiceForm = {
   reflux: true,
   refluxLow: 0.3,
   refluxHigh: 0.5,
+  watchDir: "",
+  watchEvery: 1,
 };
 
 function ServiceTab({ run, project, recConf, classRec }: { run: RunInfo; project: ProjectInfo; recConf: number | null; classRec: Record<string, number> | null }) {
@@ -1099,6 +1104,8 @@ function ServiceTab({ run, project, recConf, classRec }: { run: RunInfo; project
       webhook: { url: f.webhookUrl.trim(), with_image: f.webhookImage, headers: {} },
       mqtt: { host: f.mqttHost.trim(), port: f.mqttPort, topic: f.mqttTopic.trim(), username: f.mqttUser, password: f.mqttPass },
       reflux: { enabled: f.reflux, low: f.refluxLow, high: f.refluxHigh, interval: 60 },
+      // 文件夹模式：新放进来的图片、视频自动识别，结果在服务包的 watch_results 文件夹
+      ...(f.watchDir.trim() ? { watch: { dir: f.watchDir.trim(), out: "watch_results", every: f.watchEvery, interval: 10, settle: 5 } } : {}),
     };
     setBusy(true);
     setLines([]);
@@ -1174,6 +1181,27 @@ function ServiceTab({ run, project, recConf, classRec }: { run: RunInfo; project
             <InputNumber min={0.1} max={60} step={0.5} value={f.interval} onChange={(v) => set({ interval: Number(v ?? 1) })} />
           </Form.Item>
           <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{t("需要只检测画面某个区域时，生成后在 config.json 里给视频流加 region，见 README。")}</div>
+        </div>
+
+        <div className="card">
+          <h3 className="h3">{t("文件夹模式（可选）")}</h3>
+          <div className="dim" style={{ fontSize: 12, marginBottom: 8 }}>
+            {t("监控一个文件夹：新放进来的图片、视频自动识别一遍，截图按子文件夹（比如单号）放在服务包的 watch_results 里，表格里追加一行，过了告警规则的照常推送。适合每天把新单号的视频拷到同一个文件夹。不用就空着。")}
+          </div>
+          <Space.Compact style={{ width: "100%" }}>
+            <Input value={f.watchDir} placeholder={t("现场电脑上要监控的文件夹路径")} onChange={(e) => set({ watchDir: e.target.value })} />
+            <Button
+              icon={<FolderOpenOutlined />}
+              title={t("选择文件夹")}
+              onClick={async () => {
+                const v = await open({ directory: true, title: t("选择要监控的文件夹") });
+                if (typeof v === "string") set({ watchDir: v });
+              }}
+            />
+          </Space.Compact>
+          <Form.Item label={t("视频每隔几秒看一帧")} style={{ marginTop: 12, marginBottom: 0 }}>
+            <InputNumber min={0.2} max={60} step={0.5} value={f.watchEvery} onChange={(v) => set({ watchEvery: Number(v ?? 1) })} />
+          </Form.Item>
         </div>
 
         <div className="card">

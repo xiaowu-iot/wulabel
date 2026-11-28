@@ -369,10 +369,199 @@ def safe(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in name)[:40]
 
 
+# ---------------- 文件夹模式 ----------------
+
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".wmv", ".m4v", ".ts"}
+# Wulabel 批量识别的结果文件夹里有这个记号，扫描时整个跳过
+RESULT_MARK = ".wulabel-result"
+
+
+def passes(d: dict, rules: dict) -> bool:
+    """一个识别结果过不过告警规则的阈值和类别（不看检测区域、时段）"""
+    min_score = float(rules.get("min_score", 0.5))
+    class_scores = rules.get("class_scores") or {}
+    labels = set(rules.get("labels") or [])
+    return d["score"] >= float(class_scores.get(d["label"], min_score)) and (not labels or d["label"] in labels)
+
+
+def read_image(path: Path):
+    """读图片，支持中文路径"""
+    data = np.fromfile(str(path), dtype=np.uint8)
+    return cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
+
+
+def open_video(path: Path):
+    """打开本地视频；OpenCV 打不开（比如 Windows 上的中文路径）时先复制到临时文件再打开。返回 (cap, 临时文件或 None)"""
+    cap = cv2.VideoCapture(str(path), cv2.CAP_FFMPEG)
+    if cap.isOpened():
+        return cap, None
+    import shutil
+    import tempfile
+
+    tmp = Path(tempfile.gettempdir()) / f"wulabel-watch-{os.getpid()}{path.suffix.lower()}"
+    shutil.copyfile(path, tmp)
+    return cv2.VideoCapture(str(tmp), cv2.CAP_FFMPEG), tmp
+
+
+def mmss(t: float) -> str:
+    return f"{int(t // 60):02d}m{int(t % 60):02d}s"
+
+
+class FolderWatcher(threading.Thread):
+    """文件夹模式：定时扫描一个文件夹（包括子文件夹），新放进来、不再变化的图片和视频自动识别一遍。
+    视频每隔几秒取一帧，一个类别在几帧里检出就算有。识别出的每个类别存一张带框截图，按所在子文件夹（比如单号）放好，
+    每个文件在「识别结果.csv」里追加一行；过了告警规则的照常推送。识别过的记在结果文件夹里，重启服务不会重复识别"""
+
+    def __init__(self, wcfg: dict, cfg: dict, det: Detector, notifier: Notifier, alerts: collections.deque):
+        super().__init__(daemon=True)
+        self.w, self.cfg, self.det, self.notifier, self.alerts = wcfg, cfg, det, notifier, alerts
+        self.dir = Path(wcfg["dir"])
+        out = Path(wcfg.get("out") or "watch_results")
+        self.out = out if out.is_absolute() else HERE / out
+        self.out.mkdir(parents=True, exist_ok=True)
+        (self.out / RESULT_MARK).write_text("Wulabel results\n", encoding="utf-8")
+        self.state_path = self.out / ".wulabel-watch.json"
+        try:
+            self.done: dict = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.done = {}
+        # 上次扫描时文件的 [大小, 修改时间]：连续两次一样才算放好了（还在复制的不识别）
+        self.seen: dict = {}
+        self.status = {"dir": str(self.dir), "out": str(self.out), "processed": 0, "last_file": None, "last_time": None, "errors": 0}
+
+    def files(self):
+        for root, dirs, names in os.walk(self.dir):
+            rp = Path(root)
+            if (rp / RESULT_MARK).exists() or rp == self.out or self.out in rp.parents:
+                dirs[:] = []
+                continue
+            for n in names:
+                ext = os.path.splitext(n)[1].lower()
+                if ext in IMAGE_EXTS or ext in VIDEO_EXTS:
+                    yield rp / n
+
+    def run(self):
+        log.info(tr("文件夹模式：监控 %s，结果放在 %s"), self.dir, self.out)
+        interval = float(self.w.get("interval", 10))
+        while True:
+            try:
+                self.scan()
+            except Exception:
+                log.exception(tr("文件夹模式扫描出错"))
+            time.sleep(max(2.0, interval))
+
+    def scan(self):
+        if not self.dir.is_dir():
+            log.warning(tr("要监控的文件夹不存在：%s"), self.dir)
+            return
+        for f in self.files():
+            rel = f.relative_to(self.dir).as_posix()
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            sig = [st.st_size, int(st.st_mtime)]
+            if self.done.get(rel) == sig:
+                continue
+            if self.seen.get(rel) != sig or time.time() - st.st_mtime < float(self.w.get("settle", 5)):
+                self.seen[rel] = sig
+                continue
+            try:
+                self.handle(f, rel)
+            except Exception:
+                self.status["errors"] += 1
+                log.exception(tr("识别出错：%s"), rel)
+            self.done[rel] = sig
+            self.state_path.write_text(json.dumps(self.done, ensure_ascii=False), encoding="utf-8")
+
+    def frames(self, f: Path):
+        """视频每隔几秒取一帧，返回 [(秒, 画面)]；图片就是它自己"""
+        if f.suffix.lower() in IMAGE_EXTS:
+            img = read_image(f)
+            return [(0.0, img)] if img is not None else []
+        cap, tmp = open_video(f)
+        try:
+            fps = cap.get(cv2.CAP_PROP_FPS) or 25
+            step = max(1, int(round(fps * float(self.w.get("every", 1.0)))))
+            out, i = [], 0
+            while cap.grab():
+                if i % step == 0:
+                    ok, frame = cap.retrieve()
+                    if ok:
+                        out.append((i / fps, frame))
+                i += 1
+            return out
+        finally:
+            cap.release()
+            if tmp:
+                tmp.unlink(missing_ok=True)
+
+    def handle(self, f: Path, rel: str):
+        rules = self.cfg.get("alert", {})
+        frames = self.frames(f)
+        if not frames:
+            raise RuntimeError(tr("读不了这个文件"))
+        min_frames = max(1, int(self.w.get("min_frames", 1)))
+        # 每个类别：检出的帧数、最高分，以及最高分那一帧的画面和结果
+        best: dict = {}
+        for t, img in frames:
+            dets = [d for d in self.det.detect(img, min_score=0.05) if passes(d, rules)]
+            for d in dets:
+                b = best.setdefault(d["label"], {"n": 0, "score": 0.0})
+                b["n"] += 1
+                if d["score"] > b["score"]:
+                    b.update(score=d["score"], t=t, img=img, dets=dets)
+        hits = {k: v for k, v in best.items() if v["n"] >= min_frames}
+        folder = Path(rel).parent.as_posix()
+        folder = "" if folder == "." else folder
+        shots = []
+        for label, b in sorted(hits.items(), key=lambda kv: -kv[1]["score"]):
+            shot = self.out / folder / f"{safe(f.stem)}_{safe(label)}_{mmss(b['t'])}_{b['score']:.2f}.jpg"
+            save_jpg(shot, draw(b["img"], b["dets"], self.cfg.get("skeleton")))
+            shots.append(shot)
+        video = f.suffix.lower() in VIDEO_EXTS
+        if hits:
+            text = tr("；").join(tr("{name}（{n} 帧）").format(name=k, n=v["n"]) if video else k for k, v in hits.items())
+        else:
+            text = tr("没有目标")
+        top = max((v["score"] for v in hits.values()), default=0.0)
+        now = dt.datetime.now()
+        csv_path = self.out / (tr("识别结果") + ".csv")
+        new = not csv_path.exists()
+        import csv
+
+        with open(csv_path, "a", encoding="utf-8-sig" if new else "utf-8", newline="") as fp:
+            w = csv.writer(fp)
+            if new:
+                w.writerow([tr("时间"), tr("文件"), tr("文件夹"), tr("结果"), tr("最高分"), tr("截图")])
+            w.writerow([now.isoformat(sep=" ", timespec="seconds"), rel, folder, text, f"{top:.3f}" if hits else "", "; ".join(s.name for s in shots)])
+        self.status.update(processed=self.status["processed"] + 1, last_file=rel, last_time=time.time())
+        log.info(tr("[文件夹] %s：%s"), rel, text)
+        if not hits or not in_hours(rules.get("hours", ""), now):
+            return
+        b = max(hits.values(), key=lambda v: v["score"])
+        img = draw(b["img"], b["dets"], self.cfg.get("skeleton"))
+        alert = {
+            "stream": tr("文件夹"),
+            "file": rel,
+            "folder": folder,
+            "time": now.isoformat(timespec="seconds"),
+            "labels": sorted(hits),
+            "detections": b["dets"],
+            "width": int(img.shape[1]),
+            "height": int(img.shape[0]),
+            "image": None,
+            "image_url": None,
+        }
+        self.alerts.appendleft(alert)
+        self.notifier.push(alert, img)
+
+
 # ---------------- HTTP 接口 ----------------
 
 
-def make_handler(det: Detector, streams: list[Stream], alerts: collections.deque):
+def make_handler(det: Detector, streams: list[Stream], alerts: collections.deque, watcher=None):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -389,7 +578,15 @@ def make_handler(det: Detector, streams: list[Stream], alerts: collections.deque
             # 路径里可能有中文（截图文件名带视频流名称）
             path = urllib.parse.unquote(self.path.split("?")[0])
             if path == "/health":
-                self.send_json({"ok": True, "task": det.task, "classes": det.classes, "streams": [s.status for s in streams]})
+                self.send_json(
+                    {
+                        "ok": True,
+                        "task": det.task,
+                        "classes": det.classes,
+                        "streams": [s.status for s in streams],
+                        "watch": watcher.status if watcher else None,
+                    }
+                )
             elif path == "/alerts":
                 q = dict(p.split("=", 1) for p in self.path.partition("?")[2].split("&") if "=" in p)
                 self.send_json(list(alerts)[: int(q.get("limit", 50))])
@@ -448,8 +645,14 @@ def main():
     streams = [Stream(s, cfg, det, notifier, alerts) for s in cfg.get("streams", []) if s.get("url")]
     for s in streams:
         s.start()
+    # 文件夹模式：监控一个文件夹，新放进来的图片、视频自动识别
+    watcher = None
+    wcfg = cfg.get("watch") or {}
+    if wcfg.get("dir"):
+        watcher = FolderWatcher(wcfg, cfg, det, notifier, alerts)
+        watcher.start()
     port = int(cfg.get("port", 8090))
-    server = ThreadingHTTPServer((cfg.get("host", "0.0.0.0"), port), make_handler(det, streams, alerts))
+    server = ThreadingHTTPServer((cfg.get("host", "0.0.0.0"), port), make_handler(det, streams, alerts, watcher))
     log.info(tr("推理服务已启动：%d 路视频，HTTP 接口 http://%s:%d"), len(streams), cfg.get("host", "0.0.0.0"), port)
     try:
         server.serve_forever()
