@@ -1781,5 +1781,22 @@
   "批量识别视频的截图像标注页一样画框，框旁边写着类别和分数。": "Les captures vidéo de la reconnaissance par lot ont maintenant des cadres dessinés comme sur la page d'annotation, avec la classe et le score à côté de chaque cadre.",
   "批量识别新增选项：视频截图放回视频所在的文件夹（子文件夹「识别截图」），不用再手动拷回去。": "Nouvelle option de la reconnaissance par lot : enregistrer les captures vidéo à côté de chaque vidéo (sous-dossier « Captures de reconnaissance »), sans les recopier à la main.",
   "批量识别的结果文件夹可以放在要识别的文件夹里面，下次识别时自动跳过。": "Le dossier de résultats de la reconnaissance par lot peut maintenant se trouver dans le dossier à reconnaître ; il est ignoré automatiquement la fois suivante.",
-  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Corrigé : avec « copier par classe » coché, la reconnaissance par lot copiait les vidéos entières. Elle copie désormais la capture de chaque classe, avec le numéro de commande devant le nom."
+  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Corrigé : avec « copier par classe » coché, la reconnaissance par lot copiait les vidéos entières. Elle copie désormais la capture de chaque classe, avec le numéro de commande devant le nom.",
+  "没有标注的图": "Images sans annotation",
+  "有预标注还没确认的图": "Images avec des pré-annotations non validées",
+  "（{n} 张批量识别截图已换成原图，识别结果作为预标注）": " ({n} captures de la reconnaissance par lot ont été remplacées par les images d'origine, avec les résultats de reconnaissance comme pré-annotations)",
+  "有预标注还没确认的": "Avec pré-annotations non validées",
+  "没有任何标注的": "Sans aucune annotation",
+  "去标注这批（{n} 张）": "Annoter ce lot ({n} images)",
+  "，{n} 张带着识别结果作为预标注": ", dont {n} avec les résultats de reconnaissance comme pré-annotations",
+  "截图上画框和类别": "Dessiner les cadres et les classes sur les captures",
+  "截图文件里都带着不画框的原图和识别结果：挑出认错的截图拖进数据页，导入的是原图，识别结果自动变成预标注，在上面改就行。": "Chaque fichier de capture contient aussi l'image d'origine sans cadres et les résultats de reconnaissance : choisissez les captures mal reconnues et glissez-les dans la page Données. C'est l'image d'origine qui est importée, et les résultats deviennent automatiquement des pré-annotations : il ne reste qu'à les corriger.",
+  "把 {n} 张视频截图加进项目去标": "Ajouter les {n} captures vidéo au projet pour les annoter",
+  "批量识别的视频截图": "Captures vidéo de la reconnaissance par lot",
+  "导入的是不画框的原图，识别结果作为预标注；只想改认错的，就在文件夹里挑出那几张截图拖进数据页。": "Ce sont les images d'origine sans cadres qui sont importées, avec les résultats de reconnaissance comme pré-annotations. Pour ne corriger que les erreurs, choisissez ces captures dans le dossier et glissez-les dans la page Données.",
+  "{n} 个视频什么都没识别出来，可能有模型没学过的新情况": "Rien n'a été reconnu dans {n} vidéos : elles contiennent peut-être des cas nouveaux que le modèle n'a pas appris",
+  "把这些视频的 {n} 帧加进项目去标": "Ajouter {n} images de ces vidéos au projet pour les annoter",
+  "没识别出来的视频": "Vidéos où rien n'a été reconnu",
+  "每个视频取了几帧原图，放在结果文件夹的「{name}」里。有新类别的话，在标注页加上类别再标。": "Quelques images d'origine ont été extraites de chaque vidéo et placées dans « {name} » du dossier de résultats. S'il y a de nouvelles classes, ajoutez-les dans la page Annotation avant d'annoter.",
+  "拿不准": "Incertaine"
 }

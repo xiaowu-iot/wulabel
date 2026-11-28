@@ -1781,5 +1781,22 @@
   "批量识别视频的截图像标注页一样画框，框旁边写着类别和分数。": "Tangkapan layar video dari pengenalan massal kini digambar kotaknya seperti di halaman anotasi, dengan kelas dan skor di samping tiap kotak.",
   "批量识别新增选项：视频截图放回视频所在的文件夹（子文件夹「识别截图」），不用再手动拷回去。": "Opsi baru pengenalan massal: simpan tangkapan layar video di samping tiap video (subfolder \"Tangkapan pengenalan\"), tanpa perlu menyalin ulang secara manual.",
   "批量识别的结果文件夹可以放在要识别的文件夹里面，下次识别时自动跳过。": "Folder hasil pengenalan massal kini boleh berada di dalam folder yang dikenali; lain kali otomatis dilewati.",
-  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Perbaikan: saat \"salin per kelas\" dicentang, pengenalan massal menyalin video utuh. Sekarang yang disalin adalah tangkapan layar tiap kelas, dengan nomor pesanan di depan nama file."
+  "修复：批量识别勾选「按类别复制」时，视频被整个复制过去；现在复制的是对应类别的截图，文件名前面加单号。": "Perbaikan: saat \"salin per kelas\" dicentang, pengenalan massal menyalin video utuh. Sekarang yang disalin adalah tangkapan layar tiap kelas, dengan nomor pesanan di depan nama file.",
+  "没有标注的图": "Gambar tanpa anotasi",
+  "有预标注还没确认的图": "Gambar dengan pra-anotasi yang belum dikonfirmasi",
+  "（{n} 张批量识别截图已换成原图，识别结果作为预标注）": " ({n} tangkapan layar pengenalan massal diganti dengan gambar aslinya, hasil pengenalan dijadikan pra-anotasi)",
+  "有预标注还没确认的": "Ada pra-anotasi belum dikonfirmasi",
+  "没有任何标注的": "Tanpa anotasi sama sekali",
+  "去标注这批（{n} 张）": "Anotasi batch ini ({n} gambar)",
+  "，{n} 张带着识别结果作为预标注": ", {n} di antaranya membawa hasil pengenalan sebagai pra-anotasi",
+  "截图上画框和类别": "Gambar kotak dan kelas di tangkapan layar",
+  "截图文件里都带着不画框的原图和识别结果：挑出认错的截图拖进数据页，导入的是原图，识别结果自动变成预标注，在上面改就行。": "Setiap file tangkapan layar juga menyimpan gambar asli tanpa kotak dan hasil pengenalannya: pilih tangkapan layar yang salah dikenali lalu seret ke halaman Data. Yang diimpor adalah gambar aslinya, hasil pengenalan otomatis menjadi pra-anotasi, tinggal Anda perbaiki.",
+  "把 {n} 张视频截图加进项目去标": "Tambahkan {n} tangkapan layar video ke proyek untuk dianotasi",
+  "批量识别的视频截图": "Tangkapan layar video dari pengenalan massal",
+  "导入的是不画框的原图，识别结果作为预标注；只想改认错的，就在文件夹里挑出那几张截图拖进数据页。": "Yang diimpor adalah gambar asli tanpa kotak, dengan hasil pengenalan sebagai pra-anotasi. Jika hanya ingin memperbaiki yang salah dikenali, pilih tangkapan layar itu di folder lalu seret ke halaman Data.",
+  "{n} 个视频什么都没识别出来，可能有模型没学过的新情况": "Tidak ada yang dikenali di {n} video; mungkin ada kondisi baru yang belum dipelajari model",
+  "把这些视频的 {n} 帧加进项目去标": "Tambahkan {n} frame dari video-video ini ke proyek untuk dianotasi",
+  "没识别出来的视频": "Video yang tidak dikenali apa pun",
+  "每个视频取了几帧原图，放在结果文件夹的「{name}」里。有新类别的话，在标注页加上类别再标。": "Beberapa frame asli diambil dari setiap video dan disimpan di \"{name}\" dalam folder hasil. Jika ada kelas baru, tambahkan kelasnya di halaman Anotasi, lalu anotasi.",
+  "拿不准": "Belum pasti"
 }
