@@ -265,6 +265,36 @@ export default function Data({ project }: { project: ProjectInfo }) {
     setPage(1);
   };
 
+  /** 选中的图的原图复制到一个文件夹（比如把没有标注的图拷出来发给别人标） */
+  const exportSelected = async () => {
+    const dir = await open({ directory: true, title: t("选择把图片导出到哪个文件夹") });
+    if (typeof dir !== "string") return;
+    setBatchBusy(true);
+    try {
+      const [n, failed] = await api.exportImages([...selected].sort((a, b) => a - b), dir);
+      if (failed.length) {
+        modal.warning({
+          title: t("导出了 {n} 张，{f} 张复制失败", { n, f: failed.length }),
+          width: 640,
+          content: <div style={{ maxHeight: 300, overflow: "auto", fontSize: 12 }}>{failed.map((f) => <div key={f}>{f}</div>)}</div>,
+        });
+      } else {
+        message.success({
+          content: (
+            <span>
+              {t("已导出 {n} 张图片", { n })} <a onClick={() => api.revealPath(dir).catch(() => {})}>{t("打开文件夹")}</a>
+            </span>
+          ),
+          duration: 6,
+        });
+      }
+    } catch (e) {
+      message.error(errText(e));
+    } finally {
+      setBatchBusy(false);
+    }
+  };
+
   /** 按类别筛出来的这批图送去标注页，一类一类核对 */
   const annotateFiltered = async () => {
     try {
@@ -822,6 +852,11 @@ export default function Data({ project }: { project: ProjectInfo }) {
             >
               {t("去标注")}
             </Button>
+            <Tooltip title={t("把选中的图的原图复制到一个文件夹（不带标注）")}>
+              <Button size="small" disabled={selected.size === 0 || batchBusy} onClick={exportSelected}>
+                {t("导出图片")}
+              </Button>
+            </Tooltip>
             <Dropdown
               trigger={["click"]}
               disabled={selected.size === 0 || batchBusy}

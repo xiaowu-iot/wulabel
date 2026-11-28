@@ -156,6 +156,29 @@ fn unique_name(dir: &Path, src: &Path, taken: &mut HashSet<String>) -> String {
     name
 }
 
+/// 数据页「导出图片」：把选中的图（原图，不带标注）复制到一个文件夹，重名的加序号。
+/// 返回复制了几张；原图找不到的跳过，写在 failed 里
+pub fn copy_out(project: &Project, ids: &[i64], out: &Path) -> AppResult<(usize, Vec<String>)> {
+    fs::create_dir_all(out)?;
+    let paths: Vec<String> = {
+        let conn = project.conn.lock();
+        let mut stmt = conn.prepare("SELECT path FROM images WHERE id = ?1")?;
+        ids.iter().filter_map(|id| stmt.query_row([id], |r| r.get::<_, String>(0)).ok()).collect()
+    };
+    let mut taken = HashSet::new();
+    let mut n = 0;
+    let mut failed = Vec::new();
+    for stored in paths {
+        let src = project.resolve(&stored);
+        let name = unique_name(out, &src, &mut taken);
+        match fs::copy(&src, out.join(&name)) {
+            Ok(_) => n += 1,
+            Err(e) => failed.push(format!("{}：{e}", src.display())),
+        }
+    }
+    Ok((n, failed))
+}
+
 /// 存储路径：项目内用相对路径（整个文件夹拷走也能打开），项目外用绝对路径
 fn stored_path(project: &Project, src: &Path) -> String {
     let abs = src.canonicalize().unwrap_or_else(|_| src.to_path_buf());
@@ -647,6 +670,28 @@ mod tests {
     }
 
     #[test]
+    fn copy_out_selected() {
+        let base = temp_dir("copyout");
+        let src = base.join("src");
+        fs::create_dir_all(&src).unwrap();
+        make_image(&src.join("a.png"), 40, 30, 10);
+        make_image(&src.join("b.png"), 40, 30, 200);
+        let project = Project::create(&base, "p", "detect").unwrap();
+        import(&project, &collect(&[src.clone()]), true, &|_, _| {}).unwrap();
+        let out = base.join("out");
+        // 目标文件夹里已经有同名文件：加序号，不覆盖
+        fs::create_dir_all(&out).unwrap();
+        fs::write(out.join("a.png"), b"old").unwrap();
+        let (n, failed) = copy_out(&project, &[1, 2, 99], &out).unwrap();
+        assert_eq!(n, 2);
+        assert!(failed.is_empty());
+        assert_eq!(fs::read(out.join("a.png")).unwrap(), b"old");
+        assert!(out.join("a_1.png").exists() && out.join("b.png").exists());
+        drop(project);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
     fn create_import_list() {
         let base = temp_dir("import");
         let src = base.join("src");
@@ -666,7 +711,7 @@ mod tests {
         assert_eq!(r.duplicated, 1);
         assert_eq!(r.failed.len(), 1);
 
-        let page = list(&project, None, 0, 100).unwrap();
+        let page = list(&project, None, None, 0, 100).unwrap();
         assert_eq!(page.total, 2);
         let b = page.items.iter().find(|i| i.name == "b.jpg").unwrap();
         assert_eq!((b.width, b.height), (800, 600));

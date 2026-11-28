@@ -1798,5 +1798,10 @@
   "把这些视频的 {n} 帧加进项目去标": "Thêm {n} khung hình của các video này vào dự án để gán nhãn",
   "没识别出来的视频": "Video không nhận diện được gì",
   "每个视频取了几帧原图，放在结果文件夹的「{name}」里。有新类别的话，在标注页加上类别再标。": "Mỗi video đã lấy vài khung hình gốc, đặt trong “{name}” của thư mục kết quả. Nếu có lớp mới, hãy thêm lớp ở trang Gán nhãn rồi gán nhãn.",
-  "拿不准": "Chưa chắc"
+  "拿不准": "Chưa chắc",
+  "选择把图片导出到哪个文件夹": "Chọn thư mục để xuất ảnh",
+  "导出了 {n} 张，{f} 张复制失败": "Đã xuất {n} ảnh, {f} ảnh sao chép thất bại",
+  "已导出 {n} 张图片": "Đã xuất {n} ảnh",
+  "把选中的图的原图复制到一个文件夹（不带标注）": "Sao chép ảnh gốc của các ảnh đã chọn vào một thư mục (không kèm nhãn)",
+  "导出图片": "Xuất ảnh"
 }

@@ -1798,5 +1798,10 @@
   "把这些视频的 {n} 帧加进项目去标": "Tambahkan {n} frame dari video-video ini ke proyek untuk dianotasi",
   "没识别出来的视频": "Video yang tidak dikenali apa pun",
   "每个视频取了几帧原图，放在结果文件夹的「{name}」里。有新类别的话，在标注页加上类别再标。": "Beberapa frame asli diambil dari setiap video dan disimpan di \"{name}\" dalam folder hasil. Jika ada kelas baru, tambahkan kelasnya di halaman Anotasi, lalu anotasi.",
-  "拿不准": "Belum pasti"
+  "拿不准": "Belum pasti",
+  "选择把图片导出到哪个文件夹": "Pilih folder tujuan ekspor gambar",
+  "导出了 {n} 张，{f} 张复制失败": "{n} gambar diekspor; {f} gagal disalin",
+  "已导出 {n} 张图片": "{n} gambar diekspor",
+  "把选中的图的原图复制到一个文件夹（不带标注）": "Salin gambar asli yang dipilih ke sebuah folder (tanpa anotasi)",
+  "导出图片": "Ekspor gambar"
 }

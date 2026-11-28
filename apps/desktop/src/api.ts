@@ -718,6 +718,8 @@ export const api = {
   lastImport: () => invoke<LastImport | null>("last_import"),
   deleteImages: (scope: "ids" | "last" | "all", ids?: number[]) => invoke<number>("delete_images", { scope, ids }),
   listImageIds: (status: string | null, label: number | null = null) => invoke<number[]>("list_image_ids", { status, label }),
+  /** 选中的图的原图复制到一个文件夹：[复制了几张, 失败的] */
+  exportImages: (ids: number[], out: string) => invoke<[number, string[]]>("export_images", { ids, out }),
   loadAnnotations: (imageId: number) => invoke<ImageAnnotations>("load_annotations", { imageId }),
   saveAnnotations: (imageId: number, annotations: Annotation[]) =>
     invoke<ImageStatus>("save_annotations", { imageId, annotations }),

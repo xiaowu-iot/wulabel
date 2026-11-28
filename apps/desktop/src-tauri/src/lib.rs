@@ -133,6 +133,7 @@ pub fn run() {
             commands::last_import_ids,
             commands::delete_images,
             commands::list_image_ids,
+            commands::export_images,
             commands::load_annotations,
             commands::save_annotations,
             commands::set_image_status,

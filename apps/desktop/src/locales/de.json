@@ -1798,5 +1798,10 @@
   "把这些视频的 {n} 帧加进项目去标": "{n} Frames aus diesen Videos zum Annotieren ins Projekt aufnehmen",
   "没识别出来的视频": "Videos ohne Erkennung",
   "每个视频取了几帧原图，放在结果文件夹的「{name}」里。有新类别的话，在标注页加上类别再标。": "Aus jedem Video wurden einige Original-Frames entnommen und im Ergebnisordner unter „{name}“ gespeichert. Gibt es neue Klassen, fügen Sie sie auf der Seite „Annotieren“ hinzu und annotieren Sie dann.",
-  "拿不准": "Unsicher"
+  "拿不准": "Unsicher",
+  "选择把图片导出到哪个文件夹": "Ordner für den Bildexport wählen",
+  "导出了 {n} 张，{f} 张复制失败": "{n} Bilder exportiert, {f} konnten nicht kopiert werden",
+  "已导出 {n} 张图片": "{n} Bilder exportiert",
+  "把选中的图的原图复制到一个文件夹（不带标注）": "Die Originalbilder der Auswahl in einen Ordner kopieren (ohne Annotationen)",
+  "导出图片": "Bilder exportieren"
 }

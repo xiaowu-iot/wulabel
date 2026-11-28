@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -1241,6 +1241,15 @@ pub async fn convert_to_multilabel(
 }
 
 // ---------- 标注 ----------
+
+/// 数据页「导出图片」：选中的图的原图复制到 out，返回 (复制了几张, 失败的)
+#[tauri::command]
+pub async fn export_images(state: State<'_, AppState>, ids: Vec<i64>, out: String) -> AppResult<(usize, Vec<String>)> {
+    let project = state.current()?;
+    tauri::async_runtime::spawn_blocking(move || images::copy_out(&project, &ids, Path::new(&out)))
+        .await
+        .map_err(|e| msg(t!("导出任务异常：{e}", e = e)))?
+}
 
 #[tauri::command]
 pub async fn list_image_ids(state: State<'_, AppState>, status: Option<String>, label: Option<i64>) -> AppResult<Vec<i64>> {

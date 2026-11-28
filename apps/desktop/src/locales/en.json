@@ -1798,5 +1798,10 @@
   "把这些视频的 {n} 帧加进项目去标": "Add {n} frames from these videos to the project to annotate",
   "没识别出来的视频": "Videos with nothing recognized",
   "每个视频取了几帧原图，放在结果文件夹的「{name}」里。有新类别的话，在标注页加上类别再标。": "A few original frames were taken from each video and saved in \"{name}\" in the results folder. If there are new classes, add them on the Annotate page before annotating.",
-  "拿不准": "Unsure"
+  "拿不准": "Unsure",
+  "选择把图片导出到哪个文件夹": "Choose a folder to export the images to",
+  "导出了 {n} 张，{f} 张复制失败": "Exported {n} images; {f} could not be copied",
+  "已导出 {n} 张图片": "Exported {n} images",
+  "把选中的图的原图复制到一个文件夹（不带标注）": "Copy the original images of the selected pictures to a folder (without annotations)",
+  "导出图片": "Export images"
 }

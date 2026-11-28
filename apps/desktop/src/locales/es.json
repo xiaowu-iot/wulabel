@@ -1798,5 +1798,10 @@
   "把这些视频的 {n} 帧加进项目去标": "Añadir {n} fotogramas de estos videos al proyecto para anotarlos",
   "没识别出来的视频": "Videos sin nada reconocido",
   "每个视频取了几帧原图，放在结果文件夹的「{name}」里。有新类别的话，在标注页加上类别再标。": "Se tomaron algunos fotogramas originales de cada video y se guardaron en «{name}», dentro de la carpeta de resultados. Si hay clases nuevas, añádelas en la página Anotar antes de anotar.",
-  "拿不准": "Dudosa"
+  "拿不准": "Dudosa",
+  "选择把图片导出到哪个文件夹": "Elige la carpeta a la que exportar las imágenes",
+  "导出了 {n} 张，{f} 张复制失败": "Se exportaron {n} imágenes; {f} no se pudieron copiar",
+  "已导出 {n} 张图片": "Se exportaron {n} imágenes",
+  "把选中的图的原图复制到一个文件夹（不带标注）": "Copiar las imágenes originales seleccionadas a una carpeta (sin anotaciones)",
+  "导出图片": "Exportar imágenes"
 }
