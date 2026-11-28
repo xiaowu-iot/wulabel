@@ -1830,5 +1830,9 @@
   "现场电脑上要监控的文件夹路径": "Ruta de la carpeta a vigilar en el equipo de destino",
   "选择文件夹": "Elegir carpeta",
   "选择要监控的文件夹": "Elige la carpeta que se vigilará",
-  "视频每隔几秒看一帧": "Cada cuántos segundos se revisa un fotograma del video"
+  "视频每隔几秒看一帧": "Cada cuántos segundos se revisa un fotograma del video",
+  "批量识别的截图自带原图和识别结果：挑出认错的截图拖进数据页，导入的是原图，识别结果自动变成预标注，在上面改就行；也可以在软件里复核截图，点出认错的一键加进项目。": "Las capturas del reconocimiento por lotes ahora llevan la imagen original y los resultados: arrastra las incorrectas a la página Datos y se importa la imagen original con los resultados como preetiquetas, listas para corregir. También puedes revisar las capturas en la app y añadir las incorrectas al proyecto con un clic.",
+  "批量识别新增：分数偏低（最容易认错）的结果单独列出、什么都没识别出来的视频单独列出并取几帧、跳过已经识别过的文件、网页版识别报告（带缩略图）和按单号汇总表。": "Novedades del reconocimiento por lotes: los resultados de baja puntuación (los errores más probables) se listan aparte, los videos sin nada reconocido se listan y se guardan algunos fotogramas, se pueden omitir los archivos ya reconocidos, y se genera un informe web con miniaturas y una tabla resumen por número de pedido.",
+  "推理服务包新增文件夹模式：监控一个文件夹，新放进来的图片、视频自动识别，截图按单号放好，表格追加一行，照常推送告警。": "El paquete de servicio de inferencia tiene un nuevo modo carpeta: vigila una carpeta, reconoce automáticamente las imágenes y videos nuevos, ordena las capturas por número de pedido, añade una fila a la tabla y envía las alertas como siempre.",
+  "数据页可以按类别、按导入批次筛选，再一键去标注这批；选中的图可以导出原图。标注页可以只显示某一类的框，一类一类核对。": "La página Datos puede filtrar por clase y por lote de importación y enviar ese lote a anotar con un clic; las imágenes seleccionadas se pueden exportar como originales. La página Anotar puede mostrar solo los cuadros de una clase para revisar clase por clase."
 }

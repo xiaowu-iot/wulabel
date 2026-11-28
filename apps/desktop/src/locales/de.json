@@ -1830,5 +1830,9 @@
   "现场电脑上要监控的文件夹路径": "Pfad des zu überwachenden Ordners auf dem Rechner vor Ort",
   "选择文件夹": "Ordner wählen",
   "选择要监控的文件夹": "Zu überwachenden Ordner wählen",
-  "视频每隔几秒看一帧": "Alle wie viele Sekunden ein Videoframe geprüft wird"
+  "视频每隔几秒看一帧": "Alle wie viele Sekunden ein Videoframe geprüft wird",
+  "批量识别的截图自带原图和识别结果：挑出认错的截图拖进数据页，导入的是原图，识别结果自动变成预标注，在上面改就行；也可以在软件里复核截图，点出认错的一键加进项目。": "Screenshots der Stapelerkennung enthalten jetzt das Originalbild und die Ergebnisse: Falsch erkannte Screenshots auf die Seite „Daten“ ziehen – importiert wird das Originalbild, die Ergebnisse werden zur Vorannotation, die du nur noch korrigierst. Screenshots lassen sich auch in der App prüfen und falsche mit einem Klick ins Projekt übernehmen.",
+  "批量识别新增：分数偏低（最容易认错）的结果单独列出、什么都没识别出来的视频单独列出并取几帧、跳过已经识别过的文件、网页版识别报告（带缩略图）和按单号汇总表。": "Neu in der Stapelerkennung: Ergebnisse mit niedriger Punktzahl (die wahrscheinlichsten Fehler) werden separat gelistet, Videos ohne Treffer werden gelistet und einige Frames gespeichert, bereits erkannte Dateien können übersprungen werden, dazu ein Web-Bericht mit Vorschaubildern und eine Übersicht nach Bestellnummer.",
+  "推理服务包新增文件夹模式：监控一个文件夹，新放进来的图片、视频自动识别，截图按单号放好，表格追加一行，照常推送告警。": "Das Inferenz-Servicepaket hat einen neuen Ordnermodus: Es überwacht einen Ordner, erkennt neue Bilder und Videos automatisch, legt Screenshots nach Bestellnummer ab, ergänzt eine Tabellenzeile und sendet Alarme wie gewohnt.",
+  "数据页可以按类别、按导入批次筛选，再一键去标注这批；选中的图可以导出原图。标注页可以只显示某一类的框，一类一类核对。": "Die Seite „Daten“ kann nach Klasse und nach Importbatch filtern und diesen Stapel mit einem Klick zum Annotieren schicken; ausgewählte Bilder lassen sich als Originale exportieren. Die Seite „Annotieren“ kann nur die Rahmen einer Klasse anzeigen, damit du Klasse für Klasse prüfen kannst."
 }
